@@ -13,3 +13,5 @@ ui/*.tsbuildinfo
 *.db
 .beads-credential-key
 bin/hermit
+/.tmp
+/hello-hermit
