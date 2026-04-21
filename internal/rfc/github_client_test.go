@@ -38,8 +38,8 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *t
 		switch {
 		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "open":
 			_ = json.NewEncoder(w).Encode([]map[string]any{
-				{"number": 10, "draft": false, "head": map[string]any{"sha": "sha-ready"}},
-				{"number": 11, "draft": true, "head": map[string]any{"sha": "sha-draft"}},
+				{"number": 10, "draft": false, "head": map[string]any{"sha": "sha-ready"}, "labels": []map[string]any{{"name": "hermit:rfc-ready"}}},
+				{"number": 11, "draft": true, "head": map[string]any{"sha": "sha-draft"}, "labels": []map[string]any{{"name": "hermit:rfc-ready"}}},
 			})
 		case r.URL.Path == "/repos/owner/repo/pulls/10/files":
 			_ = json.NewEncoder(w).Encode([]map[string]string{
@@ -80,6 +80,50 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *t
 	}
 	if items[0].Title != "Ready PR RFC" {
 		t.Fatalf("expected title from markdown content, got %q", items[0].Title)
+	}
+	if len(items[0].Labels) != 1 || items[0].Labels[0] != "hermit:rfc-ready" {
+		t.Fatalf("expected labels to contain hermit:rfc-ready, got %v", items[0].Labels)
+	}
+}
+
+func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_ExcludesPRsWithoutRFCReadyLabel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/owner/repo/pulls":
+			// Return two PRs: one with the label, one without.
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"number": 20, "draft": false, "head": map[string]any{"sha": "sha-labeled"}, "labels": []map[string]any{{"name": "hermit:rfc-ready"}}},
+				{"number": 21, "draft": false, "head": map[string]any{"sha": "sha-unlabeled"}, "labels": []map[string]any{}},
+			})
+		case r.URL.Path == "/repos/owner/repo/pulls/20/files":
+			_ = json.NewEncoder(w).Encode([]map[string]string{
+				{"filename": "docs-cms/rfcs/rfc-010-labeled.md", "status": "added"},
+			})
+		case r.URL.Path == "/repos/owner/repo/pulls/21/files":
+			t.Fatalf("unlabeled PR file list should not be requested")
+		case r.URL.Path == "/repos/owner/repo/contents/docs-cms/rfcs/rfc-010-labeled.md":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"name":    "rfc-010-labeled.md",
+				"path":    "docs-cms/rfcs/rfc-010-labeled.md",
+				"content": "IyBMYWJlbGVkIFJGQwo=",
+			})
+		default:
+			t.Fatalf("unexpected request path: %s?%s", r.URL.Path, r.URL.RawQuery)
+		}
+	}))
+	defer server.Close()
+
+	client := NewHTTPGitHubRFCClient()
+	items, err := client.ListReviewReadyRFCs(context.Background(), server.URL, "owner", "repo", "docs-cms/rfcs", "token")
+	if err != nil {
+		t.Fatalf("ListReviewReadyRFCs returned error: %v", err)
+	}
+
+	if len(items) != 1 {
+		t.Fatalf("expected only the labeled PR RFC, got %d items", len(items))
+	}
+	if items[0].PRNumber != 20 {
+		t.Fatalf("expected PR 20 (labeled), got PR %d", items[0].PRNumber)
 	}
 }
 

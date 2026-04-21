@@ -19,11 +19,15 @@ type GitHubRFCClient interface {
 	GetRFCFromPullRequest(ctx context.Context, baseURL, owner, name string, prNumber int, filePath, token string) (DocumentView, error)
 }
 
+// RFCReadyLabel is the GitHub label that marks a PR as ready for RFC review.
+const RFCReadyLabel = "hermit:rfc-ready"
+
 type ReviewReadyRFCItem struct {
 	PRNumber int
 	HeadSHA  string
 	Title    string
 	Path     string
+	Labels   []string
 }
 
 type HTTPGitHubRFCClient struct {
@@ -143,7 +147,9 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 		docsPath = "docs-cms/rfcs"
 	}
 
-	prURL := fmt.Sprintf("%s/repos/%s/%s/pulls?state=open&per_page=100", apiBase, owner, name)
+	// Use the labels query parameter to restrict to PRs carrying the RFC-ready label.
+	// This avoids scanning all open PRs (per RFC-005 / ADR-008).
+	prURL := fmt.Sprintf("%s/repos/%s/%s/pulls?state=open&per_page=100&labels=%s", apiBase, owner, name, RFCReadyLabel)
 	prReq, err := http.NewRequestWithContext(ctx, http.MethodGet, prURL, nil)
 	if err != nil {
 		return nil, err
@@ -167,6 +173,9 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 		Head   struct {
 			SHA string `json:"sha"`
 		} `json:"head"`
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
 	}
 	if err := json.NewDecoder(prResp.Body).Decode(&pulls); err != nil {
 		return nil, err
@@ -176,6 +185,16 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 	for _, pr := range pulls {
 		if pr.Draft {
 			continue
+		}
+
+		// Confirm the RFC-ready label is present in the decoded response.
+		if !prHasLabel(pr.Labels, RFCReadyLabel) {
+			continue
+		}
+
+		labelNames := make([]string, 0, len(pr.Labels))
+		for _, l := range pr.Labels {
+			labelNames = append(labelNames, l.Name)
 		}
 
 		prFiles, err := c.listPullRequestFiles(ctx, apiBase, owner, name, pr.Number, token)
@@ -199,6 +218,7 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 				HeadSHA:  pr.Head.SHA,
 				Title:    title,
 				Path:     prFile.Filename,
+				Labels:   labelNames,
 			})
 		}
 	}
@@ -294,6 +314,15 @@ func (c *HTTPGitHubRFCClient) listPullRequestFiles(ctx context.Context, apiBase,
 	}
 
 	return files, nil
+}
+
+func prHasLabel(labels []struct{ Name string `json:"name"` }, target string) bool {
+	for _, l := range labels {
+		if l.Name == target {
+			return true
+		}
+	}
+	return false
 }
 
 func isRFCPathInDocs(filePath, docsPath string) bool {

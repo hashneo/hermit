@@ -696,6 +696,11 @@ components:
           nullable: true
         commentable:
           type: boolean
+        status_mutable:
+          type: boolean
+          description: >
+            True when lifecycle status transitions (draft → accepted → implemented)
+            are permitted. Always true for main-branch RFCs, always false for PR RFCs.
 
     RfcDocumentView:
       type: object

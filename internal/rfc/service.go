@@ -60,6 +60,7 @@ type CatalogItem struct {
 	PRNumber        int      `json:"pr_number,omitempty"`
 	HeadSHA         string   `json:"head_sha,omitempty"`
 	Commentable     bool     `json:"commentable"`
+	StatusMutable   bool     `json:"status_mutable"`
 }
 
 type DocumentView struct {
@@ -263,6 +264,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 			AllowedActions:  []string{"view"},
 			LifecycleStatus: lifecycleStatus,
 			Commentable:     false,
+			StatusMutable:   true,
 		})
 	}
 
@@ -281,6 +283,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 			PRNumber:       prItem.PRNumber,
 			HeadSHA:        prItem.HeadSHA,
 			Commentable:    true,
+			StatusMutable:  false,
 		})
 	}
 
