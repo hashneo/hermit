@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hermit</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f5f7;
+      --panel: #ffffff;
+      --text: #111827;
+      --muted: #4b5563;
+      --border: #d1d5db;
+      --brand: #1563ff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      background: radial-gradient(circle at top left, #eef2ff 0%, var(--bg) 45%);
+      color: var(--text);
+    }
+
+    main {
+      max-width: 960px;
+      margin: 72px auto;
+      padding: 0 20px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px;
+      box-shadow: 0 8px 28px rgba(17, 24, 39, 0.08);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 2rem;
+      line-height: 1.2;
+    }
+
+    p {
+      margin: 10px 0;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .links {
+      margin-top: 20px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    a {
+      text-decoration: none;
+      color: var(--brand);
+      border: 1px solid #bfdbfe;
+      background: #eff6ff;
+      padding: 8px 12px;
+      border-radius: 10px;
+      font-size: 0.95rem;
+    }
+
+    @media (max-width: 640px) {
+      main {
+        margin: 32px auto;
+      }
+
+      .card {
+        padding: 22px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="card">
+      <h1>Hermit</h1>
+      <p>Document-first RFC collaboration for GitHub pull requests.</p>
+      <p>This is the app-served UI placeholder. API endpoints are available under <code>/api/v1</code>.</p>
+      <div class="links">
+        <a href="/api/v1/health">API Health</a>
+        <a href="/healthz">Liveness</a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

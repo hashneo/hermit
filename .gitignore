@@ -1,6 +1,9 @@
 # Local IDE/project metadata
 .idea/
 .opencode/
+ui/node_modules/
+ui/dist/
+ui/*.tsbuildinfo
 
 # macOS
 .DS_Store

@@ -1,0 +1,34 @@
+:root {
+  --token-color-border-primary: #656a7633;
+  --token-color-border-faint: #656a761a;
+  --token-color-foreground-strong: #0c0c0e;
+  --token-color-foreground-primary: #3b3d45;
+  --token-color-foreground-faint: #656a76;
+  --token-color-foreground-high-contrast: #ffffff;
+  --token-color-foreground-action: #1060ff;
+  --token-color-foreground-action-hover: #0c56e9;
+  --token-color-foreground-action-active: #0046d1;
+  --token-color-foreground-success: #008a22;
+  --token-color-foreground-warning: #bb5a00;
+  --token-color-page-primary: #ffffff;
+  --token-color-page-faint: #fafafa;
+  --token-color-surface-primary: #ffffff;
+  --token-color-surface-faint: #fafafa;
+  --token-color-surface-strong: #f1f2f3;
+  --token-color-surface-action: #f2f8ff;
+  --token-color-surface-warning: #fff9e8;
+  --token-color-surface-success: #f2fbf6;
+  --token-color-focus-action-internal: #0c56e9;
+  --token-color-focus-action-external: #5990ff;
+  --token-border-radius-small: 5px;
+  --token-border-radius-medium: 6px;
+  --token-border-radius-large: 8px;
+  --token-typography-font-stack-display: -apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif;
+  --token-typography-font-stack-text: -apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif;
+  --token-typography-font-weight-regular: 400;
+  --token-typography-font-weight-semibold: 600;
+  --token-typography-font-weight-bold: 700;
+  --token-typography-display-400-font-size: 1.5rem;
+  --token-typography-display-300-font-size: 1.125rem;
+  --token-typography-body-200-font-size: 0.875rem;
+}

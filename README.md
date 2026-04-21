@@ -63,6 +63,73 @@ If you need help with docs-cms workflows:
 docuchango bootstrap --guide agent
 ```
 
+## Registry Configuration
+
+Hermit loads runtime config from `config/hermit.yaml` by default.
+
+- Example file: `config/hermit.example.yaml`
+- Default local file committed for development: `config/hermit.yaml`
+- Optional override path: `HERMIT_CONFIG_FILE=/path/to/hermit.yaml`
+
+Registry entries allow multiple GitHub endpoints with token env references:
+
+```yaml
+environment: development
+listen_address: ":8080"
+registries:
+  - name: github-public
+    kind: github
+    base_url: https://api.github.com
+    token_env_var: GITHUB_TOKEN
+  - name: github-enterprise
+    kind: github
+    base_url: https://github.example.com/api/v3
+    token_env_var: GHE_TOKEN
+repositories:
+  - owner: hashicorp
+    name: hermit
+    registry: github-public
+    default_branch: main
+    docs_path_policy: docs-cms/rfcs/
+  - owner: acme
+    name: platform-rfcs
+    registry: github-enterprise
+    default_branch: trunk
+    docs_path_policy: docs-cms/rfcs/
+```
+
+Configured repositories are seeded at startup (when their token env var is set), and are available in the UI selection context.
+
+Validate config locally:
+
+```bash
+make validate-config
+make validate-config-structure
+```
+
+- `validate-config` performs full validation (structure + token presence + repository API access).
+- `validate-config-structure` checks only file structure and required fields.
+
+## Local Debug Mode
+
+Use `make debug` for live-reload development:
+
+- Starts Go backend with Air (`cmd/hermit`) and rebuilds/restarts on backend file changes.
+- Starts Vite in `ui/` so UI changes hot-reload automatically.
+- Backend runs on configured Hermit address (default `http://localhost:8080`), UI dev server runs on `http://localhost:4173`.
+
+Prerequisites:
+
+```bash
+go install github.com/air-verse/air@latest
+```
+
+Then run:
+
+```bash
+make debug
+```
+
 ## Current Status
 
 Hermit is currently in planning/design phase with foundational PRD, ADRs, and RFCs in place.

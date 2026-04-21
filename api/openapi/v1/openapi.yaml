@@ -1,0 +1,737 @@
+openapi: 3.0.3
+info:
+  title: Hermit Platform API
+  version: 1.0.0
+  description: >-
+    OpenAPI v1 contract for Hermit's core workflows: repository configuration,
+    RFC eligibility/rendering, thread lifecycle, approval actions, and sync/health.
+  license:
+    name: Mozilla Public License Version 2.0
+    url: https://www.mozilla.org/en-US/MPL/2.0/
+servers:
+  - url: https://api.hermit.local
+    description: Local development endpoint
+tags:
+  - name: Health
+    description: Platform health and readiness operations.
+  - name: Repositories
+    description: Repository onboarding, configuration, and validation.
+  - name: RFC Documents
+    description: RFC eligibility, metadata, and rendered content retrieval.
+  - name: Threads
+    description: Comment thread lifecycle operations for RFC collaboration.
+  - name: Reviews
+    description: Pull request review state and approval actions.
+  - name: Sync
+    description: Synchronization status and diagnostics for GitHub integration.
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/health:
+    get:
+      tags: [Health]
+      summary: Get platform health
+      operationId: getPlatformHealth
+      security: []
+      responses:
+        '200':
+          description: Platform health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformHealth'
+        '429':
+          $ref: '#/components/responses/ApiError'
+        '503':
+          $ref: '#/components/responses/ApiError'
+        default:
+          $ref: '#/components/responses/ApiError'
+
+  /api/v1/repositories:
+    post:
+      tags: [Repositories]
+      summary: Configure a repository
+      operationId: createRepositoryConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRepositoryRequest'
+      responses:
+        '201':
+          description: Repository configuration created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepositoryConfig'
+        '400':
+          $ref: '#/components/responses/ApiError'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '409':
+          $ref: '#/components/responses/ApiError'
+        default:
+          $ref: '#/components/responses/ApiError'
+
+  /api/v1/repositories/{repositoryId}:
+    get:
+      tags: [Repositories]
+      summary: Get repository configuration
+      operationId: getRepositoryConfig
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+      responses:
+        '200':
+          description: Repository configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepositoryConfig'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '404':
+          $ref: '#/components/responses/ApiError'
+        default:
+          $ref: '#/components/responses/ApiError'
+
+  /api/v1/repositories/{repositoryId}/validate:
+    post:
+      tags: [Repositories]
+      summary: Validate repository access and policy compatibility
+      operationId: validateRepositoryConfig
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepositoryValidationResult'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '404':
+          $ref: '#/components/responses/ApiError'
+        default:
+          $ref: '#/components/responses/ApiError'
+
+  /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/rfc:
+    get:
+      tags: [RFC Documents]
+      summary: Get RFC eligibility and metadata for a pull request
+      operationId: getRfcDocument
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+        - $ref: '#/components/parameters/PrNumber'
+      responses:
+        '200':
+          description: RFC eligibility and metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RfcDocument'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '404':
+          $ref: '#/components/responses/ApiError'
+        default:
+          $ref: '#/components/responses/ApiError'
+
+  /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/rfc/render:
+    get:
+      tags: [RFC Documents]
+      summary: Get rendered RFC content and anchor map
+      operationId: renderRfcDocument
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+        - $ref: '#/components/parameters/PrNumber'
+      responses:
+        '200':
+          description: Rendered RFC content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RfcRender'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '404':
+          $ref: '#/components/responses/ApiError'
+        default:
+          $ref: '#/components/responses/ApiError'
+
+  /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/threads:
+    get:
+      tags: [Threads]
+      summary: List RFC comment threads
+      operationId: listThreads
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+        - $ref: '#/components/parameters/PrNumber'
+      responses:
+        '200':
+          description: Thread list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThreadListResponse'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '404':
+          $ref: '#/components/responses/ApiError'
+        default:
+          $ref: '#/components/responses/ApiError'
+    post:
+      tags: [Threads]
+      summary: Create a thread with an initial message
+      operationId: createThread
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+        - $ref: '#/components/parameters/PrNumber'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateThreadRequest'
+      responses:
+        '201':
+          description: Thread created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Thread'
+        '400':
+          $ref: '#/components/responses/ApiError'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '404':
+          $ref: '#/components/responses/ApiError'
+        default:
+          $ref: '#/components/responses/ApiError'
+
+  /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/threads/{threadId}/resolve:
+    post:
+      tags: [Threads]
+      summary: Resolve an RFC thread
+      operationId: resolveThread
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+        - $ref: '#/components/parameters/PrNumber'
+        - $ref: '#/components/parameters/ThreadId'
+      responses:
+        '200':
+          description: Thread resolved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Thread'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '404':
+          $ref: '#/components/responses/ApiError'
+        default:
+          $ref: '#/components/responses/ApiError'
+
+  /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/threads/{threadId}/reply:
+    post:
+      tags: [Threads]
+      summary: Reply to an RFC thread
+      operationId: replyThread
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+        - $ref: '#/components/parameters/PrNumber'
+        - $ref: '#/components/parameters/ThreadId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplyThreadRequest'
+      responses:
+        '200':
+          description: Thread with appended reply
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Thread'
+        '400':
+          $ref: '#/components/responses/ApiError'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '404':
+          $ref: '#/components/responses/ApiError'
+        default:
+          $ref: '#/components/responses/ApiError'
+
+  /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/review/approve:
+    post:
+      tags: [Reviews]
+      summary: Submit an approval review
+      operationId: approvePullRequest
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+        - $ref: '#/components/parameters/PrNumber'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveReviewRequest'
+      responses:
+        '200':
+          description: Review status after approval
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewState'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '404':
+          $ref: '#/components/responses/ApiError'
+        default:
+          $ref: '#/components/responses/ApiError'
+
+  /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/review:
+    get:
+      tags: [Reviews]
+      summary: Get current pull request review state
+      operationId: getPullRequestReviewState
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+        - $ref: '#/components/parameters/PrNumber'
+      responses:
+        '200':
+          description: Current review state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewState'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '404':
+          $ref: '#/components/responses/ApiError'
+        default:
+          $ref: '#/components/responses/ApiError'
+
+  /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/sync:
+    get:
+      tags: [Sync]
+      summary: Get synchronization and diagnostics status
+      operationId: getSyncStatus
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+        - $ref: '#/components/parameters/PrNumber'
+      responses:
+        '200':
+          description: Synchronization status for PR collaboration entities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncStatus'
+        '401':
+          $ref: '#/components/responses/ApiError'
+        '404':
+          $ref: '#/components/responses/ApiError'
+        default:
+          $ref: '#/components/responses/ApiError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    RepositoryId:
+      name: repositoryId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Hermit repository configuration identifier.
+    PrNumber:
+      name: prNumber
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      description: GitHub pull request number.
+    ThreadId:
+      name: threadId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Hermit thread identifier.
+
+  responses:
+    ApiError:
+      description: Standardized API error response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    PlatformHealth:
+      type: object
+      required: [status, service, version, timestamp]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, unavailable]
+        service:
+          type: string
+          example: hermit-api
+        version:
+          type: string
+          example: 1.0.0
+        timestamp:
+          type: string
+          format: date-time
+
+    ApiError:
+      type: object
+      required: [code, message, correlation_id]
+      properties:
+        code:
+          type: string
+          example: repository_not_found
+        message:
+          type: string
+          example: Repository configuration was not found.
+        details:
+          type: object
+          additionalProperties: true
+          nullable: true
+        correlation_id:
+          type: string
+          example: 4f8b2e4f-cdb2-4d65-b280-d3b309f1b2f2
+
+    RepositoryConfig:
+      type: object
+      required:
+        - id
+        - owner
+        - name
+        - default_branch
+        - docs_path_policy
+        - auth
+        - validation
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        owner:
+          type: string
+        name:
+          type: string
+        default_branch:
+          type: string
+        docs_path_policy:
+          type: string
+          example: docs-cms/rfcs/
+        auth:
+          $ref: '#/components/schemas/RepositoryAuthMetadata'
+        validation:
+          $ref: '#/components/schemas/RepositoryValidationResult'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    RepositoryAuthMetadata:
+      type: object
+      required: [method, token_last_validated_at]
+      properties:
+        method:
+          type: string
+          enum: [pat]
+        token_last_validated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    RepositoryValidationResult:
+      type: object
+      required: [healthy, checks, validated_at]
+      properties:
+        healthy:
+          type: boolean
+        checks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationCheck'
+        validated_at:
+          type: string
+          format: date-time
+        last_error_code:
+          type: string
+          nullable: true
+
+    ValidationCheck:
+      type: object
+      required: [name, status]
+      properties:
+        name:
+          type: string
+          example: github_api_access
+        status:
+          type: string
+          enum: [pass, fail, warn]
+        message:
+          type: string
+          nullable: true
+
+    CreateRepositoryRequest:
+      type: object
+      required: [owner, name, personal_access_token]
+      properties:
+        owner:
+          type: string
+        name:
+          type: string
+        personal_access_token:
+          type: string
+          writeOnly: true
+        default_branch:
+          type: string
+          default: main
+        docs_path_policy:
+          type: string
+          default: docs-cms/rfcs/
+
+    RfcDocument:
+      type: object
+      required:
+        - repository_id
+        - pr_number
+        - head_sha
+        - eligibility
+      properties:
+        repository_id:
+          type: string
+          format: uuid
+        pr_number:
+          type: integer
+          minimum: 1
+        head_sha:
+          type: string
+        file_path:
+          type: string
+          nullable: true
+        eligibility:
+          $ref: '#/components/schemas/RfcEligibility'
+
+    RfcEligibility:
+      type: object
+      required: [status, reasons]
+      properties:
+        status:
+          type: string
+          enum: [eligible, ineligible]
+        reasons:
+          type: array
+          items:
+            type: string
+
+    RfcRender:
+      type: object
+      required: [repository_id, pr_number, head_sha, rendered_html, anchor_map]
+      properties:
+        repository_id:
+          type: string
+          format: uuid
+        pr_number:
+          type: integer
+          minimum: 1
+        head_sha:
+          type: string
+        rendered_html:
+          type: string
+        markdown_source:
+          type: string
+        anchor_map:
+          type: array
+          items:
+            $ref: '#/components/schemas/Anchor'
+
+    Anchor:
+      type: object
+      required: [anchor_id, line_start, line_end, text_fingerprint]
+      properties:
+        anchor_id:
+          type: string
+          format: uuid
+        line_start:
+          type: integer
+          minimum: 1
+        line_end:
+          type: integer
+          minimum: 1
+        text_fingerprint:
+          type: string
+
+    Thread:
+      type: object
+      required:
+        - id
+        - repository_id
+        - pr_number
+        - status
+        - anchor
+        - messages
+        - github_thread_id
+        - sync
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        repository_id:
+          type: string
+          format: uuid
+        pr_number:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum: [open, resolved]
+        anchor:
+          $ref: '#/components/schemas/Anchor'
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ThreadMessage'
+        github_thread_id:
+          type: string
+          nullable: true
+        sync:
+          $ref: '#/components/schemas/SyncStatus'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ThreadMessage:
+      type: object
+      required: [id, author, body, source_system, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        author:
+          type: string
+        body:
+          type: string
+        source_system:
+          type: string
+          enum: [hermit, github]
+        github_comment_id:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    ThreadListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Thread'
+        total:
+          type: integer
+          minimum: 0
+
+    CreateThreadRequest:
+      type: object
+      required: [anchor, body]
+      properties:
+        anchor:
+          $ref: '#/components/schemas/AnchorCreateInput'
+        body:
+          type: string
+          minLength: 1
+
+    ReplyThreadRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          minLength: 1
+
+    AnchorCreateInput:
+      type: object
+      required: [line_start, line_end, text_fingerprint]
+      properties:
+        line_start:
+          type: integer
+          minimum: 1
+        line_end:
+          type: integer
+          minimum: 1
+        text_fingerprint:
+          type: string
+
+    ApproveReviewRequest:
+      type: object
+      properties:
+        body:
+          type: string
+          description: Optional approval message.
+
+    ReviewState:
+      type: object
+      required: [repository_id, pr_number, state, updated_at]
+      properties:
+        repository_id:
+          type: string
+          format: uuid
+        pr_number:
+          type: integer
+          minimum: 1
+        state:
+          type: string
+          enum: [approved, changes_requested, commented, pending]
+        reviewer:
+          type: string
+        github_review_id:
+          type: string
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+
+    SyncStatus:
+      type: object
+      required: [state, last_synced_at, retry_count]
+      properties:
+        state:
+          type: string
+          enum: [synced, pending, failed, reconciling]
+        last_synced_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_error_code:
+          type: string
+          nullable: true
+        retry_count:
+          type: integer
+          minimum: 0
