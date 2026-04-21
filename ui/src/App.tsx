@@ -262,8 +262,17 @@ export function App() {
                   className={`rfc-link ${activeId === item.id ? "selected" : ""}`}
                   onClick={() => openRfc(item)}
                 >
-                  <span className="title">{item.title}</span>
+                  <span className="title-row">
+                    <span className="title">{item.title}</span>
+                    <span className={`rfc-source source-${item.source_type}`}>{item.source_label}</span>
+                  </span>
                   <span className="path">{item.path}</span>
+                  <span className="rfc-meta-row">
+                    {item.lifecycle_status && item.lifecycle_status !== "unknown" && (
+                      <span className="rfc-chip">{item.lifecycle_status}</span>
+                    )}
+                    {item.commentable && <span className="rfc-chip commentable">commentable</span>}
+                  </span>
                 </button>
               </li>
             ))}

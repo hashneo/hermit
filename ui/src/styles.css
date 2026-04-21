@@ -184,9 +184,58 @@ body {
   color: var(--ink);
 }
 
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rfc-source {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-radius: 999px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.rfc-source.source-main {
+  background: var(--token-color-surface-faint);
+}
+
+.rfc-source.source-pull_request {
+  background: color-mix(in srgb, var(--token-color-surface-action) 45%, white);
+  border-color: var(--token-color-border-action);
+  color: var(--token-color-foreground-action);
+}
+
 .rfc-link .path {
   font-size: 0.8rem;
   color: var(--muted);
+}
+
+.rfc-meta-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.rfc-chip {
+  font-size: 0.72rem;
+  text-transform: lowercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--token-color-surface-primary);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.rfc-chip.commentable {
+  background: color-mix(in srgb, var(--token-color-surface-success) 40%, white);
+  border-color: var(--token-color-border-success);
+  color: var(--token-color-foreground-success);
 }
 
 .right-panel {

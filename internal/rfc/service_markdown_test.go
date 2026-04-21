@@ -95,4 +95,27 @@ func TestListRFCs_FiltersNonDocuchangoFilenames(t *testing.T) {
 	if items[0].ID != "rfc-001-valid-name.md" {
 		t.Fatalf("expected valid RFC file to be listed, got %q", items[0].ID)
 	}
+	if items[0].SourceType != "main" {
+		t.Fatalf("expected source_type main, got %q", items[0].SourceType)
+	}
+	if items[0].Commentable {
+		t.Fatalf("expected main RFC entry to be non-commentable")
+	}
+}
+
+func TestParsePRCatalogID(t *testing.T) {
+	prNumber, path, ok := parsePRCatalogID("pr:77:docs-cms/rfcs/rfc-077-test.md")
+	if !ok {
+		t.Fatalf("expected valid PR catalog id")
+	}
+	if prNumber != 77 {
+		t.Fatalf("expected pr number 77, got %d", prNumber)
+	}
+	if path != "docs-cms/rfcs/rfc-077-test.md" {
+		t.Fatalf("unexpected path %q", path)
+	}
+
+	if _, _, ok := parsePRCatalogID("rfc-077-test.md"); ok {
+		t.Fatalf("expected invalid non-pr catalog id")
+	}
 }

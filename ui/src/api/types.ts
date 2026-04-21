@@ -131,6 +131,13 @@ export type RfcCatalogItem = {
   id: string;
   title: string;
   path: string;
+  source_type: "main" | "pull_request";
+  source_label: string;
+  allowed_actions: Array<"view" | "comment">;
+  lifecycle_status?: "draft" | "accepted" | "implemented" | "unknown";
+  pr_number?: number;
+  head_sha?: string;
+  commentable: boolean;
 };
 
 export type RfcCatalogResponse = {

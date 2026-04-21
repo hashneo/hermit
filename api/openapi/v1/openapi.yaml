@@ -160,6 +160,77 @@ paths:
         default:
           $ref: '#/components/responses/ApiError'
 
+  /api/v1/rfcs:
+    get:
+      tags: [RFC Documents]
+      summary: List canonical RFC files from local docs
+      operationId: listRfcs
+      responses:
+        '200':
+          description: RFC catalog response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RfcCatalogResponse'
+        default:
+          $ref: '#/components/responses/ApiError'
+
+  /api/v1/rfcs/{rfcId}:
+    get:
+      tags: [RFC Documents]
+      summary: Get rendered RFC document by RFC id
+      operationId: getRfcById
+      parameters:
+        - $ref: '#/components/parameters/RfcId'
+      responses:
+        '200':
+          description: RFC rendered document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RfcDocumentView'
+        '404':
+          $ref: '#/components/responses/ApiError'
+        default:
+          $ref: '#/components/responses/ApiError'
+
+  /api/v1/repositories/{repositoryId}/rfcs:
+    get:
+      tags: [RFC Documents]
+      summary: List unified RFC catalog from main and review-ready PR RFCs
+      operationId: listRepositoryRfcs
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+      responses:
+        '200':
+          description: Unified RFC catalog response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RfcCatalogResponse'
+        default:
+          $ref: '#/components/responses/ApiError'
+
+  /api/v1/repositories/{repositoryId}/rfcs/{rfcId}:
+    get:
+      tags: [RFC Documents]
+      summary: Get rendered RFC document by repository-scoped RFC id
+      operationId: getRepositoryRfcById
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+        - $ref: '#/components/parameters/RfcId'
+      responses:
+        '200':
+          description: RFC rendered document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RfcDocumentView'
+        '404':
+          $ref: '#/components/responses/ApiError'
+        default:
+          $ref: '#/components/responses/ApiError'
+
   /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/threads:
     get:
       tags: [Threads]
@@ -368,6 +439,13 @@ components:
         type: string
         format: uuid
       description: Hermit thread identifier.
+    RfcId:
+      name: rfcId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: RFC identifier. Repository-scoped list may return PR-backed IDs as `pr:{number}:{path}`.
 
   responses:
     ApiError:
@@ -564,6 +642,75 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Anchor'
+
+    RfcCatalogResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RfcCatalogItem'
+        total:
+          type: integer
+          minimum: 0
+
+    RfcCatalogItem:
+      type: object
+      required:
+        - id
+        - title
+        - path
+        - source_type
+        - source_label
+        - allowed_actions
+        - commentable
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        path:
+          type: string
+        source_type:
+          type: string
+          enum: [main, pull_request]
+        source_label:
+          type: string
+          example: PR #42
+        allowed_actions:
+          type: array
+          items:
+            type: string
+            enum: [view, comment]
+        lifecycle_status:
+          type: string
+          enum: [draft, accepted, implemented, unknown]
+          nullable: true
+        pr_number:
+          type: integer
+          minimum: 1
+          nullable: true
+        head_sha:
+          type: string
+          nullable: true
+        commentable:
+          type: boolean
+
+    RfcDocumentView:
+      type: object
+      required: [id, title, path, rendered_html, markdown_source]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        path:
+          type: string
+        rendered_html:
+          type: string
+        markdown_source:
+          type: string
 
     Anchor:
       type: object

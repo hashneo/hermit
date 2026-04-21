@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/yuin/goldmark"
@@ -49,9 +50,16 @@ type Render struct {
 }
 
 type CatalogItem struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	Path  string `json:"path"`
+	ID              string   `json:"id"`
+	Title           string   `json:"title"`
+	Path            string   `json:"path"`
+	SourceType      string   `json:"source_type"`
+	SourceLabel     string   `json:"source_label"`
+	AllowedActions  []string `json:"allowed_actions"`
+	LifecycleStatus string   `json:"lifecycle_status,omitempty"`
+	PRNumber        int      `json:"pr_number,omitempty"`
+	HeadSHA         string   `json:"head_sha,omitempty"`
+	Commentable     bool     `json:"commentable"`
 }
 
 type DocumentView struct {
@@ -164,9 +172,14 @@ func (s *Service) ListRFCs() ([]CatalogItem, error) {
 		}
 
 		items = append(items, CatalogItem{
-			ID:    entry.Name(),
-			Title: title,
-			Path:  filepath.ToSlash(fullPath),
+			ID:              entry.Name(),
+			Title:           title,
+			Path:            filepath.ToSlash(fullPath),
+			SourceType:      "main",
+			SourceLabel:     "Main branch",
+			AllowedActions:  []string{"view"},
+			LifecycleStatus: normalizeLifecycleStatus(frontmatter["status"]),
+			Commentable:     false,
 		})
 	}
 
@@ -226,7 +239,68 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 	}
 
 	baseURL := s.registryBaseURL(registry)
-	return client.ListRFCs(ctx, baseURL, owner, name, branch, docsPath, token)
+	mainItems, err := client.ListRFCs(ctx, baseURL, owner, name, branch, docsPath, token)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]CatalogItem, 0, len(mainItems))
+	for _, item := range mainItems {
+		lifecycleStatus := "unknown"
+		title := item.Title
+		if view, viewErr := client.GetRFC(ctx, baseURL, owner, name, branch, item.Path, token); viewErr == nil {
+			title = view.Title
+			meta, _ := parseFrontmatter(view.MarkdownSource)
+			lifecycleStatus = normalizeLifecycleStatus(meta["status"])
+		}
+
+		items = append(items, CatalogItem{
+			ID:              item.ID,
+			Title:           title,
+			Path:            item.Path,
+			SourceType:      "main",
+			SourceLabel:     "Main branch",
+			AllowedActions:  []string{"view"},
+			LifecycleStatus: lifecycleStatus,
+			Commentable:     false,
+		})
+	}
+
+	prItems, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, token)
+	if err != nil {
+		return nil, err
+	}
+	for _, prItem := range prItems {
+		items = append(items, CatalogItem{
+			ID:             makePRCatalogID(prItem.PRNumber, prItem.Path),
+			Title:          prItem.Title,
+			Path:           prItem.Path,
+			SourceType:     "pull_request",
+			SourceLabel:    fmt.Sprintf("PR #%d", prItem.PRNumber),
+			AllowedActions: []string{"view", "comment"},
+			PRNumber:       prItem.PRNumber,
+			HeadSHA:        prItem.HeadSHA,
+			Commentable:    true,
+		})
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].SourceType == items[j].SourceType {
+			if items[i].Title == items[j].Title {
+				return items[i].ID < items[j].ID
+			}
+			return items[i].Title < items[j].Title
+		}
+		if items[i].SourceType == "main" {
+			return true
+		}
+		if items[j].SourceType == "main" {
+			return false
+		}
+		return items[i].Title < items[j].Title
+	})
+
+	return items, nil
 }
 
 func (s *Service) RenderRFCByRepository(ctx context.Context, repositoryID, rfcID string) (DocumentView, error) {
@@ -248,6 +322,15 @@ func (s *Service) RenderRFCByRepository(ctx context.Context, repositoryID, rfcID
 	}
 
 	baseURL := s.registryBaseURL(registry)
+	if prNumber, filePath, ok := parsePRCatalogID(rfcID); ok {
+		view, err := client.GetRFCFromPullRequest(ctx, baseURL, owner, name, prNumber, filePath, token)
+		if err != nil {
+			return DocumentView{}, err
+		}
+		view.ID = rfcID
+		return view, nil
+	}
+
 	return client.GetRFC(ctx, baseURL, owner, name, branch, rfcID, token)
 }
 
@@ -533,4 +616,38 @@ func writeMetaField(b *strings.Builder, label, value string) {
 
 func isDocuchangoRFCFilename(name string) bool {
 	return docuchangoRFCFilenamePattern.MatchString(name)
+}
+
+func normalizeLifecycleStatus(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "draft", "accepted", "implemented":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "unknown"
+	}
+}
+
+func makePRCatalogID(prNumber int, filePath string) string {
+	return fmt.Sprintf("pr:%d:%s", prNumber, strings.TrimPrefix(filePath, "/"))
+}
+
+func parsePRCatalogID(id string) (int, string, bool) {
+	if !strings.HasPrefix(id, "pr:") {
+		return 0, "", false
+	}
+	parts := strings.SplitN(id, ":", 3)
+	if len(parts) != 3 {
+		return 0, "", false
+	}
+
+	prNumber, err := strconv.Atoi(parts[1])
+	if err != nil || prNumber <= 0 {
+		return 0, "", false
+	}
+	filePath := strings.TrimSpace(parts[2])
+	if filePath == "" {
+		return 0, "", false
+	}
+
+	return prNumber, filePath, true
 }
