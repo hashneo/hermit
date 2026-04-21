@@ -1,0 +1,6 @@
+# Local IDE/project metadata
+.idea/
+.opencode/
+
+# macOS
+.DS_Store
