@@ -276,6 +276,12 @@ body {
   color: var(--token-color-foreground-primary);
 }
 
+.doc-body img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
 .doc-body pre {
   background: #f6f8fa;
   border: 1px solid #d0d7de;
