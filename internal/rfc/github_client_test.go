@@ -37,6 +37,9 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *t
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "open":
+			if got := r.URL.Query().Get("labels"); got != "" {
+				t.Fatalf("expected no labels query parameter, got %q", got)
+			}
 			_ = json.NewEncoder(w).Encode([]map[string]any{
 				{"number": 10, "draft": false, "head": map[string]any{"sha": "sha-ready"}, "labels": []map[string]any{{"name": "hermit:rfc-ready"}}},
 				{"number": 11, "draft": true, "head": map[string]any{"sha": "sha-draft"}, "labels": []map[string]any{{"name": "hermit:rfc-ready"}}},

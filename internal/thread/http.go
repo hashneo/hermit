@@ -40,6 +40,7 @@ func (h *Handler) CreateThread(w http.ResponseWriter, r *http.Request) {
 			LineStart       int    `json:"line_start"`
 			LineEnd         int    `json:"line_end"`
 			TextFingerprint string `json:"text_fingerprint"`
+			FilePath        string `json:"file_path"`
 		} `json:"anchor"`
 		Body string `json:"body"`
 	}
@@ -61,6 +62,7 @@ func (h *Handler) CreateThread(w http.ResponseWriter, r *http.Request) {
 			LineStart:       payload.Anchor.LineStart,
 			LineEnd:         payload.Anchor.LineEnd,
 			TextFingerprint: payload.Anchor.TextFingerprint,
+			FilePath:        payload.Anchor.FilePath,
 		},
 		Body:   payload.Body,
 		Author: r.Header.Get("X-Hermit-User"),

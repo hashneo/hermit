@@ -98,7 +98,7 @@ func newMux(cfg config.Config) *http.ServeMux {
 	mux.HandleFunc("GET "+review.ReviewStatePath(), reviewHandler.GetReviewState)
 	mux.HandleFunc("POST "+review.ReviewApprovePath(), reviewHandler.Approve)
 
-	threadService := thread.NewService(nil)
+	threadService := thread.NewService(thread.NewHTTPGitHubClient(repositoryService, registryBaseURLs))
 	threadHandler := thread.NewHandler(threadService)
 	mux.HandleFunc("GET "+thread.ThreadsPath(), threadHandler.ListThreads)
 	mux.HandleFunc("POST "+thread.ThreadsPath(), threadHandler.CreateThread)

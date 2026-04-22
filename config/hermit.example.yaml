@@ -9,6 +9,10 @@ registries:
     kind: github
     base_url: https://github.example.com/api/v3
     token_env_var: GHE_TOKEN
+  - name: gitea-local
+    kind: github
+    base_url: http://localhost:3000/api/v1
+    token_env_var: GITEA_TOKEN
 repositories:
   - owner: hashicorp
     name: hermit
@@ -19,4 +23,9 @@ repositories:
     name: platform-rfcs
     registry: github-enterprise
     default_branch: trunk
+    docs_path_policy: docs-cms/rfcs/
+  - owner: gitea_admin
+    name: hermit-rfcs
+    registry: gitea-local
+    default_branch: main
     docs_path_policy: docs-cms/rfcs/

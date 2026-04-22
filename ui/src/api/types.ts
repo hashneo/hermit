@@ -64,6 +64,7 @@ export type Anchor = {
   line_start: number;
   line_end: number;
   text_fingerprint: string;
+  file_path?: string;
 };
 
 export type RfcRender = {
@@ -110,6 +111,7 @@ export type CreateThreadRequest = {
     line_start: number;
     line_end: number;
     text_fingerprint: string;
+    file_path?: string;
   };
   body: string;
 };

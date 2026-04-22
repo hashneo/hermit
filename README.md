@@ -85,6 +85,10 @@ registries:
     kind: github
     base_url: https://github.example.com/api/v3
     token_env_var: GHE_TOKEN
+  - name: gitea-local
+    kind: github
+    base_url: http://localhost:3000/api/v1
+    token_env_var: GITEA_TOKEN
 repositories:
   - owner: hashicorp
     name: hermit
@@ -95,6 +99,11 @@ repositories:
     name: platform-rfcs
     registry: github-enterprise
     default_branch: trunk
+    docs_path_policy: docs-cms/rfcs/
+  - owner: gitea_admin
+    name: hermit-rfcs
+    registry: gitea-local
+    default_branch: main
     docs_path_policy: docs-cms/rfcs/
 ```
 
@@ -109,6 +118,45 @@ make validate-config-structure
 
 - `validate-config` performs full validation (structure + token presence + repository API access).
 - `validate-config-structure` checks only file structure and required fields.
+
+## Local Gitea Testing
+
+Use the built-in Make targets to run a local Gitea instance for integration testing.
+
+```bash
+make gitea-up
+```
+
+- Web UI: `http://localhost:3000`
+- SSH: `localhost:2222`
+- Persistent data directory: `./data/gitea/`
+
+Additional commands:
+
+```bash
+make gitea-seed-pr # (re)seed repo + review-ready PR
+make gitea-logs   # stream container logs
+make gitea-down   # stop container
+make gitea-reset  # remove container and delete ./data/gitea/
+```
+
+To use Gitea with Hermit config, set `GITEA_TOKEN` and use registry base URL `http://localhost:3000/api/v1`.
+
+After `make gitea-up`, set your current shell token with:
+
+```bash
+eval "$(cat .tmp/gitea-token-export.sh)"
+```
+
+`make gitea-up` now automatically ensures a valid local token and prints an `eval` command you can run to load `GITEA_TOKEN` into your current shell session.
+
+Seed details (`make gitea-seed-pr`):
+
+- Creates admin user: `gitea_admin` / `gitea_admin` (local test only)
+- Creates repo: `gitea_admin/hermit-rfcs`
+- Pushes main-branch RFC: `docs-cms/rfcs/rfc-001-seeded-main-branch.md`
+- Pushes PR branch RFC: `docs-cms/rfcs/rfc-002-seeded-pr-review.md`
+- Opens ready-for-review PR from `feat/rfc-002-seeded-pr-review` -> `main`
 
 ## Local Debug Mode
 

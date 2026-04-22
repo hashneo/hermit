@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestThreadLifecycleCreateReplyResolve(t *testing.T) {
@@ -32,8 +33,8 @@ func TestThreadLifecycleCreateReplyResolve(t *testing.T) {
 	if err := json.Unmarshal(createResp.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode create response: %v", err)
 	}
-	if created.Sync.State != SyncStateSynced {
-		t.Fatalf("create sync state = %q, want %q", created.Sync.State, SyncStateSynced)
+	if created.Sync.State != SyncStatePending {
+		t.Fatalf("create sync state = %q, want %q", created.Sync.State, SyncStatePending)
 	}
 
 	replyBody := bytes.NewBufferString(`{"body":"follow-up"}`)
@@ -65,6 +66,10 @@ func TestThreadLifecycleCreateReplyResolve(t *testing.T) {
 		t.Fatalf("message count = %d, want %d", len(resolved.Messages), 2)
 	}
 
+	if resolved.Sync.State != SyncStatePending {
+		t.Fatalf("resolve sync state = %q, want %q", resolved.Sync.State, SyncStatePending)
+	}
+
 	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/repositories/repo-1/pull-requests/7/threads", nil)
 	listResp := httptest.NewRecorder()
 	mux.ServeHTTP(listResp, listReq)
@@ -81,5 +86,27 @@ func TestThreadLifecycleCreateReplyResolve(t *testing.T) {
 	}
 	if listed.Total != 1 {
 		t.Fatalf("listed total = %d, want %d", listed.Total, 1)
+	}
+
+	eventually(t, time.Second, 10*time.Millisecond, func() bool {
+		latest := service.List("repo-1", 7)
+		if len(latest) != 1 {
+			return false
+		}
+		return latest[0].Sync.State == SyncStateSynced && latest[0].GitHubThreadID != ""
+	})
+}
+
+func eventually(t *testing.T, timeout, interval time.Duration, predicate func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if predicate() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("condition not satisfied before timeout")
+		}
+		time.Sleep(interval)
 	}
 }

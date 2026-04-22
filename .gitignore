@@ -15,3 +15,5 @@ ui/*.tsbuildinfo
 bin/hermit
 /.tmp
 /hello-hermit
+/data/gitea/
+/.tmp/gitea-token.env

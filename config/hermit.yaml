@@ -9,14 +9,23 @@ registries:
     kind: github
     base_url: https://github.ibm.com/api/v3
     token_env_var: GHE_TOKEN
+  - name: gitea-local
+    kind: github
+    base_url: http://localhost:3000/api/v1
+    token_env_var: GITEA_TOKEN
 repositories:
-  - owner: hashicorp
-    name: agx-bridge
-    registry: github
-    default_branch: main
-    docs_path_policy: docs-cms/rfcs/
-  - owner: Steven-Taylor1
-    name: hermit
-    registry: github-enterprise
+#  - owner: hashicorp
+#    name: agx-bridge
+#    registry: github
+#    default_branch: main
+#    docs_path_policy: docs-cms/rfcs/
+#  - owner: Steven-Taylor1
+#    name: hermit
+#    registry: github-enterprise
+#    default_branch: main
+#    docs_path_policy: docs-cms/rfcs/
+  - owner: gitea_admin
+    name: hermit-rfcs
+    registry: gitea-local
     default_branch: main
     docs_path_policy: docs-cms/rfcs/

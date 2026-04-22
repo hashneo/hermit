@@ -147,9 +147,9 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 		docsPath = "docs-cms/rfcs"
 	}
 
-	// Use the labels query parameter to restrict to PRs carrying the RFC-ready label.
-	// This avoids scanning all open PRs (per RFC-005 / ADR-008).
-	prURL := fmt.Sprintf("%s/repos/%s/%s/pulls?state=open&per_page=100&labels=%s", apiBase, owner, name, RFCReadyLabel)
+	// Query open PRs then filter by label client-side.
+	// Some providers (for example Gitea) do not support string label filters on this endpoint.
+	prURL := fmt.Sprintf("%s/repos/%s/%s/pulls?state=open&per_page=100", apiBase, owner, name)
 	prReq, err := http.NewRequestWithContext(ctx, http.MethodGet, prURL, nil)
 	if err != nil {
 		return nil, err

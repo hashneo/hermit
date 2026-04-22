@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const githubThreadWaitTimeout = 2 * time.Second
+
 const (
 	ThreadStatusOpen     = "open"
 	ThreadStatusResolved = "resolved"
@@ -22,6 +24,7 @@ type Anchor struct {
 	LineStart       int    `json:"line_start"`
 	LineEnd         int    `json:"line_end"`
 	TextFingerprint string `json:"text_fingerprint"`
+	FilePath        string `json:"file_path,omitempty"`
 }
 
 type Message struct {
@@ -137,6 +140,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Thread, error)
 			LineStart:       req.Anchor.LineStart,
 			LineEnd:         req.Anchor.LineEnd,
 			TextFingerprint: req.Anchor.TextFingerprint,
+			FilePath:        req.Anchor.FilePath,
 		},
 		Messages: []Message{{
 			ID:           messageID,
@@ -150,22 +154,11 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Thread, error)
 		UpdatedAt: now,
 	}
 
-	ghThreadID, ghCommentID, err := s.client.CreateThread(ctx, thread)
-	if err != nil {
-		thread.Sync = Sync{State: SyncStateFailed, LastError: "github_create_failed", RetryCount: 1}
-		s.mu.Lock()
-		s.threads[thread.ID] = thread
-		s.mu.Unlock()
-		return thread, fmt.Errorf("create github thread: %w", err)
-	}
-
-	thread.GitHubThreadID = ghThreadID
-	thread.Messages[0].GitHubCommentID = ghCommentID
-	thread.Sync = Sync{State: SyncStateSynced, LastSynced: &now}
-
 	s.mu.Lock()
 	s.threads[thread.ID] = thread
 	s.mu.Unlock()
+
+	go s.syncCreateThread(thread.ID)
 
 	return thread, nil
 }
@@ -196,22 +189,7 @@ func (s *Service) Reply(ctx context.Context, req ReplyRequest) (Thread, error) {
 	s.threads[req.ThreadID] = thread
 	s.mu.Unlock()
 
-	commentID, err := s.client.ReplyThread(ctx, thread.GitHubThreadID, msg)
-	if err != nil {
-		s.mu.Lock()
-		thread = s.threads[req.ThreadID]
-		thread.Sync = Sync{State: SyncStateFailed, LastError: "github_reply_failed", RetryCount: thread.Sync.RetryCount + 1}
-		s.threads[req.ThreadID] = thread
-		s.mu.Unlock()
-		return thread, fmt.Errorf("reply github thread: %w", err)
-	}
-
-	s.mu.Lock()
-	thread = s.threads[req.ThreadID]
-	thread.Messages[len(thread.Messages)-1].GitHubCommentID = commentID
-	thread.Sync = Sync{State: SyncStateSynced, LastSynced: &now}
-	s.threads[req.ThreadID] = thread
-	s.mu.Unlock()
+	go s.syncReply(req.ThreadID, msg.ID)
 
 	return thread, nil
 }
@@ -231,22 +209,166 @@ func (s *Service) Resolve(ctx context.Context, req ResolveRequest) (Thread, erro
 	s.threads[req.ThreadID] = thread
 	s.mu.Unlock()
 
-	if err := s.client.ResolveThread(ctx, thread.GitHubThreadID); err != nil {
-		s.mu.Lock()
-		thread = s.threads[req.ThreadID]
-		thread.Sync = Sync{State: SyncStateFailed, LastError: "github_resolve_failed", RetryCount: thread.Sync.RetryCount + 1}
-		s.threads[req.ThreadID] = thread
-		s.mu.Unlock()
-		return thread, fmt.Errorf("resolve github thread: %w", err)
-	}
-
-	s.mu.Lock()
-	thread = s.threads[req.ThreadID]
-	thread.Sync = Sync{State: SyncStateSynced, LastSynced: &now}
-	s.threads[req.ThreadID] = thread
-	s.mu.Unlock()
+	go s.syncResolve(req.ThreadID)
 
 	return thread, nil
+}
+
+func (s *Service) syncCreateThread(threadID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	s.mu.RLock()
+	thread, ok := s.threads[threadID]
+	s.mu.RUnlock()
+	if !ok {
+		return
+	}
+
+	ghThreadID, ghCommentID, err := s.client.CreateThread(ctx, thread)
+	if err != nil {
+		s.markSyncFailed(threadID, "github_create_failed")
+		return
+	}
+
+	now := s.now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	thread, ok = s.threads[threadID]
+	if !ok {
+		return
+	}
+
+	thread.GitHubThreadID = ghThreadID
+	if len(thread.Messages) > 0 {
+		thread.Messages[0].GitHubCommentID = ghCommentID
+	}
+	thread.Sync = Sync{State: SyncStateSynced, LastSynced: &now}
+	thread.UpdatedAt = now
+	s.threads[threadID] = thread
+}
+
+func (s *Service) syncReply(threadID, messageID string) {
+	githubThreadID, ok := s.waitForGitHubThreadID(threadID, githubThreadWaitTimeout)
+	if !ok {
+		s.markSyncFailed(threadID, "github_thread_unavailable")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	msg, ok := s.messageByID(threadID, messageID)
+	if !ok {
+		return
+	}
+
+	commentID, err := s.client.ReplyThread(ctx, githubThreadID, msg)
+	if err != nil {
+		s.markSyncFailed(threadID, "github_reply_failed")
+		return
+	}
+
+	now := s.now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	thread, ok := s.threads[threadID]
+	if !ok {
+		return
+	}
+
+	for i := range thread.Messages {
+		if thread.Messages[i].ID == messageID {
+			thread.Messages[i].GitHubCommentID = commentID
+			break
+		}
+	}
+	thread.Sync = Sync{State: SyncStateSynced, LastSynced: &now}
+	thread.UpdatedAt = now
+	s.threads[threadID] = thread
+}
+
+func (s *Service) syncResolve(threadID string) {
+	githubThreadID, ok := s.waitForGitHubThreadID(threadID, githubThreadWaitTimeout)
+	if !ok {
+		s.markSyncFailed(threadID, "github_thread_unavailable")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := s.client.ResolveThread(ctx, githubThreadID); err != nil {
+		s.markSyncFailed(threadID, "github_resolve_failed")
+		return
+	}
+
+	now := s.now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	thread, ok := s.threads[threadID]
+	if !ok {
+		return
+	}
+
+	thread.Sync = Sync{State: SyncStateSynced, LastSynced: &now}
+	thread.UpdatedAt = now
+	s.threads[threadID] = thread
+}
+
+func (s *Service) markSyncFailed(threadID, code string) {
+	now := s.now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	thread, ok := s.threads[threadID]
+	if !ok {
+		return
+	}
+
+	retryCount := thread.Sync.RetryCount + 1
+	thread.Sync = Sync{State: SyncStateFailed, LastError: code, RetryCount: retryCount}
+	thread.UpdatedAt = now
+	s.threads[threadID] = thread
+}
+
+func (s *Service) waitForGitHubThreadID(threadID string, timeout time.Duration) (string, bool) {
+	deadline := time.Now().Add(timeout)
+	for {
+		s.mu.RLock()
+		thread, ok := s.threads[threadID]
+		s.mu.RUnlock()
+		if !ok {
+			return "", false
+		}
+		if thread.GitHubThreadID != "" {
+			return thread.GitHubThreadID, true
+		}
+		if time.Now().After(deadline) {
+			return "", false
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func (s *Service) messageByID(threadID, messageID string) (Message, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	thread, ok := s.threads[threadID]
+	if !ok {
+		return Message{}, false
+	}
+	for _, msg := range thread.Messages {
+		if msg.ID == messageID {
+			return msg, true
+		}
+	}
+
+	return Message{}, false
 }
 
 func (s *Service) newID(prefix string) string {
