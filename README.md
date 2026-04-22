@@ -140,6 +140,16 @@ make gitea-down   # stop container
 make gitea-reset  # remove container and delete ./data/gitea/
 ```
 
+Convenience scripts at repo root:
+
+```bash
+./run.sh           # gitea-down -> gitea-up (with retry/delay) -> make run
+./run.sh --debug   # gitea-down -> gitea-up (with retry/delay) -> make debug (Air + Vite)
+./ren.sh --debug   # alias for ./run.sh --debug
+./stop.sh          # make gitea-down
+./stop.sh --reset  # make gitea-down && make gitea-reset
+```
+
 To use Gitea with Hermit config, set `GITEA_TOKEN` and use registry base URL `http://localhost:3000/api/v1`.
 
 After `make gitea-up`, set your current shell token with:
