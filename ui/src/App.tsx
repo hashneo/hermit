@@ -14,6 +14,8 @@ const repositorySelectionStorageKey = "hermit:selectedRepositoryId";
 type SelectionAnchor = {
   line_start: number;
   line_end: number;
+  formatted_line_start: number;
+  formatted_line_end: number;
   text_fingerprint: string;
   selected_text: string;
 };
@@ -223,6 +225,8 @@ export function App() {
         anchor: {
           line_start: selectionAnchor.line_start,
           line_end: selectionAnchor.line_end,
+          formatted_line_start: selectionAnchor.formatted_line_start,
+          formatted_line_end: selectionAnchor.formatted_line_end,
           text_fingerprint: selectionAnchor.text_fingerprint,
           file_path: activeRfcItem.path,
         },
@@ -266,13 +270,21 @@ export function App() {
       return;
     }
 
-    const anchor = anchorFromSelection(selectedText, document.markdown_source) ?? {
-      line_start: 1,
-      line_end: 1,
-      text_fingerprint: fingerprint(selectedText),
-    };
+    const offsets = rangeOffsetsInContainer(container, range);
+    const renderedLineStart = lineNumberAtOffset(container.innerText, offsets.start);
+    const renderedLineEnd = lineNumberAtOffset(container.innerText, offsets.end);
+    const anchor =
+      anchorFromSelection(selectedText, document.markdown_source, container.innerText, offsets.start, offsets.end) ??
+      anchorFromSelectionByTextMatch(
+        selectedText,
+        document.markdown_source,
+        container,
+        range,
+        renderedLineStart,
+        renderedLineEnd,
+      );
 
-    if (!anchor.text_fingerprint) {
+    if (!anchor) {
       setPanelError("Could not map selected text to a stable markdown anchor.");
       return;
     }
@@ -316,7 +328,7 @@ export function App() {
         id: thread.id,
         top,
         height,
-        label: `Lines ${thread.anchor.line_start}-${thread.anchor.line_end}`,
+        label: `Lines ${thread.anchor.formatted_line_start ?? thread.anchor.line_start}-${thread.anchor.formatted_line_end ?? thread.anchor.line_end}`,
         preview: latestMessage,
       };
     });
@@ -516,9 +528,9 @@ export function App() {
                   {selectionAnchor && (
                     <div className="selection-side-card">
                       <div className="selection-side-author">Steven Taylor</div>
-                      <p className="selection-side-meta">
-                        Lines {selectionAnchor.line_start}-{selectionAnchor.line_end}
-                      </p>
+                        <p className="selection-side-meta">
+                          Selected lines {selectionAnchor.formatted_line_start}-{selectionAnchor.formatted_line_end} (raw {selectionAnchor.line_start}-{selectionAnchor.line_end})
+                        </p>
                       <blockquote>{selectionAnchor.selected_text}</blockquote>
                       <textarea
                         value={inlineCommentBody}
@@ -564,7 +576,10 @@ export function App() {
                                   <strong>{latestMessage?.author || "Comment"}</strong>
                                   <span className={`thread-status ${thread.status}`}>{thread.status}</span>
                                 </div>
-                                <p className="thread-meta">Lines {thread.anchor.line_start}-{thread.anchor.line_end}</p>
+                                <p className="thread-meta">
+                                  Lines {thread.anchor.formatted_line_start ?? thread.anchor.line_start}-{thread.anchor.formatted_line_end ?? thread.anchor.line_end}
+                                  {thread.anchor.formatted_line_start ? ` (raw ${thread.anchor.line_start}-${thread.anchor.line_end})` : ""}
+                                </p>
                                 <p>{latestMessage?.body}</p>
                               </button>
                             </li>
@@ -598,7 +613,10 @@ export function App() {
                         <strong>{thread.id}</strong>
                         <span className={`thread-status ${thread.status}`}>{thread.status}</span>
                       </div>
-                      <p className="thread-meta">Anchor lines {thread.anchor.line_start}-{thread.anchor.line_end}</p>
+                      <p className="thread-meta">
+                        Anchor lines {thread.anchor.formatted_line_start ?? thread.anchor.line_start}-{thread.anchor.formatted_line_end ?? thread.anchor.line_end}
+                        {thread.anchor.formatted_line_start ? ` (raw ${thread.anchor.line_start}-${thread.anchor.line_end})` : ""}
+                      </p>
                       <p>{thread.messages[thread.messages.length - 1]?.body}</p>
                       {thread.status !== "resolved" && (
                         <button type="button" className="menu-item dark" onClick={() => void resolveThread(thread.id)}>Resolve</button>
@@ -644,40 +662,263 @@ export function App() {
   );
 }
 
-function anchorFromSelection(selectedText: string, markdownSource: string) {
+function anchorFromSelection(
+  selectedText: string,
+  markdownSource: string,
+  renderedText: string,
+  selectionStartOffset: number,
+  selectionEndOffset: number,
+) {
   const normalized = selectedText.replace(/\s+/g, " ").trim();
   if (!normalized) {
     return null;
   }
 
-  const sourceLower = markdownSource.toLowerCase();
-  const normalizedLower = normalized.toLowerCase();
-  let start = sourceLower.indexOf(normalizedLower);
-
-  if (start < 0) {
-    const token = normalized
-      .split(" ")
-      .find((part) => part.length >= 6)
-      ?.toLowerCase();
-    if (!token) {
-      return null;
-    }
-    start = sourceLower.indexOf(token);
-  }
-
-  if (start < 0) {
+  const safeRendered = renderedText.replace(/\r\n/g, "\n");
+  const renderedLineStart = safeRendered.slice(0, selectionStartOffset).split("\n").length;
+  const renderedLineEnd = safeRendered.slice(0, selectionEndOffset).split("\n").length;
+  const lineMap = buildRenderedToRawLineMap(safeRendered, markdownSource);
+  if (lineMap.size === 0) {
     return null;
   }
 
-  const end = Math.min(markdownSource.length-1, start + normalized.length - 1);
-  const lineStart = markdownSource.slice(0, start).split("\n").length;
-  const lineEnd = markdownSource.slice(0, end).split("\n").length;
+  const lineStart = estimateRawLine(renderedLineStart, lineMap);
+  const lineEnd = estimateRawLine(Math.max(renderedLineStart, renderedLineEnd), lineMap);
 
   return {
     line_start: lineStart,
     line_end: Math.max(lineStart, lineEnd),
+    formatted_line_start: renderedLineStart,
+    formatted_line_end: Math.max(renderedLineStart, renderedLineEnd),
     text_fingerprint: fingerprint(normalized),
   };
+}
+
+function rangeOffsetsInContainer(container: HTMLElement, range: Range): { start: number; end: number } {
+  const beforeRange = range.cloneRange();
+  beforeRange.selectNodeContents(container);
+  beforeRange.setEnd(range.startContainer, range.startOffset);
+
+  const beforeLength = beforeRange.toString().length;
+  const selectedLength = range.toString().length;
+  return {
+    start: Math.max(0, beforeLength),
+    end: Math.max(0, beforeLength + Math.max(0, selectedLength - 1)),
+  };
+}
+
+function anchorFromSelectionByTextMatch(
+  selectedText: string,
+  markdownSource: string,
+  container: HTMLElement,
+  range: Range,
+  renderedLineStart: number,
+  renderedLineEnd: number,
+) {
+  const normalized = selectedText.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const selectionRatio = selectionStartRatio(container, range);
+  const normalizedSource = normalizeWithIndexMap(markdownSource);
+  const normalizedNeedle = normalizeForMatch(normalized);
+  if (!normalizedNeedle) {
+    return null;
+  }
+
+  const candidates: Array<{ start: number; end: number; score: number }> = [];
+  let searchFrom = 0;
+  while (searchFrom <= normalizedSource.value.length) {
+    const next = normalizedSource.value.indexOf(normalizedNeedle, searchFrom);
+    if (next < 0) {
+      break;
+    }
+
+    const start = normalizedSource.indexMap[next] ?? 0;
+    const endIndex = next + normalizedNeedle.length - 1;
+    const end = normalizedSource.indexMap[Math.max(next, endIndex)] ?? start;
+    const ratio = markdownSource.length > 0 ? start / markdownSource.length : 0;
+    const score = Math.abs(ratio - selectionRatio);
+    candidates.push({ start, end, score });
+    searchFrom = next + 1;
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  candidates.sort((a, b) => a.score - b.score);
+  const best = candidates[0];
+
+  const lineStart = markdownSource.slice(0, best.start).split("\n").length;
+  const lineEnd = markdownSource.slice(0, best.end).split("\n").length;
+
+  return {
+    line_start: lineStart,
+    line_end: Math.max(lineStart, lineEnd),
+    formatted_line_start: renderedLineStart,
+    formatted_line_end: Math.max(renderedLineStart, renderedLineEnd),
+    text_fingerprint: fingerprint(normalized),
+  };
+}
+
+function lineNumberAtOffset(text: string, offset: number): number {
+  if (text.length === 0) {
+    return 1;
+  }
+  const safeOffset = Math.max(0, Math.min(offset, text.length));
+  return text.slice(0, safeOffset).split("\n").length;
+}
+
+function selectionStartRatio(container: HTMLElement, range: Range): number {
+  const offsets = rangeOffsetsInContainer(container, range);
+  const totalLength = Math.max(1, container.innerText.length);
+  return Math.max(0, Math.min(1, offsets.start / totalLength));
+}
+
+function buildRenderedToRawLineMap(renderedText: string, markdownSource: string): Map<number, number> {
+  const renderedLines = renderedText.split("\n");
+  const rawLines = markdownSource.replace(/\r\n/g, "\n").split("\n");
+
+  const renderedNorm = renderedLines.map((line) => normalizeLine(line));
+  const rawNorm = rawLines.map((line) => normalizeLine(line));
+
+  const n = renderedNorm.length;
+  const m = rawNorm.length;
+  const dp: number[][] = Array.from({ length: n + 1 }, () => Array<number>(m + 1).fill(0));
+
+  for (let i = 1; i <= n; i += 1) {
+    for (let j = 1; j <= m; j += 1) {
+      if (renderedNorm[i - 1] !== "" && renderedNorm[i - 1] === rawNorm[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  const pairs: Array<{ rendered: number; raw: number }> = [];
+  let i = n;
+  let j = m;
+  while (i > 0 && j > 0) {
+    if (renderedNorm[i - 1] !== "" && renderedNorm[i - 1] === rawNorm[j - 1]) {
+      pairs.push({ rendered: i, raw: j });
+      i -= 1;
+      j -= 1;
+      continue;
+    }
+    if (dp[i - 1][j] >= dp[i][j - 1]) {
+      i -= 1;
+    } else {
+      j -= 1;
+    }
+  }
+
+  pairs.reverse();
+  const lineMap = new Map<number, number>();
+  for (const pair of pairs) {
+    lineMap.set(pair.rendered, pair.raw);
+  }
+
+  return lineMap;
+}
+
+function estimateRawLine(renderedLine: number, lineMap: Map<number, number>): number {
+  if (lineMap.has(renderedLine)) {
+    return lineMap.get(renderedLine) ?? 1;
+  }
+
+  const mapped = Array.from(lineMap.entries()).sort((a, b) => a[0] - b[0]);
+  if (mapped.length === 0) {
+    return 1;
+  }
+
+  let lower: [number, number] | null = null;
+  let upper: [number, number] | null = null;
+
+  for (const entry of mapped) {
+    if (entry[0] < renderedLine) {
+      lower = entry;
+      continue;
+    }
+    if (entry[0] > renderedLine) {
+      upper = entry;
+      break;
+    }
+  }
+
+  if (lower && upper) {
+    const renderedSpan = upper[0] - lower[0];
+    const rawSpan = upper[1] - lower[1];
+    if (renderedSpan > 0) {
+      const ratio = (renderedLine - lower[0]) / renderedSpan;
+      return Math.max(1, Math.round(lower[1] + rawSpan * ratio));
+    }
+  }
+
+  if (lower) {
+    return Math.max(1, lower[1] + (renderedLine - lower[0]));
+  }
+  if (upper) {
+    return Math.max(1, upper[1] - (upper[0] - renderedLine));
+  }
+
+  return 1;
+}
+
+function normalizeLine(line: string): string {
+  return line.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function normalizeForMatch(value: string): string {
+  let out = "";
+  let inSpace = false;
+
+  for (const ch of value.toLowerCase()) {
+    const isAlphaNum = /[a-z0-9]/.test(ch);
+    if (isAlphaNum) {
+      out += ch;
+      inSpace = false;
+      continue;
+    }
+    if (!inSpace && out.length > 0) {
+      out += " ";
+      inSpace = true;
+    }
+  }
+
+  return out.trim();
+}
+
+function normalizeWithIndexMap(value: string): { value: string; indexMap: number[] } {
+  let out = "";
+  const indexMap: number[] = [];
+  let inSpace = false;
+
+  for (let i = 0; i < value.length; i += 1) {
+    const ch = value[i].toLowerCase();
+    const isAlphaNum = /[a-z0-9]/.test(ch);
+    if (isAlphaNum) {
+      out += ch;
+      indexMap.push(i);
+      inSpace = false;
+      continue;
+    }
+
+    if (!inSpace && out.length > 0) {
+      out += " ";
+      indexMap.push(i);
+      inSpace = true;
+    }
+  }
+
+  if (out.endsWith(" ")) {
+    out = out.slice(0, -1);
+    indexMap.pop();
+  }
+
+  return { value: out, indexMap };
 }
 
 function fingerprint(value: string): string {

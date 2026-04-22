@@ -50,8 +50,8 @@ func TestHTTPGitHubClient_CreateThreadPostsIssueComment(t *testing.T) {
 		if len(payload.Comments) != 1 || payload.Comments[0].Path != "docs-cms/rfcs/rfc-001.md" {
 			t.Fatalf("expected inline comment payload path, got %+v", payload.Comments)
 		}
-		if payload.Comments[0].NewPosition != 12 {
-			t.Fatalf("expected new_position 12, got %d", payload.Comments[0].NewPosition)
+		if payload.Comments[0].NewPosition != 13 {
+			t.Fatalf("expected new_position 13, got %d", payload.Comments[0].NewPosition)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": int64(9001)})
 	}))

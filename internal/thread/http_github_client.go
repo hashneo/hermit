@@ -39,7 +39,11 @@ func (c *HTTPGitHubClient) CreateThread(ctx context.Context, thread Thread) (str
 
 	body := thread.Messages[0].Body
 	commentBody := fmt.Sprintf("%s\n\n<!-- hermit-anchor lines:%d-%d fp:%s -->", body, thread.Anchor.LineStart, thread.Anchor.LineEnd, thread.Anchor.TextFingerprint)
-	commentID, err := c.postPullRequestInlineComment(ctx, baseURL, owner, repo, thread.PRNumber, token, thread.Anchor.FilePath, thread.Anchor.LineStart, commentBody)
+	commentLine := thread.Anchor.LineEnd
+	if commentLine <= 0 {
+		commentLine = thread.Anchor.LineStart
+	}
+	commentID, err := c.postPullRequestInlineComment(ctx, baseURL, owner, repo, thread.PRNumber, token, thread.Anchor.FilePath, commentLine, commentBody)
 	if err != nil {
 		return "", "", err
 	}

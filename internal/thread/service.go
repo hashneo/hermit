@@ -3,6 +3,8 @@ package thread
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,6 +25,8 @@ type Anchor struct {
 	AnchorID        string `json:"anchor_id"`
 	LineStart       int    `json:"line_start"`
 	LineEnd         int    `json:"line_end"`
+	FormattedLineStart int `json:"formatted_line_start,omitempty"`
+	FormattedLineEnd   int `json:"formatted_line_end,omitempty"`
 	TextFingerprint string `json:"text_fingerprint"`
 	FilePath        string `json:"file_path,omitempty"`
 }
@@ -88,21 +92,43 @@ type Service struct {
 	mu      sync.RWMutex
 	threads map[string]Thread
 	client  GitHubClient
+	store   ThreadStore
 	now     func() time.Time
 	idSeq   atomic.Int64
 }
 
 func NewService(client GitHubClient) *Service {
+	return NewServiceWithStore(client, nil)
+}
+
+func NewServiceWithStore(client GitHubClient, store ThreadStore) *Service {
 	if client == nil {
 		client = NewInMemoryGitHubClient()
 	}
 
+	threads := map[string]Thread{}
+	maxID := int64(1000)
+	if store != nil {
+		if loaded, err := store.Load(); err == nil {
+			for _, thread := range loaded {
+				if strings.TrimSpace(thread.ID) == "" {
+					continue
+				}
+				threads[thread.ID] = thread
+				if threadMax := maxThreadIDSequence(thread); threadMax > maxID {
+					maxID = threadMax
+				}
+			}
+		}
+	}
+
 	s := &Service{
-		threads: make(map[string]Thread),
+		threads: threads,
 		client:  client,
+		store:   store,
 		now:     time.Now,
 	}
-	s.idSeq.Store(1000)
+	s.idSeq.Store(maxID)
 	return s
 }
 
@@ -139,6 +165,8 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Thread, error)
 			AnchorID:        s.newID("anc"),
 			LineStart:       req.Anchor.LineStart,
 			LineEnd:         req.Anchor.LineEnd,
+			FormattedLineStart: req.Anchor.FormattedLineStart,
+			FormattedLineEnd:   req.Anchor.FormattedLineEnd,
 			TextFingerprint: req.Anchor.TextFingerprint,
 			FilePath:        req.Anchor.FilePath,
 		},
@@ -157,6 +185,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Thread, error)
 	s.mu.Lock()
 	s.threads[thread.ID] = thread
 	s.mu.Unlock()
+	s.persist()
 
 	go s.syncCreateThread(thread.ID)
 
@@ -188,6 +217,7 @@ func (s *Service) Reply(ctx context.Context, req ReplyRequest) (Thread, error) {
 	thread.Sync = Sync{State: SyncStatePending}
 	s.threads[req.ThreadID] = thread
 	s.mu.Unlock()
+	s.persist()
 
 	go s.syncReply(req.ThreadID, msg.ID)
 
@@ -208,6 +238,7 @@ func (s *Service) Resolve(ctx context.Context, req ResolveRequest) (Thread, erro
 	thread.Sync = Sync{State: SyncStatePending}
 	s.threads[req.ThreadID] = thread
 	s.mu.Unlock()
+	s.persist()
 
 	go s.syncResolve(req.ThreadID)
 
@@ -233,10 +264,9 @@ func (s *Service) syncCreateThread(threadID string) {
 
 	now := s.now().UTC()
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	thread, ok = s.threads[threadID]
 	if !ok {
+		s.mu.Unlock()
 		return
 	}
 
@@ -247,6 +277,8 @@ func (s *Service) syncCreateThread(threadID string) {
 	thread.Sync = Sync{State: SyncStateSynced, LastSynced: &now}
 	thread.UpdatedAt = now
 	s.threads[threadID] = thread
+	s.mu.Unlock()
+	s.persist()
 }
 
 func (s *Service) syncReply(threadID, messageID string) {
@@ -272,10 +304,9 @@ func (s *Service) syncReply(threadID, messageID string) {
 
 	now := s.now().UTC()
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	thread, ok := s.threads[threadID]
 	if !ok {
+		s.mu.Unlock()
 		return
 	}
 
@@ -288,6 +319,8 @@ func (s *Service) syncReply(threadID, messageID string) {
 	thread.Sync = Sync{State: SyncStateSynced, LastSynced: &now}
 	thread.UpdatedAt = now
 	s.threads[threadID] = thread
+	s.mu.Unlock()
+	s.persist()
 }
 
 func (s *Service) syncResolve(threadID string) {
@@ -307,25 +340,25 @@ func (s *Service) syncResolve(threadID string) {
 
 	now := s.now().UTC()
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	thread, ok := s.threads[threadID]
 	if !ok {
+		s.mu.Unlock()
 		return
 	}
 
 	thread.Sync = Sync{State: SyncStateSynced, LastSynced: &now}
 	thread.UpdatedAt = now
 	s.threads[threadID] = thread
+	s.mu.Unlock()
+	s.persist()
 }
 
 func (s *Service) markSyncFailed(threadID, code string) {
 	now := s.now().UTC()
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	thread, ok := s.threads[threadID]
 	if !ok {
+		s.mu.Unlock()
 		return
 	}
 
@@ -333,6 +366,8 @@ func (s *Service) markSyncFailed(threadID, code string) {
 	thread.Sync = Sync{State: SyncStateFailed, LastError: code, RetryCount: retryCount}
 	thread.UpdatedAt = now
 	s.threads[threadID] = thread
+	s.mu.Unlock()
+	s.persist()
 }
 
 func (s *Service) waitForGitHubThreadID(threadID string, timeout time.Duration) (string, bool) {
@@ -373,4 +408,48 @@ func (s *Service) messageByID(threadID, messageID string) (Message, bool) {
 
 func (s *Service) newID(prefix string) string {
 	return fmt.Sprintf("%s_%d", prefix, s.idSeq.Add(1))
+}
+
+func (s *Service) persist() {
+	if s.store == nil {
+		return
+	}
+
+	s.mu.RLock()
+	snapshot := make([]Thread, 0, len(s.threads))
+	for _, thread := range s.threads {
+		snapshot = append(snapshot, thread)
+	}
+	s.mu.RUnlock()
+
+	_ = s.store.Save(snapshot)
+}
+
+func maxThreadIDSequence(thread Thread) int64 {
+	maxID := extractSequence(thread.ID)
+	if anchorID := extractSequence(thread.Anchor.AnchorID); anchorID > maxID {
+		maxID = anchorID
+	}
+	for _, message := range thread.Messages {
+		if messageID := extractSequence(message.ID); messageID > maxID {
+			maxID = messageID
+		}
+	}
+	return maxID
+}
+
+func extractSequence(id string) int64 {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return 0
+	}
+	parts := strings.Split(id, "_")
+	if len(parts) < 2 {
+		return 0
+	}
+	value, err := strconv.ParseInt(parts[len(parts)-1], 10, 64)
+	if err != nil || value <= 0 {
+		return 0
+	}
+	return value
 }

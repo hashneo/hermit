@@ -16,4 +16,5 @@ bin/hermit
 /.tmp
 /hello-hermit
 /data/gitea/
+/data/hermit/
 /.tmp/gitea-token.env

@@ -63,6 +63,8 @@ export type Anchor = {
   anchor_id: string;
   line_start: number;
   line_end: number;
+  formatted_line_start?: number;
+  formatted_line_end?: number;
   text_fingerprint: string;
   file_path?: string;
 };
@@ -110,6 +112,8 @@ export type CreateThreadRequest = {
   anchor: {
     line_start: number;
     line_end: number;
+    formatted_line_start?: number;
+    formatted_line_end?: number;
     text_fingerprint: string;
     file_path?: string;
   };

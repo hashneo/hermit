@@ -39,6 +39,8 @@ func (h *Handler) CreateThread(w http.ResponseWriter, r *http.Request) {
 		Anchor struct {
 			LineStart       int    `json:"line_start"`
 			LineEnd         int    `json:"line_end"`
+			FormattedLineStart int `json:"formatted_line_start"`
+			FormattedLineEnd   int `json:"formatted_line_end"`
 			TextFingerprint string `json:"text_fingerprint"`
 			FilePath        string `json:"file_path"`
 		} `json:"anchor"`
@@ -61,6 +63,8 @@ func (h *Handler) CreateThread(w http.ResponseWriter, r *http.Request) {
 		Anchor: Anchor{
 			LineStart:       payload.Anchor.LineStart,
 			LineEnd:         payload.Anchor.LineEnd,
+			FormattedLineStart: payload.Anchor.FormattedLineStart,
+			FormattedLineEnd:   payload.Anchor.FormattedLineEnd,
 			TextFingerprint: payload.Anchor.TextFingerprint,
 			FilePath:        payload.Anchor.FilePath,
 		},

@@ -160,6 +160,8 @@ eval "$(cat .tmp/gitea-token-export.sh)"
 
 `make gitea-up` now automatically ensures a valid local token and prints an `eval` command you can run to load `GITEA_TOKEN` into your current shell session.
 
+Thread/comment state is now persisted across Hermit restarts at `./data/hermit/threads.json`.
+
 Seed details (`make gitea-seed-pr`):
 
 - Creates admin user: `gitea_admin` / `gitea_admin` (local test only)
