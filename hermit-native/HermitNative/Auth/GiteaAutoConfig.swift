@@ -108,10 +108,14 @@ enum GiteaAutoConfig {
         let tokenText  = try String(contentsOf: tokenURL,  encoding: .utf8)
 
         let token = try parseToken(from: tokenText)
-        let (baseURL, owner, repo, docsPath) = try parseConfig(configText, token: token)
+        let (_, owner, repo, docsPath) = try parseConfig(configText, token: token)
+
+        // The native app talks to the Hermit Go backend, not Gitea directly.
+        // GUI → Go server (:8080) → Gitea/GitHub
+        let hermitServerURL = parseListenAddress(configText) ?? "http://localhost:8080"
 
         return DetectedConfig(
-            baseURL:       baseURL,
+            baseURL:       hermitServerURL,
             pat:           token,
             owner:         owner,
             repo:          repo,
@@ -119,6 +123,24 @@ enum GiteaAutoConfig {
             rfcLabel:      "hermit:rfc-ready",
             resolvedFrom:  configURL.path
         )
+    }
+
+    // MARK: - Listen address parsing
+
+    /// Reads listen_address from hermit.yaml and converts it to an http:// URL.
+    /// e.g. ":8080" → "http://localhost:8080"
+    private static func parseListenAddress(_ yaml: String) -> String? {
+        for line in yaml.components(separatedBy: .newlines) {
+            let stripped = line.trimmingCharacters(in: .whitespaces)
+            if stripped.hasPrefix("listen_address:") {
+                if let raw = value(from: stripped, key: "listen_address:") {
+                    // raw may be ":8080" or "0.0.0.0:8080"
+                    let port = raw.components(separatedBy: ":").last ?? "8080"
+                    return "http://localhost:\(port)"
+                }
+            }
+        }
+        return nil
     }
 
     // MARK: - Token parsing
