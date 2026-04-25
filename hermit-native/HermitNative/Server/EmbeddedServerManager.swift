@@ -1,6 +1,8 @@
 import Foundation
 import Network
+#if os(macOS)
 import AppKit
+#endif
 #if HERMIT_EMBEDDED_SERVER
 import HermitServer
 #endif
@@ -61,6 +63,7 @@ final class EmbeddedServerManager: ObservableObject {
         errorMessage = nil
         appState.serverBaseURL = "http://127.0.0.1:\(p)"
         registerBonjour(port: p)
+        PairingAdvertiser.shared.restart()
 #else
         // Dev fallback: spawn Go server as a subprocess.
         startSubprocess(appState: appState)
@@ -86,6 +89,42 @@ final class EmbeddedServerManager: ObservableObject {
     // Runs the pre-built bin/hermit binary as a child process and polls until ready.
 
     private func startSubprocess(appState: AppState) {
+        let startMsg = "[\(Date())] [EmbeddedServerManager] startSubprocess called\n"
+        if let d = startMsg.data(using: .utf8), let fh = FileHandle(forWritingAtPath: "/tmp/hermit-native-debug.log") { fh.seekToEndOfFile(); fh.write(d); try? fh.close() }
+
+        let listenPort = 8080
+
+        // If the server is already running (e.g. launched separately via `make run`),
+        // adopt it immediately without spawning a second process.
+        Task {
+            let alreadyUp = await isPortResponding(port: listenPort)
+            if alreadyUp {
+                let m = "[\(Date())] [EmbeddedServerManager] server already running on port \(listenPort) — adopting\n"
+                if let d = m.data(using: .utf8), let fh = FileHandle(forWritingAtPath: "/tmp/hermit-native-debug.log") { fh.seekToEndOfFile(); fh.write(d); try? fh.close() }
+                await MainActor.run {
+                    self.port = listenPort
+                    self.errorMessage = nil
+                    appState.serverBaseURL = "http://127.0.0.1:\(listenPort)"
+                    self.registerBonjour(port: listenPort)
+                    PairingAdvertiser.shared.restart()
+                }
+                return
+            }
+
+            // Server not running — spawn the binary subprocess.
+            await MainActor.run {
+                self.spawnBinarySubprocess(appState: appState, listenPort: listenPort)
+            }
+        }
+    }
+
+    private func isPortResponding(port: Int) async -> Bool {
+        let url = URL(string: "http://127.0.0.1:\(port)/api/v1/health")!
+        return (try? await URLSession.shared.data(from: url)) != nil
+    }
+
+    @MainActor
+    private func spawnBinarySubprocess(appState: AppState, listenPort: Int) {
         guard let repoRoot = findRepoRoot() else {
             errorMessage = "Could not locate Hermit repo root to start server."
             return
@@ -122,7 +161,6 @@ final class EmbeddedServerManager: ObservableObject {
         serverProcess = process
 
         // Poll until the server responds then update AppState
-        let listenPort = 8080
         Task {
             await pollUntilReady(port: listenPort, timeout: 15)
             await MainActor.run {
@@ -130,6 +168,7 @@ final class EmbeddedServerManager: ObservableObject {
                 self.errorMessage = nil
                 appState.serverBaseURL = "http://127.0.0.1:\(listenPort)"
                 self.registerBonjour(port: listenPort)
+                PairingAdvertiser.shared.restart()
             }
         }
     }
