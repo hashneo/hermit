@@ -6,7 +6,7 @@ struct RootView: View {
 
     var body: some View {
         if appState.isAuthenticated {
-            RFCBrowserView()
+            iPadRootView()
         } else {
             SetupView()
         }

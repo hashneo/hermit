@@ -7,8 +7,11 @@ struct MenuBarContentView: View {
 
     var body: some View {
         if appState.isAuthenticated {
-            RFCBrowserView()
-                .frame(width: 480, height: 600)
+#if os(macOS)
+            MenuBarRFCBrowserView()
+#else
+            iPadRootView()
+#endif
         } else {
             SetupView()
         }
