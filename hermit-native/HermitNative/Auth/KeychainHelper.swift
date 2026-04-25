@@ -108,7 +108,7 @@ final class KeychainHelper {
 
     /// Returns all (peerName → token) pairs persisted in the Keychain.
     func loadPairedTokens() -> [String: String] {
-#if DEBUG
+#if DEBUG && os(macOS)
         return [:]
 #else
         let query: [CFString: Any] = [
@@ -134,7 +134,9 @@ final class KeychainHelper {
     }
 
     func savePairedToken(peerName: String, token: String) {
-#if !DEBUG
+#if DEBUG && os(macOS)
+        return
+#else
         guard let data = token.data(using: .utf8) else { return }
         let query: [CFString: Any] = [
             kSecClass:        kSecClassGenericPassword,
@@ -148,7 +150,9 @@ final class KeychainHelper {
     }
 
     func deletePairedToken(peerName: String) {
-#if !DEBUG
+#if DEBUG && os(macOS)
+        return
+#else
         let query: [CFString: Any] = [
             kSecClass:       kSecClassGenericPassword,
             kSecAttrService: "hermit.paired" as CFString,
@@ -190,13 +194,14 @@ final class KeychainHelper {
     // MARK: - Private helpers
 
     private func write(_ value: String?, key: Key) {
-#if !DEBUG
+#if DEBUG && os(macOS)
+        return  // Keychain no-op on macOS debug to avoid permission dialogs
+#else
         if let value { save(value, key: key) } else { delete(key: key) }
 #endif
     }
 
     private func save(_ value: String, key: Key) {
-#if !DEBUG
         guard let data = value.data(using: .utf8) else { return }
         let query: [CFString: Any] = [
             kSecClass:       kSecClassGenericPassword,
@@ -205,12 +210,11 @@ final class KeychainHelper {
         ]
         SecItemDelete(query as CFDictionary)
         SecItemAdd(query as CFDictionary, nil)
-#endif
     }
 
     private func read(key: Key) -> String? {
-#if DEBUG
-        return nil   // Debug: never read from Keychain
+#if DEBUG && os(macOS)
+        return nil   // macOS debug: never read from Keychain
 #else
         let query: [CFString: Any] = [
             kSecClass:       kSecClassGenericPassword,
@@ -230,8 +234,8 @@ final class KeychainHelper {
 
     @discardableResult
     private func delete(key: Key) -> Bool {
-#if DEBUG
-        return true   // Debug: no-op
+#if DEBUG && os(macOS)
+        return true   // macOS debug: no-op
 #else
         let query: [CFString: Any] = [
             kSecClass:       kSecClassGenericPassword,
