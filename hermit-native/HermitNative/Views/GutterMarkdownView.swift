@@ -28,6 +28,22 @@ struct GutterMarkdownView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    // MARK: - Quote handler
+    // Called from SelectableTextView when "Quote & Comment" is chosen.
+    // Selects the block, pre-fills compose with a GitHub blockquote, scrolls compose into view.
+    private func handleQuote(text: String, line: Int) {
+        let quoted = text
+            .components(separatedBy: "\n")
+            .map { "> \($0)" }
+            .joined(separator: "\n")
+        withAnimation(.easeInOut(duration: 0.15)) {
+            selectedLine = line
+            composeText = quoted + "\n\n"
+            submitError = nil
+        }
+        onLineTapped?(line)
+    }
+
     // MARK: - Per-block row
 
     @ViewBuilder
@@ -43,7 +59,9 @@ struct GutterMarkdownView: View {
                 gutterCell(line: line, count: count, isSelected: isSelected)
 
                 // Content
-                MarkdownBlockView(block: block)
+                MarkdownBlockView(block: block, onQuoteSelected: { text in
+                    handleQuote(text: text, line: line)
+                })
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 6)
                     .contentShape(Rectangle())
@@ -189,9 +207,12 @@ struct GutterMarkdownView: View {
 // MARK: - MarkdownBlockView
 // Thin wrapper that renders a single MarkdownBlock without the outer VStack/tap logic.
 // Extracted so GutterMarkdownView can compose it with its own tap handling.
+// Paragraphs, headings and blockquotes use SelectableTextView so OS-level text
+// selection + "Quote & Comment" menu action work natively.
 
 struct MarkdownBlockView: View {
     let block: MarkdownBlock
+    var onQuoteSelected: ((String) -> Void)? = nil
 
     private var codeBackground: Color {
 #if os(macOS)
@@ -206,8 +227,11 @@ struct MarkdownBlockView: View {
         case .heading(let level, let inlines, _):
             headingView(level: level, inlines: inlines)
         case .paragraph(let inlines, _):
-            Text(attributedString(inlines))
-                .fixedSize(horizontal: false, vertical: true)
+            SelectableTextView(
+                attributedText: inlines.nsAttributedString(),
+                onQuoteSelected: onQuoteSelected
+            )
+            .fixedSize(horizontal: false, vertical: true)
         case .codeBlock(let lang, let code, _):
             codeBlockView(language: lang, code: code)
         case .mermaidBlock(let source, _):
@@ -230,21 +254,24 @@ struct MarkdownBlockView: View {
     // MARK: Heading
     @ViewBuilder
     private func headingView(level: Int, inlines: [MarkdownInline]) -> some View {
-        let text = Text(attributedString(inlines))
-        switch level {
-        case 1:
+        let sizes: [Int: CGFloat] = [1: 28, 2: 22, 3: 18, 4: 16]
+        let size = sizes[level] ?? 14
+        let weight: NSFont.Weight = level <= 2 ? .semibold : .medium
+#if os(macOS)
+        let font = NSFont.systemFont(ofSize: size, weight: weight)
+#else
+        let font = UIFont.systemFont(ofSize: size, weight: UIFont.Weight(rawValue: weight.rawValue))
+#endif
+        let attrStr = inlines.nsAttributedString(font: font)
+
+        if level == 1 {
             VStack(alignment: .leading, spacing: 4) {
-                text.font(.system(size: 28, weight: .bold))
+                SelectableTextView(attributedText: attrStr, onQuoteSelected: onQuoteSelected)
                 Divider()
             }
-        case 2:
-            text.font(.system(size: 22, weight: .semibold)).padding(.top, 8)
-        case 3:
-            text.font(.system(size: 18, weight: .semibold)).padding(.top, 4)
-        case 4:
-            text.font(.system(size: 16, weight: .semibold))
-        default:
-            text.font(.system(size: 14, weight: .semibold)).foregroundStyle(.secondary)
+        } else {
+            SelectableTextView(attributedText: attrStr, onQuoteSelected: onQuoteSelected)
+                .padding(.top, level == 2 ? 8 : level == 3 ? 4 : 0)
         }
     }
 
@@ -287,7 +314,11 @@ struct MarkdownBlockView: View {
     private func blockquoteView(inlines: [MarkdownInline]) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Rectangle().fill(Color.accentColor.opacity(0.6)).frame(width: 3).cornerRadius(2)
-            Text(attributedString(inlines)).foregroundStyle(.secondary).italic().fixedSize(horizontal: false, vertical: true)
+            SelectableTextView(
+                attributedText: inlines.nsAttributedString(),
+                onQuoteSelected: onQuoteSelected
+            )
+            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 4)
     }

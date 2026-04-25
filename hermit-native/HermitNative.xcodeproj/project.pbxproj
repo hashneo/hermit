@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		88C952BF1FC4569AAA227167 /* GutterMarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DEF0D01EB6E30FF8CF74D70 /* GutterMarkdownView.swift */; };
+		AB7C0F2701C62D56AC09227C /* SelectableTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41AFAD009AFAE5101431EBE5 /* SelectableTextView.swift */; };
 		B001000A /* HermitNativeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000B /* HermitNativeApp.swift */; };
 		B001000C /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000D /* AppState.swift */; };
 		B001000E /* RFC.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000F /* RFC.swift */; };
@@ -48,6 +49,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		41AFAD009AFAE5101431EBE5 /* SelectableTextView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectableTextView.swift; sourceTree = "<group>"; };
 		702547F1AF611276712EA42C /* CommentStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CommentStore.swift; sourceTree = "<group>"; };
 		7DEF0D01EB6E30FF8CF74D70 /* GutterMarkdownView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GutterMarkdownView.swift; sourceTree = "<group>"; };
 		B001000B /* HermitNativeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitNativeApp.swift; sourceTree = "<group>"; };
@@ -222,6 +224,7 @@
 				B0010049 /* ThreadPanelView.swift */,
 				702547F1AF611276712EA42C /* CommentStore.swift */,
 				7DEF0D01EB6E30FF8CF74D70 /* GutterMarkdownView.swift */,
+				41AFAD009AFAE5101431EBE5 /* SelectableTextView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -339,6 +342,7 @@
 				B0010048 /* ThreadPanelView.swift in Sources */,
 				F51CA0CA0595C036D8E2D00B /* CommentStore.swift in Sources */,
 				88C952BF1FC4569AAA227167 /* GutterMarkdownView.swift in Sources */,
+				AB7C0F2701C62D56AC09227C /* SelectableTextView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
