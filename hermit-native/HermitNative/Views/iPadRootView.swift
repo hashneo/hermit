@@ -73,6 +73,9 @@ final class RFCStore: ObservableObject {
     }
 }
 
+// MARK: - hermit-3dc: iPadRootView — iOS only
+
+#if os(iOS)
 struct iPadRootView: View {
     @EnvironmentObject private var appState: AppState
 #if os(iOS)
@@ -84,7 +87,11 @@ struct iPadRootView: View {
     @State private var showSettings = false
     @State private var showRFCPicker = false   // portrait: RFC menu popover
     @State private var showThread = false       // portrait: thread sheet
+#if os(iOS)
     @State private var isLandscape: Bool = UIDevice.current.orientation.isLandscape
+#else
+    @State private var isLandscape: Bool = false
+#endif
 
     var body: some View {
         Group {
@@ -94,12 +101,14 @@ struct iPadRootView: View {
                 portraitLayout
             }
         }
+#if os(iOS)
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
             let o = UIDevice.current.orientation
             // Only flip on unambiguous landscape/portrait — ignore faceUp/faceDown/unknown
             if o.isLandscape { isLandscape = true }
             else if o.isPortrait { isLandscape = false }
         }
+#endif
         .task {
             guard let client = appState.makeAPIClient() else {
                 store.errorMessage = "No API client — check pairing or configuration."
@@ -313,6 +322,8 @@ struct iPadRootView: View {
 }
 
 // MARK: - Connection status bar
+
+#endif // os(iOS) — iPadRootView
 
 #if os(iOS)
 private struct ConnectionStatusBar: View {

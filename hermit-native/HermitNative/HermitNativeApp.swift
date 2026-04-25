@@ -49,16 +49,16 @@ struct HermitNativeApp: App {
                 .environmentObject(appState)
                 .environmentObject(pairingBrowser)
                 .task { pairingBrowser.start() }
+                // hermit-txn: handle hermit://rfc/<path> deep links on iPadOS
+                .onOpenURL { url in
+                    if let path = HermitActivity.rfcPath(from: url) {
+                        appState.pendingDeepLinkPath = path
+                    }
+                }
         }
         .onChange(of: appState.serverMode) { _, _ in
             KeychainHelper.shared.serverMode    = appState.serverMode
             KeychainHelper.shared.serverBaseURL = appState.serverBaseURL
-        }
-        // hermit-txn: handle hermit://rfc/<path> deep links on iPadOS
-        .onOpenURL { url in
-            if let path = HermitActivity.rfcPath(from: url) {
-                appState.pendingDeepLinkPath = path
-            }
         }
 #endif
     }

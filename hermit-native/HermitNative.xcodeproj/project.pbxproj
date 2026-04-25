@@ -11,6 +11,8 @@
 		AB7C0F2701C62D56AC09227C /* SelectableTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41AFAD009AFAE5101431EBE5 /* SelectableTextView.swift */; };
 		B001000A /* HermitNativeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000B /* HermitNativeApp.swift */; };
 		B001000C /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000D /* AppState.swift */; };
+		B001D004 /* HermitActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D001 /* HermitActivity.swift */; };
+		B001D002 /* SpotlightDonor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D003 /* SpotlightDonor.swift */; };
 		B001000E /* RFC.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000F /* RFC.swift */; };
 		B0010010 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010011 /* KeychainHelper.swift */; };
 		B0010012 /* GitHubAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010013 /* GitHubAPIClient.swift */; };
@@ -61,6 +63,8 @@
 		7DEF0D01EB6E30FF8CF74D70 /* GutterMarkdownView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GutterMarkdownView.swift; sourceTree = "<group>"; };
 		B001000B /* HermitNativeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitNativeApp.swift; sourceTree = "<group>"; };
 		B001000D /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		B001D001 /* HermitActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitActivity.swift; sourceTree = "<group>"; };
+		B001D003 /* SpotlightDonor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightDonor.swift; sourceTree = "<group>"; };
 		B001000F /* RFC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFC.swift; sourceTree = "<group>"; };
 		B0010011 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		B0010013 /* GitHubAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubAPIClient.swift; sourceTree = "<group>"; };
@@ -155,6 +159,8 @@
 			isa = PBXGroup;
 			children = (
 				B001000D /* AppState.swift */,
+				B001D001 /* HermitActivity.swift */,
+				B001D003 /* SpotlightDonor.swift */,
 				B001000F /* RFC.swift */,
 				B001B002 /* HermitModels.swift */,
 			);
@@ -343,6 +349,8 @@
 			files = (
 				B001000A /* HermitNativeApp.swift in Sources */,
 				B001000C /* AppState.swift in Sources */,
+				B001D004 /* HermitActivity.swift in Sources */,
+				B001D002 /* SpotlightDonor.swift in Sources */,
 				B001000E /* RFC.swift in Sources */,
 				B0010010 /* KeychainHelper.swift in Sources */,
 				B001004B /* GiteaAutoConfig.swift in Sources */,

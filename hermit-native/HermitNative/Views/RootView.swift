@@ -1,5 +1,6 @@
 import SwiftUI
 
+#if os(iOS)
 /// iPad root: shows SetupView until discovered, then the RFC browser.
 struct RootView: View {
     @EnvironmentObject private var appState: AppState
@@ -20,3 +21,4 @@ struct RootView: View {
         return false
     }
 }
+#endif
