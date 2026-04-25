@@ -77,9 +77,9 @@ final class RFCStore: ObservableObject {
 struct iPadRootView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var store = RFCStore()
+    @StateObject private var commentStore = CommentStore()
     @State private var selectedRFC: RFC? = nil
     @State private var columnVisibility = NavigationSplitViewVisibility.all
-    @State private var selectedText: String? = nil
     @State private var selectedLine: Int? = nil
 
     var body: some View {
@@ -95,20 +95,21 @@ struct iPadRootView: View {
             }
         } content: {
             if let rfc = selectedRFC {
-                RFCDetailView(rfc: rfc, onTextSelected: { text in
-                    selectedText = text
-                }, onLineTapped: { line in
+                RFCDetailView(rfc: rfc, commentStore: commentStore, onLineTapped: { line in
                     selectedLine = line
                 })
             } else {
                 ContentUnavailableView("Select an RFC", systemImage: "doc.text")
             }
         } detail: {
-            if let text = selectedText, let rfc = selectedRFC,
-               case .pullRequest(let pr) = rfc.source {
-                ThreadPanelView(prNumber: pr.number, selectedText: text, selectedLine: selectedLine)
+            if let rfc = selectedRFC, case .pullRequest(let pr) = rfc.source {
+                ThreadPanelView(prNumber: pr.number, selectedLine: selectedLine)
+                    .environmentObject(commentStore)
+            } else if selectedRFC != nil {
+                ContentUnavailableView("Main-branch RFC", systemImage: "doc.text",
+                    description: Text("Comments are only available on PR branches."))
             } else {
-                ContentUnavailableView("Select text to comment", systemImage: "bubble.left")
+                ContentUnavailableView("Select an RFC", systemImage: "bubble.left")
             }
         }
         .task {

@@ -1,14 +1,15 @@
 import SwiftUI
 
-// MARK: - hermit-ii0: RFCDetailView — WKWebView reading view with thread gutter markers
+// MARK: - hermit-ii0: RFCDetailView — native markdown viewer with gutter comment markers
 // hermit-8q5: Reading Mode — full-screen RFC view with swipe-to-restore sidebar
 
 struct RFCDetailView: View {
     let rfc: RFC
-    var onTextSelected: ((String) -> Void)? = nil
+    var commentStore: CommentStore? = nil
     var onLineTapped: ((Int) -> Void)? = nil
 
     @EnvironmentObject private var appState: AppState
+
     @State private var markdown: String = ""
     @State private var isLoading = true
     @State private var errorMessage: String? = nil
@@ -49,10 +50,18 @@ struct RFCDetailView: View {
     }
 
     private var rfcContentView: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            MarkdownRendererView(blocks: MarkdownParser.parse(markdown), onLineTapped: onLineTapped)
-                .padding(40)
-                .frame(maxWidth: 900, alignment: .leading)
+        // Always inject a CommentStore — use the provided one or a default no-op instance
+        let store = commentStore ?? CommentStore()
+        let gutterView = GutterMarkdownView(
+            blocks: MarkdownParser.parse(markdown),
+            onLineTapped: onLineTapped
+        )
+        return ScrollView(.vertical, showsIndicators: true) {
+            gutterView
+                .environmentObject(store)
+                .padding(.horizontal, 32)
+                .padding(.vertical, 40)
+                .frame(maxWidth: 940, alignment: .leading)
                 .frame(maxWidth: .infinity)
         }
     }
@@ -60,6 +69,7 @@ struct RFCDetailView: View {
     private func loadContent() async {
         isLoading = true
         errorMessage = nil
+
         guard let client = appState.makeAPIClient() else {
             errorMessage = "Not configured."
             isLoading = false
@@ -70,18 +80,36 @@ struct RFCDetailView: View {
             isLoading = false
             return
         }
+
+        let ref: String
+        switch rfc.source {
+        case .mainBranch:
+            ref = "main"
+        case .pullRequest(let pr):
+            ref = pr.headRef
+        }
+
         do {
-            let ref: String
-            switch rfc.source {
-            case .mainBranch:
-                ref = "main"
-            case .pullRequest(let pr):
-                ref = pr.headRef
-            }
             markdown = try await client.fetchRFCContent(path: rfc.path, ref: ref)
         } catch {
             errorMessage = error.localizedDescription
+            isLoading = false
+            return
         }
+
+        // Configure and load comments if this is a PR RFC
+        if case .pullRequest(let pr) = rfc.source, let store = commentStore {
+            store.configure(
+                client: client,
+                prNumber: pr.number,
+                commitSHA: pr.headSHA,
+                filePath: rfc.path
+            )
+            await store.load()
+        } else {
+            commentStore?.reset()
+        }
+
         isLoading = false
     }
 }

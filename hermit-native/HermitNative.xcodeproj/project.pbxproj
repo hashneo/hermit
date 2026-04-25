@@ -7,11 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		88C952BF1FC4569AAA227167 /* GutterMarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DEF0D01EB6E30FF8CF74D70 /* GutterMarkdownView.swift */; };
 		B001000A /* HermitNativeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000B /* HermitNativeApp.swift */; };
 		B001000C /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000D /* AppState.swift */; };
 		B001000E /* RFC.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000F /* RFC.swift */; };
 		B0010010 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010011 /* KeychainHelper.swift */; };
-		B001004B /* GiteaAutoConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001004C /* GiteaAutoConfig.swift */; };
 		B0010012 /* GitHubAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010013 /* GitHubAPIClient.swift */; };
 		B0010014 /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010015 /* AIProvider.swift */; };
 		B0010016 /* AppleIntelligenceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010017 /* AppleIntelligenceProvider.swift */; };
@@ -40,14 +40,20 @@
 		B0010044 /* RFCListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010045 /* RFCListView.swift */; };
 		B0010046 /* RFCPreviewPublishingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010047 /* RFCPreviewPublishingView.swift */; };
 		B0010048 /* ThreadPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010049 /* ThreadPanelView.swift */; };
+		B001004B /* GiteaAutoConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001004C /* GiteaAutoConfig.swift */; };
+		B001A001 /* MarkdownParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A002 /* MarkdownParser.swift */; };
+		B001A003 /* MarkdownRendererView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A004 /* MarkdownRendererView.swift */; };
+		B001A005 /* MermaidView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A006 /* MermaidView.swift */; };
+		F51CA0CA0595C036D8E2D00B /* CommentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 702547F1AF611276712EA42C /* CommentStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		702547F1AF611276712EA42C /* CommentStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CommentStore.swift; sourceTree = "<group>"; };
+		7DEF0D01EB6E30FF8CF74D70 /* GutterMarkdownView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GutterMarkdownView.swift; sourceTree = "<group>"; };
 		B001000B /* HermitNativeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitNativeApp.swift; sourceTree = "<group>"; };
 		B001000D /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		B001000F /* RFC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFC.swift; sourceTree = "<group>"; };
 		B0010011 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
-		B001004C /* GiteaAutoConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GiteaAutoConfig.swift; sourceTree = "<group>"; };
 		B0010013 /* GitHubAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubAPIClient.swift; sourceTree = "<group>"; };
 		B0010015 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
 		B0010017 /* AppleIntelligenceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleIntelligenceProvider.swift; sourceTree = "<group>"; };
@@ -77,6 +83,10 @@
 		B0010047 /* RFCPreviewPublishingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCPreviewPublishingView.swift; sourceTree = "<group>"; };
 		B0010049 /* ThreadPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadPanelView.swift; sourceTree = "<group>"; };
 		B001004A /* HermitNative.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HermitNative.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B001004C /* GiteaAutoConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GiteaAutoConfig.swift; sourceTree = "<group>"; };
+		B001A002 /* MarkdownParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownParser.swift; sourceTree = "<group>"; };
+		B001A004 /* MarkdownRendererView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRendererView.swift; sourceTree = "<group>"; };
+		B001A006 /* MermaidView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MermaidView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -188,6 +198,9 @@
 				B001002D /* WebViewRenderer.swift */,
 				B001002F /* MarkdownRenderer.swift */,
 				B0010031 /* BundledAssets.swift */,
+				B001A002 /* MarkdownParser.swift */,
+				B001A004 /* MarkdownRendererView.swift */,
+				B001A006 /* MermaidView.swift */,
 			);
 			path = WebView;
 			sourceTree = "<group>";
@@ -207,6 +220,8 @@
 				B0010045 /* RFCListView.swift */,
 				B0010047 /* RFCPreviewPublishingView.swift */,
 				B0010049 /* ThreadPanelView.swift */,
+				702547F1AF611276712EA42C /* CommentStore.swift */,
+				7DEF0D01EB6E30FF8CF74D70 /* GutterMarkdownView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -307,6 +322,9 @@
 				B001002C /* WebViewRenderer.swift in Sources */,
 				B001002E /* MarkdownRenderer.swift in Sources */,
 				B0010030 /* BundledAssets.swift in Sources */,
+				B001A001 /* MarkdownParser.swift in Sources */,
+				B001A003 /* MarkdownRendererView.swift in Sources */,
+				B001A005 /* MermaidView.swift in Sources */,
 				B0010032 /* SetupView.swift in Sources */,
 				B0010034 /* RootView.swift in Sources */,
 				B0010036 /* RFCBrowserView.swift in Sources */,
@@ -319,6 +337,8 @@
 				B0010044 /* RFCListView.swift in Sources */,
 				B0010046 /* RFCPreviewPublishingView.swift in Sources */,
 				B0010048 /* ThreadPanelView.swift in Sources */,
+				F51CA0CA0595C036D8E2D00B /* CommentStore.swift in Sources */,
+				88C952BF1FC4569AAA227167 /* GutterMarkdownView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -444,7 +464,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = HermitNative/HermitNative-Debug.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "HermitNative/HermitNative-Debug.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -456,13 +476,15 @@
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Hermit uses speech recognition to transcribe your voice into RFC text and comments.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportsDocumentBrowser = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 					"@executable_path/Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 15.2;
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.hashicorp.hermit-native;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.hashicorp.hermit-native";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "macosx iphonesimulator iphoneos";
 				SUPPORTS_MACCATALYST = NO;
@@ -470,8 +492,6 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
-				MACOSX_DEPLOYMENT_TARGET = 15.2;
 			};
 			name = Debug;
 		};
@@ -492,13 +512,15 @@
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Hermit uses speech recognition to transcribe your voice into RFC text and comments.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportsDocumentBrowser = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 					"@executable_path/Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 15.2;
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.hashicorp.hermit-native;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.hashicorp.hermit-native";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "macosx iphonesimulator iphoneos";
 				SUPPORTS_MACCATALYST = NO;
@@ -506,8 +528,6 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
-				MACOSX_DEPLOYMENT_TARGET = 15.2;
 			};
 			name = Release;
 		};
@@ -533,7 +553,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
 	};
 	rootObject = B0010070 /* Project object */;
 }
