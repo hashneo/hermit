@@ -80,9 +80,43 @@ browser.start(queue: .main)
 
 When a server is selected, `AppState.baseURL` is set to `"http://{host}:{port}"` and the selection is persisted to Keychain so it survives app restarts (the iPad reconnects automatically on next launch).
 
-### Security
+### Security — Multipeer Pairing Handshake
 
-Traffic on the local network is HTTP (not HTTPS) for zero-config simplicity. This is acceptable for a local trusted network. Remote mode (Mode 3) is expected to terminate TLS at the server or a reverse proxy. A future RFC may add mutual TLS or token-based auth for local network mode.
+Local network traffic is HTTP (not HTTPS) for zero-config simplicity. To prevent unauthorised clients on the same WiFi from connecting, access is gated by a per-device bearer token exchanged during a one-time Multipeer Connectivity pairing handshake.
+
+#### Pairing Flow
+
+```text
+iPad                                    Mac
+  |                                      |
+  |-- MCNearbyServiceBrowser discovers ->|
+  |                                      |
+  |<------- MCInvitation received -------|  (user sees "Steven's iPad wants to connect")
+  |                                      |
+  |       [User taps Accept on Mac]      |
+  |                                      |
+  |<========= MCSession established ====>|
+  |                                      |
+  |<-- { "token": "<random 256-bit>" }---|  (Mac generates, sends over encrypted peer channel)
+  |                                      |
+  | Store token in Keychain              |  Mac stores token mapped to iPad's MCPeerID
+  |                                      |
+  |========= MCSession closed ==========>|  (pairing complete, peer channel torn down)
+  |                                      |
+  |-- HTTP Bearer <token> -------------->|  (all subsequent API calls use HTTP + token)
+```
+
+#### Implementation
+
+- **Mac (`PairingAdvertiser`):** `MCNearbyServiceAdvertiser` with service type `hermit-pair`. On invitation received, presents a system-style confirmation alert: *"Steven's iPad wants to connect to Hermit."* On accept, generates a `256-bit` random token via `SecRandomCopyBytes`, sends it as JSON over the `MCSession` data channel, stores `(peerID → token)` in an in-memory map that the Go server middleware checks.
+- **iPad (`PairingBrowser`):** `MCNearbyServiceBrowser` with the same service type. Discovers the Mac, sends an invitation, waits for session establishment, reads the token from the received data, stores it in Keychain under `hermit.local-token`.
+- **Go server middleware:** A new auth middleware checks the `Authorization: Bearer <token>` header against the in-memory token map for local network mode. Requests without a valid token receive `401`.
+- **Token lifetime:** Tokens persist in the Mac's in-memory map for the duration of the app session. Quitting and relaunching the Mac app invalidates all local tokens — paired iPads must re-pair. A future enhancement may persist tokens to the Mac's Keychain for session survival across restarts.
+- **Revocation:** A paired device list in the Server settings tab on Mac shows all currently paired iPads by `MCPeerID` display name, with a "Revoke" button per device.
+
+#### Why Not iCloud Keychain Shared Secret
+
+iCloud Keychain sync would share a token silently across all devices on the same Apple ID — no explicit consent, no per-device revocation. Multipeer pairing gives the Mac owner a visible trust gesture and per-device control, which is the right model for a server accepting inbound connections.
 
 ## Mode 3: Remote (macOS and iPadOS)
 
@@ -124,7 +158,7 @@ A new **Server** tab is added to `SettingsView`:
 ```
 
 - **Embedded** tab is only shown on macOS.
-- **Local Network** tab shows Bonjour-discovered servers with live scanning indicator.
+- **Local Network** tab shows Bonjour-discovered servers with live scanning indicator. Paired servers show a lock icon; unpaired servers show a "Pair" button that initiates the Multipeer handshake.
 - **Remote** tab shows a URL field and a validate button.
 - The active server's connection status (green/red dot) is shown in the Account settings tab.
 
@@ -138,6 +172,7 @@ The following entitlements are required:
 | `com.apple.security.network.client` | macOS + iOS | Outbound HTTP to local/remote server |
 | `com.apple.developer.networking.multicast` | iOS | Bonjour service discovery (`NWBrowser`) |
 | `NSLocalNetworkUsageDescription` | iOS Info.plist | Required for local network access permission prompt |
+| `com.apple.developer.nearby-interaction` | macOS + iOS | Multipeer Connectivity pairing handshake |
 
 # Drawbacks
 
@@ -171,10 +206,10 @@ Use TinyGo or standard Go's WASM target to run server logic in a WKWebView on iP
 - Should the embedded server port be fixed (e.g. `8765`) or dynamically assigned? Dynamic avoids port conflicts but requires the Bonjour TXT record to carry the port for discovery.
 - Should the Mac advertise itself only when the app is in the foreground, or persistently as a background service (using a Launch Agent)?
 - What is the upgrade path when the Go server API version changes and an iPad is still running an older client? Version negotiation via the Bonjour TXT record `version` field is sketched above but not fully designed.
-- Should the PAT be sent from the iPad to the Mac server over the local network? This requires the local network channel to be trusted. An alternative is for the Mac to use its own stored PAT on behalf of the iPad, which requires a shared GitHub identity or a service account.
+- Should paired tokens survive Mac app restarts (persisted to Keychain) or require re-pairing each session?
 
 # Future Possibilities
 
-- Multipeer Connectivity as a fallback when WiFi is unavailable (works over Bluetooth and Apple Wireless Direct Link).
+- Multipeer Connectivity is already used for pairing; it could serve as a full transport fallback when WiFi is unavailable (works over Bluetooth and Apple Wireless Direct Link).
 - Remote mode with SSO: replace PAT with an OAuth flow so the hosted server holds the GitHub credentials and devices authenticate with Hermit accounts instead.
 - Live collaboration: multiple iPads connected to the same server instance see real-time comment updates via Server-Sent Events or WebSocket.
