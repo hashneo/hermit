@@ -15,9 +15,38 @@ struct SetupView: View {
     @State private var pat:        String = ""
     @State private var isWorking   = false
     @State private var statusMessage: StatusMessage? = nil
+    @State private var showSettings = false
     @FocusState private var patFieldFocused: Bool
 
     var body: some View {
+        NavigationStack {
+            setupBody
+#if os(iOS)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { showSettings = true } label: {
+                            Image(systemName: "gear")
+                        }
+                    }
+                }
+                .sheet(isPresented: $showSettings) {
+                    NavigationStack {
+                        SettingsView()
+                            .environmentObject(appState)
+                            .navigationTitle("Settings")
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    Button("Done") { showSettings = false }
+                                }
+                            }
+                    }
+                }
+#endif
+        }
+    }
+
+    private var setupBody: some View {
         VStack(spacing: 24) {
             // ── Header ────────────────────────────────────────────────────
             VStack(spacing: 8) {
@@ -79,7 +108,7 @@ struct SetupView: View {
 #if os(macOS)
         .frame(width: 420)
 #endif
-    }
+    }   // end setupBody
 
     // MARK: - Connect
 

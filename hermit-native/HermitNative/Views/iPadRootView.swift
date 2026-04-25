@@ -75,11 +75,15 @@ final class RFCStore: ObservableObject {
 
 struct iPadRootView: View {
     @EnvironmentObject private var appState: AppState
+#if os(iOS)
+    @EnvironmentObject private var pairingBrowser: PairingBrowser
+#endif
     @StateObject private var store = RFCStore()
     @StateObject private var commentStore = CommentStore()
     @State private var selectedRFC: RFC? = nil
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @State private var selectedLine: Int? = nil
+    @State private var showSettings = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -87,9 +91,38 @@ struct iPadRootView: View {
                 await store.load()
             }
             .navigationTitle("Hermit")
+            .overlay {
+                if let err = store.errorMessage {
+                    ContentUnavailableView("Could not load RFCs",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(err))
+                } else if store.rfcs.isEmpty && !store.isLoading {
+                    ContentUnavailableView("No RFCs", systemImage: "doc.text")
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .automatic) {
                     if store.isLoading { ProgressView().controlSize(.small) }
+                }
+                ToolbarItem(placement: .automatic) {
+                    Button { showSettings = true } label: {
+                        Image(systemName: "gear")
+                    }
+                }
+            }
+            .sheet(isPresented: $showSettings) {
+                NavigationStack {
+                    SettingsView()
+                        .environmentObject(appState)
+                        .navigationTitle("Settings")
+#if os(iOS)
+                        .navigationBarTitleDisplayMode(.inline)
+#endif
+                        .toolbar {
+                            ToolbarItem(placement: .automatic) {
+                                Button("Done") { showSettings = false }
+                            }
+                        }
                 }
             }
         } content: {
@@ -112,10 +145,67 @@ struct iPadRootView: View {
             }
         }
         .task {
+            guard let client = appState.makeAPIClient() else {
+                store.errorMessage = "No API client — check pairing or configuration."
+                return
+            }
+            store.configure(client: client, docsPath: appState.docsPath)
+            await store.load()
+        }
+        .onChange(of: appState.serverBaseURL) { _, _ in
             if let client = appState.makeAPIClient() {
                 store.configure(client: client, docsPath: appState.docsPath)
+                Task { await store.load() }
             }
-            await store.load()
+        }
+        .safeAreaInset(edge: .bottom) {
+#if os(iOS)
+            ConnectionStatusBar(appState: appState, pairingBrowser: pairingBrowser)
+#endif
         }
     }
 }
+
+// MARK: - Connection status bar
+
+#if os(iOS)
+private struct ConnectionStatusBar: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject var pairingBrowser: PairingBrowser
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 8, height: 8)
+            Text(statusText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            if !appState.serverBaseURL.isEmpty {
+                Text(appState.serverBaseURL)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(.bar)
+    }
+
+    private var statusColor: Color {
+        if appState.serverBaseURL.isEmpty { return .red }
+        if !appState.localNetworkToken.isEmpty { return .green }
+        return .orange
+    }
+
+    private var statusText: String {
+        if appState.serverBaseURL.isEmpty {
+            return pairingBrowser.discoveredMacs.isEmpty ? "Searching…" : "Mac found — not paired"
+        }
+        if appState.localNetworkToken.isEmpty { return "Connected — not paired" }
+        return "Connected"
+    }
+}
+#endif

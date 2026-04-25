@@ -6,17 +6,20 @@ struct MenuBarContentView: View {
     @EnvironmentObject private var appState: AppState
 
     var body: some View {
+#if os(macOS)
         if appState.isAuthenticated {
             MenuBarRFCListView()
         } else {
             SetupView()
         }
+#endif
     }
 }
 
 #if os(macOS)
 struct MenuBarRFCListView: View {
     @EnvironmentObject private var appState: AppState
+    @ObservedObject private var advertiser = PairingAdvertiser.shared
     @StateObject private var store = RFCStore()
     @State private var searchText = ""
 
@@ -27,6 +30,32 @@ struct MenuBarRFCListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // ── Pending pairing invitation ─────────────────────────────────
+            if let invite = advertiser.pendingInvitation {
+                VStack(spacing: 6) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "ipad")
+                            .foregroundStyle(Color.accentColor)
+                        Text("\(invite.peerName) wants to pair")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        Spacer()
+                    }
+                    HStack(spacing: 8) {
+                        Button("Deny") { invite.decline() }
+                            .buttonStyle(.bordered)
+                            .tint(.red)
+                        Button("Allow") { invite.accept() }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.green)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                .padding(12)
+                .background(Color.accentColor.opacity(0.08))
+                Divider()
+            }
+
             // ── Toolbar ───────────────────────────────────────────────────
             HStack {
                 Text("Hermit")
@@ -86,7 +115,6 @@ struct MenuBarRFCListView: View {
                     LazyVStack(spacing: 0) {
                         ForEach(filtered) { rfc in
                             MenuBarRFCRow(rfc: rfc) {
-                                // Close the menu bar popover first, then open the window
                                 NSApplication.shared.keyWindow?.close()
                                 RFCViewerWindowManager.shared.open(rfc: rfc, appState: appState)
                             }

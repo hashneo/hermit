@@ -92,6 +92,8 @@ private struct ServerSettingsTab: View {
                 localNetworkSection
             case .remote:
                 remoteSection
+            default:
+                EmptyView()
             }
         }
         .formStyle(.grouped)
@@ -130,6 +132,8 @@ private struct ServerSettingsTab: View {
         case .remote(let url):
             appState.serverBaseURL = url
             KeychainHelper.shared.serverBaseURL = url
+        default:
+            break
         }
     }
 
@@ -380,19 +384,19 @@ private struct PairedDevicesSection: View {
 
 #if os(iOS)
 private struct PairingBrowserSection: View {
-    @StateObject private var browser = PairingBrowser()
+    @EnvironmentObject private var browser: PairingBrowser
 
     var body: some View {
         if browser.isPaired {
             Label("Paired", systemImage: "checkmark.shield.fill")
                 .foregroundStyle(.green)
         } else {
-            Button("Pair with Mac…") { browser.start() }
-
             if !browser.discoveredMacs.isEmpty {
                 ForEach(browser.discoveredMacs, id: \.displayName) { peer in
-                    Button(peer.displayName) { browser.invite(peer: peer) }
+                    Button("Pair with \(peer.displayName)…") { browser.invite(peer: peer) }
                 }
+            } else {
+                Text("Scanning for Macs…").foregroundStyle(.secondary)
             }
 
             if !browser.pairingStatus.isEmpty {
