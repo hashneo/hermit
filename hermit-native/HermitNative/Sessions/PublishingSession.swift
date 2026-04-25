@@ -7,12 +7,12 @@ import Foundation
 final class PublishingSession: ObservableObject {
 
     enum Step: String, CaseIterable {
-        case idle         = "Idle"
+        case idle           = "Idle"
         case creatingBranch = "Creating branch…"
         case committingFile = "Committing file…"
-        case openingPR    = "Opening pull request…"
-        case success      = "Published!"
-        case failed       = "Failed"
+        case openingPR      = "Opening pull request…"
+        case success        = "Published!"
+        case failed         = "Failed"
     }
 
     @Published var currentStep: Step = .idle
@@ -20,13 +20,15 @@ final class PublishingSession: ObservableObject {
     @Published var publishedPR: RFCPullRequest? = nil
     @Published var progress: Double = 0  // 0–1
 
-    private let client: GitHubAPIClient
-    private let config: GitHubAPIClient.Config
+    private let client: any HermitClientProtocol
+    private let docsPath: String
+    private let rfcLabel: String
     private let maxRetries = 3
 
-    init(client: GitHubAPIClient, config: GitHubAPIClient.Config) {
-        self.client = client
-        self.config = config
+    init(client: any HermitClientProtocol, docsPath: String, rfcLabel: String) {
+        self.client   = client
+        self.docsPath = docsPath
+        self.rfcLabel = rfcLabel
     }
 
     // MARK: - Publish
@@ -49,21 +51,21 @@ final class PublishingSession: ObservableObject {
                 markdown: markdown, rfcNumber: number, authorLogin: authorLogin)
 
             // Step 3: create branch
-            let baseSHA = try await withRetry { [weak self] in
-                try await self!.client.getMainBranchSHA()
+            let baseSHA = try await withRetry { [self] in
+                try await self.client.getMainBranchSHA()
             }
             let branch = RFCPublishingHelpers.branchName(rfcTitle: rfcTitle, rfcNumber: number)
-            try await withRetry { [weak self] in
-                try await self!.client.createBranch(name: branch, fromSHA: baseSHA)
+            try await withRetry { [self] in
+                try await self.client.createBranch(name: branch, fromSHA: baseSHA)
             }
             advance(to: .committingFile, progress: 0.45)
 
             // Step 4: commit file
             let path = RFCPublishingHelpers.filePath(
-                docsPath: config.docsPath, rfcNumber: number, rfcTitle: rfcTitle)
+                docsPath: docsPath, rfcNumber: number, rfcTitle: rfcTitle)
             let commitMessage = "docs(rfc): add \(String(format: "rfc-%03d", number)) \(rfcTitle)"
-            try await withRetry { [weak self] in
-                _ = try await self!.client.commitFile(
+            try await withRetry { [self] in
+                _ = try await self.client.commitFile(
                     branch: branch, path: path,
                     content: enriched, message: commitMessage)
             }
@@ -72,10 +74,10 @@ final class PublishingSession: ObservableObject {
             // Step 5: open PR
             let prBody = "## \(rfcTitle)\n\nCreated via Hermit native app.\n\n" +
                          "<!-- hermit:rfc-ready -->"
-            let pr = try await withRetry { [weak self] in
-                try await self!.client.createPR(
+            let pr = try await withRetry { [self] in
+                try await self.client.createPR(
                     title: rfcTitle, body: prBody,
-                    headBranch: branch, label: self!.config.rfcLabel)
+                    headBranch: branch, label: rfcLabel)
             }
 
             publishedPR = pr
@@ -108,9 +110,8 @@ final class PublishingSession: ObservableObject {
                 return try await operation()
             } catch {
                 lastError = error
-                // Don't retry auth or not-found errors
-                if case GitHubAPIClient.APIError.unauthorized = error { throw error }
-                if case GitHubAPIClient.APIError.notFound = error { throw error }
+                if case HermitAPIError.httpError(let code, _) = error,
+                   code == 401 || code == 404 { throw error }
                 let delay = UInt64(pow(2.0, Double(attempt))) * 500_000_000
                 try await Task.sleep(nanoseconds: delay)
             }

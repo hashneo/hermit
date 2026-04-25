@@ -5,7 +5,7 @@ import SwiftUI
 // Owns all PR review comments for the currently-viewed RFC.
 // Shared via EnvironmentObject between RFCDetailView, GutterMarkdownView and ThreadPanelView.
 // hermit-l00: migrated to HermitClientProtocol so it works with both
-//             HermitAPIClient (all production modes) and GitHubAPIClient (debug standalone).
+// All API calls go through HermitAPIClient (any HermitClientProtocol).
 
 @MainActor
 final class CommentStore: ObservableObject {

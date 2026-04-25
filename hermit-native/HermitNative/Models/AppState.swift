@@ -47,7 +47,7 @@ enum ServerMode: Codable, Equatable, Hashable {
 @MainActor
 final class AppState: ObservableObject {
     @Published var isAuthenticated: Bool
-    @Published var baseURL: String        // GitHub / Gitea API base URL
+    @Published var baseURL: String        // Hermit server base URL (legacy field, superseded by serverBaseURL)
     @Published var repoOwner: String
     @Published var repoName: String
     @Published var docsPath: String
@@ -63,22 +63,6 @@ final class AppState: ObservableObject {
     private let keychain = KeychainHelper.shared
 
     init() {
-#if DEBUG
-        do {
-            let detected = try GiteaAutoConfig.detect()
-            isAuthenticated = true
-            baseURL         = detected.baseURL
-            repoOwner       = detected.owner
-            repoName        = detected.repo
-            docsPath        = detected.docsPath
-            rfcLabel        = detected.rfcLabel
-            pat             = detected.pat
-            debugLog("loaded from config — \(detected.owner)/\(detected.repo) @ \(detected.baseURL)")
-            return
-        } catch {
-            debugLog("GiteaAutoConfig.detect() FAILED — \(error)")
-        }
-#endif
         let kc = KeychainHelper.shared
         isAuthenticated = kc.isConfigured
         baseURL         = kc.baseURL   ?? ""
@@ -89,17 +73,6 @@ final class AppState: ObservableObject {
         pat             = kc.pat       ?? ""
         serverMode      = kc.serverMode ?? .embeddedLocal
         serverBaseURL   = kc.serverBaseURL ?? ""
-    }
-
-    /// Applies a detected config into memory (used by SetupView in release).
-    func apply(_ config: GiteaAutoConfig.DetectedConfig) {
-        isAuthenticated = true
-        baseURL   = config.baseURL
-        repoOwner = config.owner
-        repoName  = config.repo
-        docsPath  = config.docsPath
-        rfcLabel  = config.rfcLabel
-        pat       = config.pat
     }
 
     /// Refreshes published state from the Keychain (used by SetupView after saving).
@@ -115,40 +88,25 @@ final class AppState: ObservableObject {
         serverBaseURL = keychain.serverBaseURL ?? ""
     }
 
-    // MARK: - API client factory (hermit-u1k)
+    // MARK: - API client factory
 
-    /// Returns the appropriate API client for the current server mode.
+    /// Returns a HermitAPIClient aimed at the configured server URL, or nil
+    /// if authentication or a server URL is not yet set.
     ///
-    /// - embeddedLocal / localNetwork / remote: returns a HermitAPIClient
-    ///   hitting `serverBaseURL`.
-    /// - Falls back to GitHubAPIClient in DEBUG if no serverBaseURL is set
-    ///   (standalone development against Gitea).
+    /// All GitHub interactions flow through the Go backend — there is no
+    /// direct GitHub API fallback in the native client.
     func makeAPIClient() -> (any HermitClientProtocol)? {
-        guard isAuthenticated, !pat.isEmpty else { return nil }
+        guard isAuthenticated, !pat.isEmpty, !serverBaseURL.isEmpty else { return nil }
 
-        // Use HermitAPIClient if we have a resolved server URL
-        if !serverBaseURL.isEmpty {
-            let cfg = HermitAPIClient.Config(
-                baseURL:  serverBaseURL,
-                owner:    repoOwner,
-                repo:     repoName,
-                docsPath: docsPath,
-                rfcLabel: rfcLabel,
-                pat:      pat
-            )
-            return HermitAPIClient(config: cfg)
-        }
-
-        // Fallback: direct GitHub/Gitea client (debug standalone, or pre-server-start)
-        let cfg = GitHubAPIClient.Config(
-            baseURL:  baseURL,
+        let cfg = HermitAPIClient.Config(
+            baseURL:  serverBaseURL,
             owner:    repoOwner,
             repo:     repoName,
             docsPath: docsPath,
             rfcLabel: rfcLabel,
             pat:      pat
         )
-        return GitHubAPIClient(config: cfg)
+        return HermitAPIClient(config: cfg)
     }
 
     // MARK: - Display helpers

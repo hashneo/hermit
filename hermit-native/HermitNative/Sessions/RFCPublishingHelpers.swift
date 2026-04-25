@@ -8,10 +8,8 @@ enum RFCPublishingHelpers {
 
     // MARK: - RFC number determination (hermit-9at)
 
-    /// Scans existing RFC files in the repo to find the next rfc-NNN number.
-    /// Retries up to `maxRetries` times if a concurrent PR creates the same number.
     static func nextRFCNumber(
-        client: GitHubAPIClient,
+        client: any HermitClientProtocol,
         maxRetries: Int = 3
     ) async throws -> Int {
         for attempt in 0..<maxRetries {
@@ -19,13 +17,11 @@ enum RFCPublishingHelpers {
             let usedNumbers = files.compactMap { rfcNumber(from: $0.name) }
             let candidate = (usedNumbers.max() ?? 0) + 1
 
-            // Small random back-off on retry to reduce collision probability
             if attempt > 0 {
-                let delay = UInt64(attempt) * 500_000_000  // 0.5s per retry
+                let delay = UInt64(attempt) * 500_000_000
                 try await Task.sleep(nanoseconds: delay)
             }
 
-            // Re-fetch to confirm the number is still available
             let recheck = try await client.listMainBranchRFCs()
             let recheckNumbers = recheck.compactMap { rfcNumber(from: $0.name) }
             if !recheckNumbers.contains(candidate) {
@@ -36,7 +32,6 @@ enum RFCPublishingHelpers {
     }
 
     private static func rfcNumber(from filename: String) -> Int? {
-        // Matches rfc-001, rfc-042, rfc-123, etc.
         let pattern = #"^rfc-0*(\d+)"#
         guard let range = filename.range(of: pattern, options: .regularExpression),
               let numRange = filename.range(of: #"(\d+)"#, options: .regularExpression,
@@ -54,7 +49,6 @@ enum RFCPublishingHelpers {
 
     // MARK: - Frontmatter enrichment (hermit-cim)
 
-    /// Enriches or injects YAML frontmatter fields: id, author, created, doc_uuid.
     static func enrichFrontmatter(
         markdown: String,
         rfcNumber: Int,
@@ -71,17 +65,15 @@ enum RFCPublishingHelpers {
         doc_uuid: \(docUUID)
         """
 
-        // If frontmatter block exists, inject fields before closing ---
         if markdown.hasPrefix("---") {
             let lines = markdown.components(separatedBy: "\n")
             var result: [String] = []
             var closingFound = false
             for (i, line) in lines.enumerated() {
                 if i > 0 && line.trimmingCharacters(in: .whitespaces) == "---" && !closingFound {
-                    // Inject before closing delimiter
                     for field in newFields.components(separatedBy: "\n") {
-                        let key = field.components(separatedBy: ":").first?.trimmingCharacters(in: .whitespaces) ?? ""
-                        // Don't overwrite existing fields
+                        let key = field.components(separatedBy: ":").first?
+                            .trimmingCharacters(in: .whitespaces) ?? ""
                         let alreadyPresent = result.contains { $0.hasPrefix("\(key):") }
                         if !alreadyPresent { result.append(field) }
                     }
@@ -92,11 +84,10 @@ enum RFCPublishingHelpers {
             return result.joined(separator: "\n")
         }
 
-        // No frontmatter — prepend a new block
         return "---\n\(newFields)\n---\n\n\(markdown)"
     }
 
-    // MARK: - Branch name helper
+    // MARK: - Helpers
 
     static func branchName(rfcTitle: String, rfcNumber: Int) -> String {
         let slug = rfcTitle
@@ -107,8 +98,6 @@ enum RFCPublishingHelpers {
             .joined(separator: "-")
         return String(format: "rfc/%03d-%@", rfcNumber, slug)
     }
-
-    // MARK: - File path helper
 
     static func filePath(docsPath: String, rfcNumber: Int, rfcTitle: String) -> String {
         let slug = rfcTitle
