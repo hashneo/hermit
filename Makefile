@@ -163,7 +163,7 @@ native-clean: ## Clean the native app build artifacts
 	rm -rf $(NATIVE_BUILD_DIR) $(NATIVE_APP_DEST)
 	$(XCODE) -project $(NATIVE_PROJECT) -scheme $(NATIVE_SCHEME) clean 2>/dev/null || true
 
-native-open: gomobile-build native-build-macos ## Build xcframework + macOS app, then launch
+native-open: build gomobile-build native-build-macos ## Build Go binary + xcframework + macOS app, then launch
 	@pkill -x HermitNative 2>/dev/null || true
 	@sleep 0.5
 	@open $(NATIVE_APP_DEST)

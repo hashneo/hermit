@@ -46,6 +46,9 @@ enum ServerMode: Codable, Equatable, Hashable {
 /// Central application state shared across all views via @EnvironmentObject.
 @MainActor
 final class AppState: ObservableObject {
+    /// Shared singleton used by HermitNativeApp so AppState is ready before SwiftUI scenes render.
+    static let shared = AppState()
+
     @Published var isAuthenticated: Bool
     @Published var baseURL: String        // Hermit server base URL (legacy field, superseded by serverBaseURL)
     @Published var repoOwner: String

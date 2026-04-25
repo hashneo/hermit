@@ -5,18 +5,17 @@ import AppKit
 
 @main
 struct HermitNativeApp: App {
-    @StateObject private var appState = AppState()
+    @NSApplicationDelegateAdaptor(HermitAppDelegate.self) var appDelegate
+    // Use a plain ObservedObject wrapping a shared instance so AppState
+    // is created at init time (before SwiftUI scenes render), making it
+    // available to the app delegate for server startup.
+    @ObservedObject private var appState = AppState.shared
 
     var body: some Scene {
 #if os(macOS)
         MenuBarExtra("Hermit", systemImage: "doc.text.magnifyingglass") {
             MenuBarContentView()
                 .environmentObject(appState)
-                .task {
-                    // Start the embedded Go server once the content view (and
-                    // therefore @StateObject appState) is fully initialised.
-                    HermitNativeApp.startEmbeddedServer(appState: appState)
-                }
         }
         .menuBarExtraStyle(.window)
 
@@ -30,57 +29,54 @@ struct HermitNativeApp: App {
                 .environmentObject(appState)
         }
         .onChange(of: appState.serverMode) { _, _ in
-            // iPad: when server mode changes persist to Keychain
             KeychainHelper.shared.serverMode    = appState.serverMode
             KeychainHelper.shared.serverBaseURL = appState.serverBaseURL
         }
 #endif
     }
-
-#if os(macOS)
-    // Called automatically by the SwiftUI lifecycle via the `init` below.
-    init() {
-        // Server startup is driven by the .task modifier on the Settings scene below,
-        // which has access to the real @StateObject appState instance.
-    }
-#endif
 }
 
-// MARK: - macOS app lifecycle helper
+// MARK: - App Delegate (macOS)
 
 #if os(macOS)
-/// AppDelegate shim that starts and stops the embedded server at the correct
-/// application lifecycle points. Registered via `@NSApplicationDelegateAdaptor`
-/// when the app target sets a delegate — or called directly from scene init.
-///
-/// Because `@main` uses the SwiftUI App protocol we use a scene-level `.task`
-/// modifier in the Settings scene to drive server startup instead of a full
-/// AppDelegate, keeping the architecture simple.
+final class HermitAppDelegate: NSObject, NSApplicationDelegate {
+    private var serverStarted = false
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        DispatchQueue.main.async {
+            self.startServerIfNeeded()
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        EmbeddedServerManager.shared.stop()
+    }
+
+    private func startServerIfNeeded() {
+        guard !serverStarted else { return }
+        serverStarted = true
+        DispatchQueue.main.async {
+            Task { @MainActor in
+                HermitNativeApp.startEmbeddedServer(appState: AppState.shared)
+            }
+        }
+    }
+}
+
 extension HermitNativeApp {
-    /// Scene-level task body that starts the embedded server once AppState is ready.
     @MainActor
     static func startEmbeddedServer(appState: AppState) {
-        // Only start the embedded server when the user has selected embedded mode.
-        // Remote mode means a user-supplied serverBaseURL is already in Keychain.
         guard appState.serverMode == .embeddedLocal else { return }
-
         EmbeddedServerManager.shared.start(appState: appState)
-
-        // start() sets appState.serverBaseURL directly after the Go server binds.
-        // Persist it to Keychain so subsequent launches skip setup.
         if let port = EmbeddedServerManager.shared.port {
-            let url = "http://127.0.0.1:\(port)"
-            KeychainHelper.shared.serverBaseURL = url
+            KeychainHelper.shared.serverBaseURL = "http://127.0.0.1:\(port)"
         }
-
-        // Load paired token map into memory so Go middleware can validate requests.
         PairedTokenStore.shared.load()
     }
 }
 
 // MARK: - RFC Viewer Window
 
-/// Opens (or focuses) a standalone NSWindow showing the full RFC detail view.
 @MainActor
 final class RFCViewerWindowManager {
     static let shared = RFCViewerWindowManager()
