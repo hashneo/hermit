@@ -3,7 +3,7 @@ title: iPadOS Reading and Commenting App
 status: Draft
 author: Steven Taylor
 created: 2026-04-24T00:00:00Z
-tags: [ipad, ipados, swift, swiftui, reading, commenting, rfc]
+tags: [commenting, ipad, ipados, reading, rfc, swift, swiftui]
 id: rfc-009
 project_id: hermit
 doc_uuid: a1b2c3d4-0004-4000-8000-100000000009
@@ -25,7 +25,7 @@ A native iPadOS app with a distraction-free reading mode, comfortable typography
 
 The app uses a three-column `NavigationSplitView`:
 
-```
+```text
 ┌──────────────┬──────────────────────────┬────────────────────┐
 │  Sidebar     │  RFC Detail              │  Thread Panel      │
 │              │                          │  (trailing, opt.)  │
@@ -108,7 +108,7 @@ These are injected at the start of each paragraph and heading, allowing the JS b
 
 `ComposeCommentView` is presented as a bottom sheet (`presentationDetents: [.medium, .large]`):
 
-```
+```text
 ┌────────────────────────────────────────────┐
 │ Add Comment                          [✕]   │
 │ ──────────────────────────────────────────  │
@@ -160,7 +160,7 @@ struct CommentThread: Identifiable {
 
 ### Thread Item Layout
 
-```
+```text
 ┌────────────────────────────────────┐
 │ @stevetaylor · 2h ago              │
 │ "The layout section could benefit  │

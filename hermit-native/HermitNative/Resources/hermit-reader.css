@@ -1,0 +1,143 @@
+/* hermit-reader.css — hermit-46r
+   Typography, brand tokens, dark mode, code blocks for RFC reading view.
+   Loaded inline into WKWebView HTML by WebViewRenderer.
+*/
+
+:root {
+  --brand-primary:   #1563ff;
+  --brand-secondary: #6b57ff;
+  --text-primary:    #1a1a2e;
+  --text-secondary:  #4a4a68;
+  --text-muted:      #7a7a99;
+  --bg-primary:      #ffffff;
+  --bg-secondary:    #f7f7fb;
+  --bg-code:         #f0f0f8;
+  --border:          #dcdce8;
+  --link:            #1563ff;
+  --font-sans:       -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --font-mono:       "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
+  --radius:          6px;
+  --max-width:       780px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text-primary:   #e8e8f4;
+    --text-secondary: #a0a0c0;
+    --text-muted:     #606080;
+    --bg-primary:     #12121e;
+    --bg-secondary:   #1a1a2e;
+    --bg-code:        #1e1e30;
+    --border:         #2a2a40;
+    --link:           #5b8cff;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { font-size: 16px; -webkit-text-size-adjust: 100%; }
+
+body {
+  font-family:     var(--font-sans);
+  font-size:       1rem;
+  line-height:     1.7;
+  color:           var(--text-primary);
+  background:      var(--bg-primary);
+  margin:          0;
+  padding:         1.5rem 1rem 4rem;
+  max-width:       var(--max-width);
+  margin-inline:   auto;
+}
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+  font-weight:     700;
+  line-height:     1.25;
+  margin-top:      2rem;
+  margin-bottom:   0.5rem;
+  color:           var(--text-primary);
+  scroll-margin-top: 4rem;
+}
+h1 { font-size: 2rem; border-bottom: 2px solid var(--border); padding-bottom: .4rem; }
+h2 { font-size: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: .3rem; }
+h3 { font-size: 1.25rem; }
+h4, h5, h6 { font-size: 1rem; }
+
+/* Paragraph */
+p { margin: 0 0 1rem; }
+
+/* Links */
+a { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+a:hover { opacity: .8; }
+
+/* Inline code */
+code {
+  font-family:  var(--font-mono);
+  font-size:    .875em;
+  background:   var(--bg-code);
+  border:       1px solid var(--border);
+  border-radius: 3px;
+  padding:      .1em .3em;
+}
+
+/* Code blocks */
+pre {
+  background:    var(--bg-code);
+  border:        1px solid var(--border);
+  border-radius: var(--radius);
+  padding:       1rem 1.25rem;
+  overflow-x:    auto;
+  margin-bottom: 1.25rem;
+}
+pre code {
+  background:    none;
+  border:        none;
+  padding:       0;
+  font-size:     .85rem;
+  line-height:   1.55;
+}
+
+/* Mermaid diagrams */
+.mermaid {
+  background:    var(--bg-secondary);
+  border:        1px solid var(--border);
+  border-radius: var(--radius);
+  padding:       1.25rem;
+  text-align:    center;
+  margin-bottom: 1.25rem;
+  overflow-x:    auto;
+}
+
+/* Tables */
+table {
+  width:           100%;
+  border-collapse: collapse;
+  margin-bottom:   1.25rem;
+  font-size:       .9rem;
+}
+th, td { border: 1px solid var(--border); padding: .5rem .75rem; text-align: left; }
+th { background: var(--bg-secondary); font-weight: 600; }
+tr:nth-child(even) { background: var(--bg-secondary); }
+
+/* Blockquote */
+blockquote {
+  border-left:  4px solid var(--brand-primary);
+  margin:       0 0 1rem;
+  padding:      .5rem 1rem;
+  color:        var(--text-secondary);
+  background:   var(--bg-secondary);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+/* Lists */
+ul, ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+li { margin-bottom: .25rem; }
+
+/* Horizontal rule */
+hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+
+/* Frontmatter hint — hide YAML block if rendered as pre */
+pre code.language-yaml { opacity: .6; }
+
+/* Text selection highlight */
+::selection { background: rgba(21, 99, 255, .18); }

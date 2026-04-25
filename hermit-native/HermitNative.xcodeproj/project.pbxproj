@@ -1,0 +1,562 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		88C952BF1FC4569AAA227167 /* GutterMarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DEF0D01EB6E30FF8CF74D70 /* GutterMarkdownView.swift */; };
+		AB7C0F2701C62D56AC09227C /* SelectableTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41AFAD009AFAE5101431EBE5 /* SelectableTextView.swift */; };
+		B001000A /* HermitNativeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000B /* HermitNativeApp.swift */; };
+		B001000C /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000D /* AppState.swift */; };
+		B001000E /* RFC.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000F /* RFC.swift */; };
+		B0010010 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010011 /* KeychainHelper.swift */; };
+		B0010012 /* GitHubAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010013 /* GitHubAPIClient.swift */; };
+		B0010014 /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010015 /* AIProvider.swift */; };
+		B0010016 /* AppleIntelligenceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010017 /* AppleIntelligenceProvider.swift */; };
+		B0010018 /* OpenAIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010019 /* OpenAIProvider.swift */; };
+		B001001A /* RFCInterviewPrompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001001B /* RFCInterviewPrompts.swift */; };
+		B001001C /* RFCInterviewSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001001D /* RFCInterviewSession.swift */; };
+		B001001E /* VoiceCommentSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001001F /* VoiceCommentSession.swift */; };
+		B0010020 /* PublishingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010021 /* PublishingSession.swift */; };
+		B0010022 /* RFCPublishingHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010023 /* RFCPublishingHelpers.swift */; };
+		B0010024 /* VoiceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010025 /* VoiceEngine.swift */; };
+		B0010026 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010027 /* SpeechRecognizer.swift */; };
+		B0010028 /* SpeechSynthesizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010029 /* SpeechSynthesizer.swift */; };
+		B001002A /* WaveformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001002B /* WaveformView.swift */; };
+		B001002C /* WebViewRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001002D /* WebViewRenderer.swift */; };
+		B001002E /* MarkdownRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001002F /* MarkdownRenderer.swift */; };
+		B0010030 /* BundledAssets.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010031 /* BundledAssets.swift */; };
+		B0010032 /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010033 /* SetupView.swift */; };
+		B0010034 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010035 /* RootView.swift */; };
+		B0010036 /* RFCBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010037 /* RFCBrowserView.swift */; };
+		B0010038 /* MenuBarContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010039 /* MenuBarContentView.swift */; };
+		B001003A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001003B /* SettingsView.swift */; };
+		B001003C /* macOSViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001003D /* macOSViews.swift */; };
+		B001003E /* iPadRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001003F /* iPadRootView.swift */; };
+		B0010040 /* RFCDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010041 /* RFCDetailView.swift */; };
+		B0010042 /* RFCInterviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010043 /* RFCInterviewView.swift */; };
+		B0010044 /* RFCListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010045 /* RFCListView.swift */; };
+		B0010046 /* RFCPreviewPublishingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010047 /* RFCPreviewPublishingView.swift */; };
+		B0010048 /* ThreadPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010049 /* ThreadPanelView.swift */; };
+		B001004B /* GiteaAutoConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001004C /* GiteaAutoConfig.swift */; };
+		B001A001 /* MarkdownParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A002 /* MarkdownParser.swift */; };
+		B001A003 /* MarkdownRendererView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A004 /* MarkdownRendererView.swift */; };
+		B001A005 /* MermaidView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A006 /* MermaidView.swift */; };
+		F51CA0CA0595C036D8E2D00B /* CommentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 702547F1AF611276712EA42C /* CommentStore.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		41AFAD009AFAE5101431EBE5 /* SelectableTextView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectableTextView.swift; sourceTree = "<group>"; };
+		702547F1AF611276712EA42C /* CommentStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CommentStore.swift; sourceTree = "<group>"; };
+		7DEF0D01EB6E30FF8CF74D70 /* GutterMarkdownView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GutterMarkdownView.swift; sourceTree = "<group>"; };
+		B001000B /* HermitNativeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitNativeApp.swift; sourceTree = "<group>"; };
+		B001000D /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		B001000F /* RFC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFC.swift; sourceTree = "<group>"; };
+		B0010011 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		B0010013 /* GitHubAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubAPIClient.swift; sourceTree = "<group>"; };
+		B0010015 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
+		B0010017 /* AppleIntelligenceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleIntelligenceProvider.swift; sourceTree = "<group>"; };
+		B0010019 /* OpenAIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIProvider.swift; sourceTree = "<group>"; };
+		B001001B /* RFCInterviewPrompts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCInterviewPrompts.swift; sourceTree = "<group>"; };
+		B001001D /* RFCInterviewSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCInterviewSession.swift; sourceTree = "<group>"; };
+		B001001F /* VoiceCommentSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCommentSession.swift; sourceTree = "<group>"; };
+		B0010021 /* PublishingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PublishingSession.swift; sourceTree = "<group>"; };
+		B0010023 /* RFCPublishingHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCPublishingHelpers.swift; sourceTree = "<group>"; };
+		B0010025 /* VoiceEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceEngine.swift; sourceTree = "<group>"; };
+		B0010027 /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
+		B0010029 /* SpeechSynthesizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSynthesizer.swift; sourceTree = "<group>"; };
+		B001002B /* WaveformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformView.swift; sourceTree = "<group>"; };
+		B001002D /* WebViewRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewRenderer.swift; sourceTree = "<group>"; };
+		B001002F /* MarkdownRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRenderer.swift; sourceTree = "<group>"; };
+		B0010031 /* BundledAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledAssets.swift; sourceTree = "<group>"; };
+		B0010033 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
+		B0010035 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		B0010037 /* RFCBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCBrowserView.swift; sourceTree = "<group>"; };
+		B0010039 /* MenuBarContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarContentView.swift; sourceTree = "<group>"; };
+		B001003B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		B001003D /* macOSViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = macOSViews.swift; sourceTree = "<group>"; };
+		B001003F /* iPadRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadRootView.swift; sourceTree = "<group>"; };
+		B0010041 /* RFCDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCDetailView.swift; sourceTree = "<group>"; };
+		B0010043 /* RFCInterviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCInterviewView.swift; sourceTree = "<group>"; };
+		B0010045 /* RFCListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCListView.swift; sourceTree = "<group>"; };
+		B0010047 /* RFCPreviewPublishingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCPreviewPublishingView.swift; sourceTree = "<group>"; };
+		B0010049 /* ThreadPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadPanelView.swift; sourceTree = "<group>"; };
+		B001004A /* HermitNative.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HermitNative.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B001004C /* GiteaAutoConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GiteaAutoConfig.swift; sourceTree = "<group>"; };
+		B001A002 /* MarkdownParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownParser.swift; sourceTree = "<group>"; };
+		B001A004 /* MarkdownRendererView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRendererView.swift; sourceTree = "<group>"; };
+		B001A006 /* MermaidView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MermaidView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		B0010080 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		B0010090 = {
+			isa = PBXGroup;
+			children = (
+				B0010091 /* HermitNative */,
+				B0010092 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		B0010091 /* HermitNative */ = {
+			isa = PBXGroup;
+			children = (
+				B001000B /* HermitNativeApp.swift */,
+				B0010093 /* Models */,
+				B0010094 /* Auth */,
+				B0010095 /* Clients */,
+				B0010096 /* AI */,
+				B0010097 /* Sessions */,
+				B0010098 /* Voice */,
+				B0010099 /* WebView */,
+				B001009A /* Views */,
+				B001009B /* Resources */,
+			);
+			path = HermitNative;
+			sourceTree = "<group>";
+		};
+		B0010092 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B001004A /* HermitNative.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		B0010093 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				B001000D /* AppState.swift */,
+				B001000F /* RFC.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		B0010094 /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				B0010011 /* KeychainHelper.swift */,
+				B001004C /* GiteaAutoConfig.swift */,
+			);
+			path = Auth;
+			sourceTree = "<group>";
+		};
+		B0010095 /* Clients */ = {
+			isa = PBXGroup;
+			children = (
+				B0010013 /* GitHubAPIClient.swift */,
+			);
+			path = Clients;
+			sourceTree = "<group>";
+		};
+		B0010096 /* AI */ = {
+			isa = PBXGroup;
+			children = (
+				B0010015 /* AIProvider.swift */,
+				B0010017 /* AppleIntelligenceProvider.swift */,
+				B0010019 /* OpenAIProvider.swift */,
+				B001001B /* RFCInterviewPrompts.swift */,
+			);
+			path = AI;
+			sourceTree = "<group>";
+		};
+		B0010097 /* Sessions */ = {
+			isa = PBXGroup;
+			children = (
+				B001001D /* RFCInterviewSession.swift */,
+				B001001F /* VoiceCommentSession.swift */,
+				B0010021 /* PublishingSession.swift */,
+				B0010023 /* RFCPublishingHelpers.swift */,
+			);
+			path = Sessions;
+			sourceTree = "<group>";
+		};
+		B0010098 /* Voice */ = {
+			isa = PBXGroup;
+			children = (
+				B0010025 /* VoiceEngine.swift */,
+				B0010027 /* SpeechRecognizer.swift */,
+				B0010029 /* SpeechSynthesizer.swift */,
+				B001002B /* WaveformView.swift */,
+			);
+			path = Voice;
+			sourceTree = "<group>";
+		};
+		B0010099 /* WebView */ = {
+			isa = PBXGroup;
+			children = (
+				B001002D /* WebViewRenderer.swift */,
+				B001002F /* MarkdownRenderer.swift */,
+				B0010031 /* BundledAssets.swift */,
+				B001A002 /* MarkdownParser.swift */,
+				B001A004 /* MarkdownRendererView.swift */,
+				B001A006 /* MermaidView.swift */,
+			);
+			path = WebView;
+			sourceTree = "<group>";
+		};
+		B001009A /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				B0010033 /* SetupView.swift */,
+				B0010035 /* RootView.swift */,
+				B0010037 /* RFCBrowserView.swift */,
+				B0010039 /* MenuBarContentView.swift */,
+				B001003B /* SettingsView.swift */,
+				B001003D /* macOSViews.swift */,
+				B001003F /* iPadRootView.swift */,
+				B0010041 /* RFCDetailView.swift */,
+				B0010043 /* RFCInterviewView.swift */,
+				B0010045 /* RFCListView.swift */,
+				B0010047 /* RFCPreviewPublishingView.swift */,
+				B0010049 /* ThreadPanelView.swift */,
+				702547F1AF611276712EA42C /* CommentStore.swift */,
+				7DEF0D01EB6E30FF8CF74D70 /* GutterMarkdownView.swift */,
+				41AFAD009AFAE5101431EBE5 /* SelectableTextView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		B001009B /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		B0010050 /* HermitNative */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B0010060 /* Build configuration list for PBXNativeTarget "HermitNative" */;
+			buildPhases = (
+				B0010051 /* Sources */,
+				B0010080 /* Frameworks */,
+				B0010052 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = HermitNative;
+			productName = HermitNative;
+			productReference = B001004A /* HermitNative.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B0010070 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1530;
+				LastUpgradeCheck = 1530;
+				TargetAttributes = {
+					B0010050 = {
+						CreatedOnToolsVersion = 15.3;
+					};
+				};
+			};
+			buildConfigurationList = B0010071 /* Build configuration list for PBXProject "HermitNative" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = B0010090;
+			productRefGroup = B0010092 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B0010050 /* HermitNative */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		B0010052 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		B0010051 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B001000A /* HermitNativeApp.swift in Sources */,
+				B001000C /* AppState.swift in Sources */,
+				B001000E /* RFC.swift in Sources */,
+				B0010010 /* KeychainHelper.swift in Sources */,
+				B001004B /* GiteaAutoConfig.swift in Sources */,
+				B0010012 /* GitHubAPIClient.swift in Sources */,
+				B0010014 /* AIProvider.swift in Sources */,
+				B0010016 /* AppleIntelligenceProvider.swift in Sources */,
+				B0010018 /* OpenAIProvider.swift in Sources */,
+				B001001A /* RFCInterviewPrompts.swift in Sources */,
+				B001001C /* RFCInterviewSession.swift in Sources */,
+				B001001E /* VoiceCommentSession.swift in Sources */,
+				B0010020 /* PublishingSession.swift in Sources */,
+				B0010022 /* RFCPublishingHelpers.swift in Sources */,
+				B0010024 /* VoiceEngine.swift in Sources */,
+				B0010026 /* SpeechRecognizer.swift in Sources */,
+				B0010028 /* SpeechSynthesizer.swift in Sources */,
+				B001002A /* WaveformView.swift in Sources */,
+				B001002C /* WebViewRenderer.swift in Sources */,
+				B001002E /* MarkdownRenderer.swift in Sources */,
+				B0010030 /* BundledAssets.swift in Sources */,
+				B001A001 /* MarkdownParser.swift in Sources */,
+				B001A003 /* MarkdownRendererView.swift in Sources */,
+				B001A005 /* MermaidView.swift in Sources */,
+				B0010032 /* SetupView.swift in Sources */,
+				B0010034 /* RootView.swift in Sources */,
+				B0010036 /* RFCBrowserView.swift in Sources */,
+				B0010038 /* MenuBarContentView.swift in Sources */,
+				B001003A /* SettingsView.swift in Sources */,
+				B001003C /* macOSViews.swift in Sources */,
+				B001003E /* iPadRootView.swift in Sources */,
+				B0010040 /* RFCDetailView.swift in Sources */,
+				B0010042 /* RFCInterviewView.swift in Sources */,
+				B0010044 /* RFCListView.swift in Sources */,
+				B0010046 /* RFCPreviewPublishingView.swift in Sources */,
+				B0010048 /* ThreadPanelView.swift in Sources */,
+				F51CA0CA0595C036D8E2D00B /* CommentStore.swift in Sources */,
+				88C952BF1FC4569AAA227167 /* GutterMarkdownView.swift in Sources */,
+				AB7C0F2701C62D56AC09227C /* SelectableTextView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		B0010061 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_CYCLE = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		B0010062 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_CYCLE = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_FAST_MATH = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		B0010063 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "HermitNative/HermitNative-Debug.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Hermit uses the microphone to let you dictate RFC content and voice comments.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Hermit uses speech recognition to transcribe your voice into RFC text and comments.";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportsDocumentBrowser = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.2;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.hashicorp.hermit-native";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "macosx iphonesimulator iphoneos";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B0010064 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = HermitNative/HermitNative.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Hermit uses the microphone to let you dictate RFC content and voice comments.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Hermit uses speech recognition to transcribe your voice into RFC text and comments.";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportsDocumentBrowser = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.2;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.hashicorp.hermit-native";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "macosx iphonesimulator iphoneos";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		B0010060 /* Build configuration list for PBXNativeTarget "HermitNative" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B0010063 /* Debug */,
+				B0010064 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B0010071 /* Build configuration list for PBXProject "HermitNative" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B0010061 /* Debug */,
+				B0010062 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = B0010070 /* Project object */;
+}

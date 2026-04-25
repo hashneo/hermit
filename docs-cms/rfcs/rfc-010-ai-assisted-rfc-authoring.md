@@ -3,7 +3,8 @@ title: AI-Assisted RFC Authoring with Conversational Interview
 status: Draft
 author: Steven Taylor
 created: 2026-04-24T00:00:00Z
-tags: [ai, rfc-authoring, conversational, interview, swift, foundationmodels, openai, rfc]
+tags: [ai, conversational, foundationmodels, interview, openai, rfc, rfc-authoring,
+  swift]
 id: rfc-010
 project_id: hermit
 doc_uuid: a1b2c3d4-0005-4000-8000-100000000010
@@ -202,7 +203,7 @@ struct InterviewMessage: Identifiable {
 
 The system prompt is loaded from `RFCInterviewPrompts.swift` and is configurable in Settings (advanced). The default prompt:
 
-```
+```text
 You are an expert technical writer helping an engineer write a structured RFC
 (Request for Comments) document for an engineering organisation.
 
@@ -274,7 +275,7 @@ The generated markdown is validated (frontmatter present, all sections present) 
 
 ### Layout
 
-```
+```text
 ┌────────────────────────────────────────────┐
 │ New RFC                              [✕]   │
 │ ──────────────────────────────────────────  │

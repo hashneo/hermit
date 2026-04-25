@@ -3,7 +3,7 @@ title: macOS Menu Bar App
 status: Draft
 author: Steven Taylor
 created: 2026-04-24T00:00:00Z
-tags: [macos, menu-bar, statusitem, swift, swiftui, rfc]
+tags: [macos, menu-bar, rfc, statusitem, swift, swiftui]
 id: rfc-008
 project_id: hermit
 doc_uuid: a1b2c3d4-0003-4000-8000-100000000008
@@ -64,7 +64,7 @@ A global keyboard shortcut shows/hides the popover from any app. Default: **⌘�
 
 ## Popover Layout
 
-```
+```text
 ┌────────────────────────────────────────┐
 │ ⬡ Hermit               [↗] [⚙] [📌] │  ← toolbar
 │────────────────────────────────────────│
@@ -87,7 +87,7 @@ A global keyboard shortcut shows/hides the popover from any app. Default: **⌘�
 
 When an RFC is selected, the popover expands horizontally (or the content area switches) to show the document:
 
-```
+```text
 ┌──────────────────┬─────────────────────────────────────┐
 │  RFC List        │  rfc-006 Native Swift App            │
 │  ─────────────── │  ─────────────────────────────────── │

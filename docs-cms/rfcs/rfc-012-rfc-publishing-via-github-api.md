@@ -3,7 +3,7 @@ title: RFC Publishing via GitHub API
 status: Draft
 author: Steven Taylor
 created: 2026-04-24T00:00:00Z
-tags: [github, api, publishing, pull-request, rfc-creation, rfc]
+tags: [api, github, publishing, pull-request, rfc, rfc-creation]
 id: rfc-012
 project_id: hermit
 doc_uuid: a1b2c3d4-0007-4000-8000-100000000012
@@ -23,7 +23,7 @@ By creating the branch, file, and PR in a single guided flow from the native app
 
 ## Publishing Flow Overview
 
-```
+```text
 RFCPreviewView: "Publish as PR"
        ↓
 PublishingSession.publish(draft: RFCDraft)
@@ -234,7 +234,7 @@ class PublishingSession: ObservableObject {
 
 `PublishingView.swift` presents as a sheet over `RFCPreviewView`:
 
-```
+```text
 ┌────────────────────────────────────────────┐
 │ Publishing RFC...                          │
 │                                            │
@@ -250,7 +250,7 @@ class PublishingSession: ObservableObject {
 
 On success, transitions to:
 
-```
+```text
 ┌────────────────────────────────────────────┐
 │  ✓ RFC Published                           │
 │                                            │
