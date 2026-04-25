@@ -14,6 +14,7 @@ protocol HermitClientProtocol: Actor {
     func discoverRFCs() async throws -> (mainBranch: [RFCFile], pullRequests: [RFCPullRequest])
     func listMainBranchRFCs() async throws -> [RFCFile]
     func fetchRFCContent(path: String, ref: String) async throws -> String
+    func fetchPRRFCContent(prNumber: Int) async throws -> String
     func listFilesOnRef(docsPath: String, ref: String) async throws -> [String]
     func listPRChangedFiles(prNumber: Int, docsPath: String) async throws -> [String]
 
@@ -54,6 +55,7 @@ actor HermitAPIClient: HermitClientProtocol {
 
     private let config: Config
     private let session: URLSession
+    private var resolvedRepoID: String? = nil  // cached after first /repositories lookup
 
     init(config: Config) {
         self.config = config
@@ -65,7 +67,7 @@ actor HermitAPIClient: HermitClientProtocol {
     // MARK: - discoverRFCs
 
     func discoverRFCs() async throws -> (mainBranch: [RFCFile], pullRequests: [RFCPullRequest]) {
-        let repoID = encodedRepoID()
+        let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/rfcs")
         let data = try await get(u)
 
@@ -73,38 +75,35 @@ actor HermitAPIClient: HermitClientProtocol {
             let id: String
             let title: String
             let path: String
-            let sha: String
-            let prNumber: Int?
-            let prTitle: String?
-            let headSHA: String?
-            let headRef: String?
-            let htmlURL: String?
-            let state: String?
-            let draft: Bool?
-            let labels: [String]?
+            let source_type: String
+            let pr_number: Int?
+            let head_sha: String?
+            let commentable: Bool?
         }
 
-        let items = try JSONDecoder().decode([RFCItem].self, from: data)
+        struct RFCPage: Decodable { let items: [RFCItem] }
+        let decoder = JSONDecoder()
+        let items = try decoder.decode(RFCPage.self, from: data).items
         var files: [RFCFile] = []
         var prs: [RFCPullRequest] = []
 
         for item in items {
-            if let prNumber = item.prNumber {
+            if item.source_type == "pull_request", let prNumber = item.pr_number {
                 prs.append(RFCPullRequest(
                     id: prNumber, number: prNumber,
-                    title: item.prTitle ?? item.title,
+                    title: item.title,
                     body: "",
-                    headSHA: item.headSHA ?? "",
-                    headRef: item.headRef ?? "",
-                    htmlURL: item.htmlURL ?? "",
-                    state: item.state ?? "open",
-                    draft: item.draft ?? false,
-                    labels: item.labels ?? []
+                    headSHA: item.head_sha ?? "",
+                    headRef: "",
+                    htmlURL: "",
+                    state: "open",
+                    draft: false,
+                    labels: []
                 ))
             } else {
                 files.append(RFCFile(id: item.id, name: item.title,
-                                     path: item.path, sha: item.sha,
-                                     htmlURL: item.htmlURL ?? ""))
+                                     path: item.path, sha: item.head_sha ?? "",
+                                     htmlURL: ""))
             }
         }
         return (files, prs)
@@ -120,11 +119,28 @@ actor HermitAPIClient: HermitClientProtocol {
     // MARK: - fetchRFCContent
 
     func fetchRFCContent(path: String, ref: String) async throws -> String {
-        let repoID = encodedRepoID()
-        let encodedPath = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
+        let repoID = try await repoID()
+        // .urlPathAllowed does not encode '/' — use a custom set that does so the
+        // full path is treated as a single path segment by the Go router.
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove("/")
+        let encodedPath = path.addingPercentEncoding(withAllowedCharacters: allowed) ?? path
         let u = url("/api/v1/repositories/\(repoID)/rfcs/\(encodedPath)?ref=\(ref)")
         let data = try await get(u)
-        return String(data: data, encoding: .utf8) ?? ""
+        struct RFCDoc: Decodable { let markdown_source: String }
+        return (try? JSONDecoder().decode(RFCDoc.self, from: data))?.markdown_source
+            ?? String(data: data, encoding: .utf8) ?? ""
+    }
+
+    // MARK: - fetchPRRFCContent
+
+    func fetchPRRFCContent(prNumber: Int) async throws -> String {
+        let repoID = try await repoID()
+        let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/rfc/render")
+        let data = try await get(u)
+        struct RFCDoc: Decodable { let markdown_source: String }
+        return (try? JSONDecoder().decode(RFCDoc.self, from: data))?.markdown_source
+            ?? String(data: data, encoding: .utf8) ?? ""
     }
 
     // MARK: - listFilesOnRef
@@ -137,7 +153,7 @@ actor HermitAPIClient: HermitClientProtocol {
     // MARK: - listPRChangedFiles
 
     func listPRChangedFiles(prNumber: Int, docsPath: String) async throws -> [String] {
-        let repoID = encodedRepoID()
+        let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/rfc")
         let data = try await get(u)
         struct Doc: Decodable { let path: String }
@@ -148,7 +164,7 @@ actor HermitAPIClient: HermitClientProtocol {
     // MARK: - listReviewComments
 
     func listReviewComments(prNumber: Int) async throws -> [PRReviewComment] {
-        let repoID = encodedRepoID()
+        let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/threads")
         let data = try await get(u)
 
@@ -177,7 +193,7 @@ actor HermitAPIClient: HermitClientProtocol {
 
     func createReviewComment(prNumber: Int, body: String, commitSHA: String,
                               path: String, line: Int) async throws -> PRReviewComment {
-        let repoID = encodedRepoID()
+        let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/threads")
         let payload: [String: Any] = [
             "body": body, "path": path, "line": line, "commit_sha": commitSHA,
@@ -199,7 +215,7 @@ actor HermitAPIClient: HermitClientProtocol {
     // MARK: - replyToReviewComment
 
     func replyToReviewComment(prNumber: Int, commentId: Int, body: String) async throws -> PRReviewComment {
-        let repoID = encodedRepoID()
+        let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/threads/\(commentId)/replies")
         let data = try await post(u, body: ["body": body])
 
@@ -218,7 +234,7 @@ actor HermitAPIClient: HermitClientProtocol {
     // MARK: - getReviewState
 
     func getReviewState(prNumber: Int) async throws -> ReviewState {
-        let repoID = encodedRepoID()
+        let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/review")
         let data = try await get(u)
         struct State: Decodable { let approved: Bool; let reviewers: [String] }
@@ -229,7 +245,7 @@ actor HermitAPIClient: HermitClientProtocol {
     // MARK: - approve
 
     func approve(prNumber: Int) async throws {
-        let repoID = encodedRepoID()
+        let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/review/approve")
         _ = try await post(u, body: [:])
     }
@@ -237,7 +253,7 @@ actor HermitAPIClient: HermitClientProtocol {
     // MARK: - getMainBranchSHA
 
     func getMainBranchSHA() async throws -> String {
-        let repoID = encodedRepoID()
+        let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/branches/main")
         let data = try await get(u)
         struct Branch: Decodable { let sha: String }
@@ -248,7 +264,7 @@ actor HermitAPIClient: HermitClientProtocol {
     // MARK: - createBranch
 
     func createBranch(name: String, fromSHA: String) async throws {
-        let repoID = encodedRepoID()
+        let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/branches")
         _ = try await post(u, body: ["name": name, "sha": fromSHA])
     }
@@ -257,7 +273,7 @@ actor HermitAPIClient: HermitClientProtocol {
 
     func commitFile(branch: String, path: String, content: String,
                     message: String) async throws -> String {
-        let repoID = encodedRepoID()
+        let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/contents")
         let encoded = Data(content.utf8).base64EncodedString()
         let payload: [String: Any] = [
@@ -274,7 +290,7 @@ actor HermitAPIClient: HermitClientProtocol {
 
     func createPR(title: String, body: String,
                   headBranch: String, label: String) async throws -> RFCPullRequest {
-        let repoID = encodedRepoID()
+        let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/pull-requests")
         let payload: [String: Any] = [
             "title": title, "body": body,
@@ -298,8 +314,31 @@ actor HermitAPIClient: HermitClientProtocol {
 
     // MARK: - HTTP helpers
 
-    private func encodedRepoID() -> String {
-        "\(config.owner)%2F\(config.repo)"
+    /// Returns the server-assigned repo ID (e.g. "repo_2001") by fetching
+    /// /api/v1/repositories and matching owner+name. Cached after first call.
+    private func repoID() async throws -> String {
+        if let cached = resolvedRepoID { return cached }
+
+        let u = url("/api/v1/repositories")
+        let data = try await get(u)
+
+        struct RepoItem: Decodable {
+            let id: String
+            let owner: String
+            let name: String
+        }
+        struct RepoPage: Decodable { let items: [RepoItem] }
+        let page = try JSONDecoder().decode(RepoPage.self, from: data)
+
+        guard let match = page.items.first(where: {
+            $0.owner.lowercased() == config.owner.lowercased() &&
+            $0.name.lowercased()  == config.repo.lowercased()
+        }) else {
+            throw HermitAPIError.httpError(statusCode: 404,
+                message: "Repository \(config.owner)/\(config.repo) not found on server")
+        }
+        resolvedRepoID = match.id
+        return match.id
     }
 
     private func url(_ path: String) -> URL {
