@@ -70,6 +70,14 @@ struct MenuBarRFCListView: View {
                     .buttonStyle(.plain)
                     .help("Refresh")
                 }
+                Button {
+                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                    NSApp.activate(ignoringOtherApps: true)
+                } label: {
+                    Image(systemName: "gear")
+                }
+                .buttonStyle(.plain)
+                .help("Settings")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)

@@ -8,11 +8,13 @@ struct RootView: View {
 #endif
 
     var body: some View {
+#if os(iOS)
         if isReady {
             iPadRootView()
         } else {
             SetupView()
         }
+#endif
     }
 
     private var isReady: Bool {
