@@ -65,6 +65,10 @@ final class AppState: ObservableObject {
     /// The comment-thread line currently selected, coordinated across devices.
     @Published var selectedLine: Int? = nil
 
+    // hermit-z9j: pending Handoff navigation (set on continuation, consumed once store loads)
+    @Published var pendingHandoffRFCID: String? = nil
+    @Published var pendingHandoffLine: Int?     = nil
+
     // hermit-u1k / RFC-013: server connectivity
     @Published var serverMode: ServerMode = .embeddedLocal
     /// The resolved base URL of the active Hermit server (set by EmbeddedServerManager

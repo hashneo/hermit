@@ -78,6 +78,21 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
         PairingAdvertiser.shared.stop()
     }
 
+    // hermit-z9j: receive Handoff continuation from iPad
+    func application(_ application: NSApplication,
+                     continue userActivity: NSUserActivity,
+                     restorationHandler: @escaping ([any NSUserActivityRestoring]) -> Void) -> Bool {
+        guard userActivity.activityType == HermitActivity.handoff,
+              let rfcID = userActivity.userInfo?[HermitActivity.keyRFCID] as? String else {
+            return false
+        }
+        let line = userActivity.userInfo?[HermitActivity.keySelectedLine] as? Int
+        let appState = AppState.shared
+        appState.pendingHandoffRFCID = rfcID
+        appState.pendingHandoffLine  = line
+        return true
+    }
+
     private func startServerIfNeeded() {
         guard !serverStarted else { return }
         serverStarted = true
@@ -111,6 +126,8 @@ extension HermitNativeApp {
 final class RFCViewerWindowManager {
     static let shared = RFCViewerWindowManager()
     private var controllers: [String: NSWindowController] = [:]
+    // hermit-z9j: one donated activity per open RFC window
+    private var activities: [String: NSUserActivity] = [:]
 
     func open(rfc: RFC, appState: AppState) {
         // hermit-olq: track selection in AppState for NSUserActivity access
@@ -142,6 +159,14 @@ final class RFCViewerWindowManager {
         let controller = NSWindowController(window: window)
         controllers[rfc.id] = controller
 
+        // hermit-z9j: donate Handoff activity for this RFC window
+        let activity = NSUserActivity(activityType: HermitActivity.handoff)
+        activity.title = rfc.title
+        activity.isEligibleForHandoff = true
+        activity.userInfo = HermitActivity.userInfo(for: rfc, selectedLine: nil)
+        activity.becomeCurrent()
+        activities[rfc.id] = activity
+
         NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
             object: window,
@@ -149,6 +174,9 @@ final class RFCViewerWindowManager {
         ) { [weak self] _ in
             Task { @MainActor in
                 self?.controllers.removeValue(forKey: rfc.id)
+                // hermit-z9j: resign and discard activity when window closes
+                self?.activities[rfc.id]?.resignCurrent()
+                self?.activities.removeValue(forKey: rfc.id)
                 // Clear shared selection when this RFC's window closes
                 if appState.selectedRFC?.id == rfc.id {
                     appState.selectedRFC = nil

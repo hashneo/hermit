@@ -134,6 +134,33 @@ struct iPadRootView: View {
                     }
             }
         }
+        // hermit-z9j: Donate Handoff activity whenever the selected RFC changes (iPadOS)
+        .userActivity(HermitActivity.handoff) { activity in
+            guard let rfc = appState.selectedRFC else {
+                activity.isEligibleForHandoff = false
+                return
+            }
+            activity.isEligibleForHandoff = true
+            activity.title = rfc.title
+            activity.userInfo = HermitActivity.userInfo(for: rfc, selectedLine: appState.selectedLine)
+        }
+        // hermit-z9j: Continue a Handoff activity arriving from another device (iPadOS)
+        .onContinueUserActivity(HermitActivity.handoff) { activity in
+            guard let rfcID = activity.userInfo?[HermitActivity.keyRFCID] as? String else { return }
+            let line = activity.userInfo?[HermitActivity.keySelectedLine] as? Int
+            // Store the pending navigation; RFCStore may not be loaded yet
+            appState.pendingHandoffRFCID = rfcID
+            appState.pendingHandoffLine  = line
+        }
+        // hermit-z9j: Navigate to pending Handoff RFC once the store has loaded
+        .onChange(of: store.rfcs) { _, rfcs in
+            guard let rfcID = appState.pendingHandoffRFCID,
+                  let rfc = rfcs.first(where: { $0.id == rfcID }) else { return }
+            appState.selectedRFC          = rfc
+            appState.selectedLine         = appState.pendingHandoffLine
+            appState.pendingHandoffRFCID  = nil
+            appState.pendingHandoffLine   = nil
+        }
     }
 
     // MARK: - Landscape: two-column split (list | detail+thread)

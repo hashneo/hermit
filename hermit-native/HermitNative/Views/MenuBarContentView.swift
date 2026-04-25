@@ -132,6 +132,14 @@ struct MenuBarRFCListView: View {
             }
             await store.load()
         }
+        // hermit-z9j: open RFC window when a Handoff continuation arrives from iPad
+        .onChange(of: store.rfcs) { _, rfcs in
+            guard let rfcID = appState.pendingHandoffRFCID,
+                  let rfc = rfcs.first(where: { $0.id == rfcID }) else { return }
+            appState.pendingHandoffRFCID = nil
+            appState.pendingHandoffLine  = nil
+            RFCViewerWindowManager.shared.open(rfc: rfc, appState: appState)
+        }
     }
 }
 
