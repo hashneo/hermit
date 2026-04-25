@@ -30,13 +30,13 @@ func (h *Handler) Render(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	render, err := h.service.Render(repositoryID, prNumber)
+	view, err := h.service.RenderPRRFC(r.Context(), repositoryID, prNumber)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "rfc_ineligible", err.Error())
+		writeError(w, http.StatusNotFound, "rfc_not_found", err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, render)
+	writeJSON(w, http.StatusOK, view)
 }
 
 func (h *Handler) ListRFCs(w http.ResponseWriter, _ *http.Request) {

@@ -306,6 +306,55 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 	return items, nil
 }
 
+// RenderPRRFC fetches the RFC file from the PR's head branch and renders it.
+// It resolves the repository, finds the RFC file changed in the PR, and returns
+// the rendered content — replacing the old stub-based Render method for the
+// /pull-requests/{prNumber}/rfc/render endpoint.
+func (s *Service) RenderPRRFC(ctx context.Context, repositoryID string, prNumber int) (DocumentView, error) {
+	if s.repoResolver == nil {
+		return DocumentView{}, fmt.Errorf("repository resolver is not configured")
+	}
+
+	owner, name, registry, _, docsPath, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	if !ok {
+		return DocumentView{}, fmt.Errorf("repository not found")
+	}
+	if token == "" {
+		return DocumentView{}, fmt.Errorf("repository token unavailable")
+	}
+
+	client, ok := s.githubClients[registry]
+	if !ok {
+		client = NewHTTPGitHubRFCClient()
+	}
+
+	baseURL := s.registryBaseURL(registry)
+
+	// List PR files to find the RFC path.
+	prFiles, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, token)
+	if err != nil {
+		return DocumentView{}, fmt.Errorf("list PR RFCs: %w", err)
+	}
+
+	var filePath string
+	for _, item := range prFiles {
+		if item.PRNumber == prNumber {
+			filePath = item.Path
+			break
+		}
+	}
+	if filePath == "" {
+		return DocumentView{}, fmt.Errorf("no RFC file found in pull request %d", prNumber)
+	}
+
+	view, err := client.GetRFCFromPullRequest(ctx, baseURL, owner, name, prNumber, filePath, token)
+	if err != nil {
+		return DocumentView{}, err
+	}
+	view.ID = makePRCatalogID(prNumber, filePath)
+	return view, nil
+}
+
 func (s *Service) RenderRFCByRepository(ctx context.Context, repositoryID, rfcID string) (DocumentView, error) {
 	if s.repoResolver == nil {
 		return DocumentView{}, fmt.Errorf("repository resolver is not configured")
