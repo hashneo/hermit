@@ -74,7 +74,11 @@ final class KeychainHelper {
     // MARK: - Convenience: is fully configured?
 
     var isConfigured: Bool {
-        pat != nil && baseURL != nil && repoOwner != nil && repoName != nil
+#if DEBUG
+        return false   // Debug: always use config-file path, never Keychain
+#else
+        return pat != nil && baseURL != nil && repoOwner != nil && repoName != nil
+#endif
     }
 
     // MARK: - Bulk write (used by auto-config)
@@ -100,10 +104,13 @@ final class KeychainHelper {
     // MARK: - Private helpers
 
     private func write(_ value: String?, key: Key) {
+#if !DEBUG
         if let value { save(value, key: key) } else { delete(key: key) }
+#endif
     }
 
     private func save(_ value: String, key: Key) {
+#if !DEBUG
         guard let data = value.data(using: .utf8) else { return }
         let query: [CFString: Any] = [
             kSecClass:       kSecClassGenericPassword,
@@ -112,9 +119,13 @@ final class KeychainHelper {
         ]
         SecItemDelete(query as CFDictionary)
         SecItemAdd(query as CFDictionary, nil)
+#endif
     }
 
     private func read(key: Key) -> String? {
+#if DEBUG
+        return nil   // Debug: never read from Keychain
+#else
         let query: [CFString: Any] = [
             kSecClass:       kSecClassGenericPassword,
             kSecAttrAccount: key.rawValue,
@@ -128,14 +139,19 @@ final class KeychainHelper {
               let string = String(data: data, encoding: .utf8)
         else { return nil }
         return string
+#endif
     }
 
     @discardableResult
     private func delete(key: Key) -> Bool {
+#if DEBUG
+        return true   // Debug: no-op
+#else
         let query: [CFString: Any] = [
             kSecClass:       kSecClassGenericPassword,
             kSecAttrAccount: key.rawValue,
         ]
         return SecItemDelete(query as CFDictionary) == errSecSuccess
+#endif
     }
 }

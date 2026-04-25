@@ -54,6 +54,7 @@ actor GitHubAPIClient {
         let repo: String
         let docsPath: String   // e.g. "docs-cms/rfcs"
         let rfcLabel: String   // e.g. "hermit:rfc-ready"
+        let pat: String        // personal access token
     }
 
     private let config: Config
@@ -66,14 +67,16 @@ actor GitHubAPIClient {
         let kc = KeychainHelper.shared
         guard let baseURL  = kc.baseURL,
               let owner    = kc.repoOwner,
-              let repo     = kc.repoName
+              let repo     = kc.repoName,
+              let pat      = kc.pat
         else { return nil }
         let config = Config(
             baseURL:  baseURL,
             owner:    owner,
             repo:     repo,
             docsPath: kc.docsPath ?? "docs-cms/rfcs",
-            rfcLabel: kc.rfcLabel ?? "hermit:rfc-ready"
+            rfcLabel: kc.rfcLabel ?? "hermit:rfc-ready",
+            pat:      pat
         )
         return GitHubAPIClient(config: config)
     }
@@ -98,6 +101,16 @@ actor GitHubAPIClient {
         return items
             .filter { $0.type == "file" && $0.name.hasSuffix(".md") }
             .map { RFCFile(id: $0.sha, name: $0.name, path: $0.path, sha: $0.sha, htmlURL: $0.htmlUrl ?? "") }
+    }
+
+    /// Lists .md file paths under docsPath on a given ref (branch/SHA).
+    func listFilesOnRef(docsPath: String, ref: String) async throws -> [String] {
+        var url = apiURL("repos/\(config.owner)/\(config.repo)/contents/\(docsPath)")
+        url = url.appending(queryItems: [URLQueryItem(name: "ref", value: ref)])
+        let items = try await get([GitHubContentItem].self, from: url)
+        return items
+            .filter { $0.type == "file" && $0.name.hasSuffix(".md") }
+            .map { $0.path }
     }
 
     func listOpenRFCPullRequests() async throws -> [RFCPullRequest] {
@@ -128,13 +141,17 @@ actor GitHubAPIClient {
     // MARK: - RFC Content Fetching (hermit-ru2)
 
     /// Fetches raw markdown, using ETag-based in-memory cache.
+    /// Handles both GitHub (raw+json Accept) and Gitea (JSON envelope with base64 content).
     func fetchRFCContent(path: String, ref: String) async throws -> String {
         let url = apiURL("repos/\(config.owner)/\(config.repo)/contents/\(path)")
             .appending(queryItems: [URLQueryItem(name: "ref", value: ref)])
         let cacheKey = "\(path)@\(ref)"
 
         var request = authorizedRequest(url: url)
-        request.setValue("application/vnd.github.raw+json", forHTTPHeaderField: "Accept")
+        // Use raw Accept for GitHub.com; Gitea ignores it and returns JSON envelope.
+        if config.baseURL.contains("api.github.com") {
+            request.setValue("application/vnd.github.raw+json", forHTTPHeaderField: "Accept")
+        }
         if let cached = contentCache[cacheKey] {
             request.setValue(cached.etag, forHTTPHeaderField: "If-None-Match")
         }
@@ -147,10 +164,32 @@ actor GitHubAPIClient {
             return String(data: cached.data, encoding: .utf8) ?? ""
         }
         try checkStatus(http)
-        if let etag = http.value(forHTTPHeaderField: "ETag") {
-            contentCache[cacheKey] = (etag: etag, data: data)
+
+        // Try to decode as raw text first (GitHub.com raw response or plain text).
+        // If the response looks like JSON (starts with '{'), decode the envelope and
+        // extract the base64 content field (Gitea behaviour).
+        let resultData: Data
+        let trimmed = data.prefix(1)
+        if trimmed.first == UInt8(ascii: "{") {
+            // JSON envelope — decode and base64-decode the content field
+            struct ContentEnvelope: Decodable {
+                let content: String
+                let encoding: String?
+            }
+            let envelope = try JSONDecoder().decode(ContentEnvelope.self, from: data)
+            let cleaned = envelope.content.components(separatedBy: .whitespacesAndNewlines).joined()
+            guard let decoded = Data(base64Encoded: cleaned) else {
+                throw APIError.invalidResponse
+            }
+            resultData = decoded
+        } else {
+            resultData = data
         }
-        return String(data: data, encoding: .utf8) ?? ""
+
+        if let etag = http.value(forHTTPHeaderField: "ETag") {
+            contentCache[cacheKey] = (etag: etag, data: resultData)
+        }
+        return String(data: resultData, encoding: .utf8) ?? ""
     }
 
     // MARK: - PR Review Comment CRUD (hermit-9os)
@@ -294,7 +333,7 @@ actor GitHubAPIClient {
 
     private func authorizedRequest(url: URL) -> URLRequest {
         var r = URLRequest(url: url)
-        r.setValue("Bearer \(KeychainHelper.shared.pat ?? "")", forHTTPHeaderField: "Authorization")
+        r.setValue("Bearer \(config.pat)", forHTTPHeaderField: "Authorization")
         r.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         // Only send the GitHub API version header for github.com — Gitea ignores it but some
         // proxies reject unknown headers, so we only add it for the canonical GitHub host.

@@ -19,7 +19,7 @@ final class RFCStore: ObservableObject {
     }
 
     func load() async {
-        guard let client, let _ = config else { return }
+        guard let client, let config else { return }
         isLoading = true
         errorMessage = nil
         do {
@@ -29,8 +29,10 @@ final class RFCStore: ObservableObject {
                     path: $0.path, sha: $0.sha, source: .mainBranch)
             }
             for pr in prs {
+                // Resolve the RFC file path on the PR's head branch
+                let path = await resolvePRPath(client: client, config: config, pr: pr)
                 result.append(RFC(id: "pr-\(pr.id)", title: pr.title,
-                                  path: "", sha: pr.headSHA,
+                                  path: path, sha: pr.headSHA,
                                   source: .pullRequest(pr)))
             }
             rfcs = result.sorted { $0.title < $1.title }
@@ -38,6 +40,16 @@ final class RFCStore: ObservableObject {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    /// Lists files on the PR's head branch under docsPath and returns the first .md path found.
+    private func resolvePRPath(client: GitHubAPIClient, config: GitHubAPIClient.Config, pr: RFCPullRequest) async -> String {
+        do {
+            let files = try await client.listFilesOnRef(docsPath: config.docsPath, ref: pr.headRef)
+            return files.first ?? ""
+        } catch {
+            return ""
+        }
     }
 
     /// hermit-80m: refresh after publish and surface the new RFC
@@ -58,6 +70,7 @@ final class RFCStore: ObservableObject {
 }
 
 struct iPadRootView: View {
+    @EnvironmentObject private var appState: AppState
     @StateObject private var store = RFCStore()
     @State private var selectedRFC: RFC? = nil
     @State private var columnVisibility = NavigationSplitViewVisibility.all
@@ -90,6 +103,18 @@ struct iPadRootView: View {
                 ContentUnavailableView("Select text to comment", systemImage: "bubble.left")
             }
         }
-        .task { await store.load() }
+        .task {
+            if let client = appState.makeAPIClient() {
+                store.configure(client: client, config: GitHubAPIClient.Config(
+                    baseURL:  appState.baseURL,
+                    owner:    appState.repoOwner,
+                    repo:     appState.repoName,
+                    docsPath: appState.docsPath,
+                    rfcLabel: appState.rfcLabel,
+                    pat:      appState.pat
+                ))
+            }
+            await store.load()
+        }
     }
 }

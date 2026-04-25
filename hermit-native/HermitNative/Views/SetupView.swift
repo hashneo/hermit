@@ -96,9 +96,17 @@ struct SetupView: View {
     private func autoDetect() async {
         do {
             let detected = try GiteaAutoConfig.detect()
+#if DEBUG
+            // In debug builds skip the banner and connect immediately —
+            // no Keychain write, no network validation round-trip.
+            await MainActor.run {
+                appState.apply(detected)
+            }
+#else
             await MainActor.run {
                 mode = .autoReady(detected)
             }
+#endif
         } catch {
             // Not on a dev machine with Gitea — fall through to manual
             await MainActor.run {
@@ -107,7 +115,7 @@ struct SetupView: View {
         }
     }
 
-    // MARK: - Apply auto config
+    // MARK: - Apply auto config (release path — writes to Keychain)
 
     private func apply(_ detected: GiteaAutoConfig.DetectedConfig) {
         isWorking = true

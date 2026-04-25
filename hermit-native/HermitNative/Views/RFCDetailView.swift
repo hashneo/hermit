@@ -8,6 +8,7 @@ struct RFCDetailView: View {
     let rfc: RFC
     var onTextSelected: ((String) -> Void)? = nil
 
+    @EnvironmentObject private var appState: AppState
     @State private var markdown: String = ""
     @State private var isLoading = true
     @State private var errorMessage: String? = nil
@@ -35,7 +36,7 @@ struct RFCDetailView: View {
                 .help(isReadingMode ? "Restore sidebar" : "Reading mode")
             }
         }
-        .task { await loadContent() }
+        .task(id: rfc.id) { await loadContent() }
         // hermit-8q5: swipe right restores sidebar
         .gesture(
             DragGesture()
@@ -57,9 +58,30 @@ struct RFCDetailView: View {
     }
 
     private func loadContent() async {
-        // In real usage, client is injected via environment; stub for compilability.
-        // Full wiring in RFCStore/iPadRootView task graph.
+        isLoading = true
+        errorMessage = nil
+        guard let client = appState.makeAPIClient() else {
+            errorMessage = "Not configured."
+            isLoading = false
+            return
+        }
+        guard !rfc.path.isEmpty else {
+            errorMessage = "No RFC file found on this branch."
+            isLoading = false
+            return
+        }
+        do {
+            let ref: String
+            switch rfc.source {
+            case .mainBranch:
+                ref = "main"
+            case .pullRequest(let pr):
+                ref = pr.headRef
+            }
+            markdown = try await client.fetchRFCContent(path: rfc.path, ref: ref)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
         isLoading = false
-        markdown = "# \(rfc.title)\n\n*Content loads via GitHubAPIClient.*"
     }
 }

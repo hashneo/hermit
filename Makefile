@@ -108,6 +108,8 @@ NATIVE_DIR        := hermit-native
 NATIVE_PROJECT    := $(NATIVE_DIR)/HermitNative.xcodeproj
 NATIVE_SCHEME     := HermitNative
 NATIVE_BUILD_DIR  := $(NATIVE_DIR)/build
+NATIVE_APP_SRC    := $(NATIVE_BUILD_DIR)/Build/Products/Debug/HermitNative.app
+NATIVE_APP_DEST   := HermitNative.app
 XCODE             := DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild
 
 native-build: native-build-macos native-build-ipad ## Build the native app for macOS and iPad simulator
@@ -127,6 +129,9 @@ native-build-macos: ## Build the native app for macOS
 		-configuration Debug \
 		-derivedDataPath $(NATIVE_BUILD_DIR) \
 		build
+	@echo "Copying HermitNative.app to project root..."
+	@rm -rf $(NATIVE_APP_DEST)
+	@cp -R $(NATIVE_APP_SRC) $(NATIVE_APP_DEST)
 
 native-build-ipad: ## Build the native app for iPad simulator
 	@echo "Building HermitNative for iPad simulator..."
@@ -155,8 +160,11 @@ native-test: ## Run the native app test suite
 
 native-clean: ## Clean the native app build artifacts
 	@echo "Cleaning HermitNative build..."
-	rm -rf $(NATIVE_BUILD_DIR)
+	rm -rf $(NATIVE_BUILD_DIR) $(NATIVE_APP_DEST)
 	$(XCODE) -project $(NATIVE_PROJECT) -scheme $(NATIVE_SCHEME) clean 2>/dev/null || true
 
-native-open: ## Open the native app project in Xcode
-	@open $(NATIVE_PROJECT)
+native-open: ## Build, copy to root, then launch HermitNative.app
+	@$(MAKE) native-build-macos
+	@pkill -x HermitNative 2>/dev/null || true
+	@sleep 0.5
+	@open $(NATIVE_APP_DEST)
