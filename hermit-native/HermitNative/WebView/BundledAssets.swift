@@ -89,7 +89,7 @@ enum BundledAssets {
 
     /* Code blocks */
     .doc-body pre {
-      background: #f6f8fa;
+      background: #eafaea;
       border: 1px solid #d0d7de;
       border-radius: 6px;
       padding: 12px 14px;
@@ -107,7 +107,7 @@ enum BundledAssets {
     }
 
     .doc-body :not(pre) > code {
-      background: #f6f8fa;
+      background: #eafaea;
       border: 1px solid #d0d7de;
       border-radius: 6px;
       padding: 0.1em 0.35em;

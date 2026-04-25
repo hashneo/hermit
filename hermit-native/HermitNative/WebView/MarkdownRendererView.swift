@@ -8,11 +8,7 @@ struct MarkdownRendererView: View {
     var onLineTapped: ((Int) -> Void)? = nil
 
     private var codeBackground: Color {
-#if os(macOS)
-        Color(nsColor: .windowBackgroundColor)
-#else
-        Color(uiColor: .secondarySystemBackground)
-#endif
+        Color(red: 0.92, green: 0.98, blue: 0.92)  // light green
     }
 
     private var codeBackgroundSwiftUIColor: Color {
@@ -95,20 +91,32 @@ struct MarkdownRendererView: View {
     // MARK: - Code block
 
     private func codeBlockView(language: String, code: String) -> some View {
-        Text(code)
-            .font(.system(.callout, design: .monospaced))
-            .foregroundStyle(.primary)
+        let content: Text
+        if language.isEmpty {
+            content = Text(code)
+                .font(.system(.callout, design: .monospaced))
+        } else {
+            let nsAttr = SyntaxHighlighter.highlight(code: code, language: language)
+            let attrStr: AttributedString
+#if os(macOS)
+            attrStr = (try? AttributedString(nsAttr, including: \.appKit)) ?? AttributedString(code)
+#else
+            attrStr = (try? AttributedString(nsAttr, including: \.uiKit)) ?? AttributedString(code)
+#endif
+            content = Text(attrStr)
+        }
+        return content
             .fixedSize(horizontal: false, vertical: true)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(codeBackground)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
-        )
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(codeBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+            )
     }
 
     // MARK: - Lists

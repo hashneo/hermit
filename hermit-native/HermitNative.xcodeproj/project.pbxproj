@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -45,13 +45,14 @@
 		B001A001 /* MarkdownParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A002 /* MarkdownParser.swift */; };
 		B001A003 /* MarkdownRendererView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A004 /* MarkdownRendererView.swift */; };
 		B001A005 /* MermaidView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A006 /* MermaidView.swift */; };
-		F51CA0CA0595C036D8E2D00B /* CommentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 702547F1AF611276712EA42C /* CommentStore.swift */; };
+		B001A007 /* SyntaxHighlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A008 /* SyntaxHighlighter.swift */; };
 		B001B001 /* HermitModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B002 /* HermitModels.swift */; };
 		B001B003 /* HermitAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B004 /* HermitAPIClient.swift */; };
 		B001B005 /* EmbeddedServerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B006 /* EmbeddedServerManager.swift */; };
 		B001B007 /* ServerDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B008 /* ServerDiscoveryService.swift */; };
 		B001B009 /* PairingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B00A /* PairingService.swift */; };
 		B001C001 /* HermitServer.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B001C002 /* HermitServer.xcframework */; };
+		F51CA0CA0595C036D8E2D00B /* CommentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 702547F1AF611276712EA42C /* CommentStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -59,12 +60,6 @@
 		702547F1AF611276712EA42C /* CommentStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CommentStore.swift; sourceTree = "<group>"; };
 		7DEF0D01EB6E30FF8CF74D70 /* GutterMarkdownView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GutterMarkdownView.swift; sourceTree = "<group>"; };
 		B001000B /* HermitNativeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitNativeApp.swift; sourceTree = "<group>"; };
-		B001B002 /* HermitModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitModels.swift; sourceTree = "<group>"; };
-		B001B004 /* HermitAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitAPIClient.swift; sourceTree = "<group>"; };
-		B001B006 /* EmbeddedServerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedServerManager.swift; sourceTree = "<group>"; };
-		B001B008 /* ServerDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDiscoveryService.swift; sourceTree = "<group>"; };
-		B001B00A /* PairingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingService.swift; sourceTree = "<group>"; };
-		B001C002 /* HermitServer.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = HermitServer.xcframework; sourceTree = "<group>"; };
 		B001000D /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		B001000F /* RFC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFC.swift; sourceTree = "<group>"; };
 		B0010011 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
@@ -101,6 +96,13 @@
 		B001A002 /* MarkdownParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownParser.swift; sourceTree = "<group>"; };
 		B001A004 /* MarkdownRendererView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRendererView.swift; sourceTree = "<group>"; };
 		B001A006 /* MermaidView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MermaidView.swift; sourceTree = "<group>"; };
+		B001A008 /* SyntaxHighlighter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyntaxHighlighter.swift; sourceTree = "<group>"; };
+		B001B002 /* HermitModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitModels.swift; sourceTree = "<group>"; };
+		B001B004 /* HermitAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitAPIClient.swift; sourceTree = "<group>"; };
+		B001B006 /* EmbeddedServerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedServerManager.swift; sourceTree = "<group>"; };
+		B001B008 /* ServerDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDiscoveryService.swift; sourceTree = "<group>"; };
+		B001B00A /* PairingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingService.swift; sourceTree = "<group>"; };
+		B001C002 /* HermitServer.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = HermitServer.xcframework; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -108,7 +110,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B001C001 /* HermitServer.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -178,24 +179,6 @@
 			path = Clients;
 			sourceTree = "<group>";
 		};
-		B001B00B /* Server */ = {
-			isa = PBXGroup;
-			children = (
-				B001B006 /* EmbeddedServerManager.swift */,
-				B001B008 /* ServerDiscoveryService.swift */,
-				B001B00A /* PairingService.swift */,
-			);
-			path = Server;
-			sourceTree = "<group>";
-		};
-		B001C003 /* Frameworks */ = {
-			isa = PBXGroup;
-			children = (
-				B001C002 /* HermitServer.xcframework */,
-			);
-			name = Frameworks;
-			sourceTree = "<group>";
-		};
 		B0010096 /* AI */ = {
 			isa = PBXGroup;
 			children = (
@@ -238,6 +221,7 @@
 				B001A002 /* MarkdownParser.swift */,
 				B001A004 /* MarkdownRendererView.swift */,
 				B001A006 /* MermaidView.swift */,
+				B001A008 /* SyntaxHighlighter.swift */,
 			);
 			path = WebView;
 			sourceTree = "<group>";
@@ -271,6 +255,24 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
+		B001B00B /* Server */ = {
+			isa = PBXGroup;
+			children = (
+				B001B006 /* EmbeddedServerManager.swift */,
+				B001B008 /* ServerDiscoveryService.swift */,
+				B001B00A /* PairingService.swift */,
+			);
+			path = Server;
+			sourceTree = "<group>";
+		};
+		B001C003 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				B001C002 /* HermitServer.xcframework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -299,7 +301,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1530;
-				LastUpgradeCheck = 1530;
+				LastUpgradeCheck = 2640;
 				TargetAttributes = {
 					B0010050 = {
 						CreatedOnToolsVersion = 15.3;
@@ -363,6 +365,7 @@
 				B001A001 /* MarkdownParser.swift in Sources */,
 				B001A003 /* MarkdownRendererView.swift in Sources */,
 				B001A005 /* MermaidView.swift in Sources */,
+				B001A007 /* SyntaxHighlighter.swift in Sources */,
 				B0010032 /* SetupView.swift in Sources */,
 				B0010034 /* RootView.swift in Sources */,
 				B0010036 /* RFCBrowserView.swift in Sources */,
@@ -413,6 +416,7 @@
 				CLANG_WARN_INT_CONVERSION = YES;
 				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
 				CLANG_WARN_OBJC_IMPLICIT_RETAIN_CYCLE = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
 				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
 				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
 				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
@@ -423,6 +427,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -445,6 +450,7 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -474,6 +480,7 @@
 				CLANG_WARN_INT_CONVERSION = YES;
 				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
 				CLANG_WARN_OBJC_IMPLICIT_RETAIN_CYCLE = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
 				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
 				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
 				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
@@ -484,6 +491,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -498,6 +506,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_FAST_MATH = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 			};
@@ -509,17 +518,23 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "HermitNative/HermitNative-Debug.entitlements";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = KCM5F3ZYT3;
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/HermitNative",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = HermitNative/Info.plist;
 				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Hermit uses Bluetooth to discover and pair with nearby Macs.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Hermit uses the local network to discover and connect to the Hermit server on your Mac.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Hermit uses the microphone to let you dictate RFC content and voice comments.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Hermit uses speech recognition to transcribe your voice into RFC text and comments.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -532,11 +547,9 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.2;
 				MARKETING_VERSION = 0.1.0;
-				OTHER_SWIFT_FLAGS = (
-					"$(inherited)",
-					"-DHERMIT_EMBEDDED_SERVER",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = "com.hashicorp.hermit-native";
+				OTHER_SWIFT_FLAGS = "$(inherited)";
+				"OTHER_LDFLAGS[sdk=macosx*]" = "$(inherited)";
+				PRODUCT_BUNDLE_IDENTIFIER = "me.steven.hermit-native";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "macosx iphonesimulator iphoneos";
 				SUPPORTS_MACCATALYST = NO;
@@ -556,6 +569,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "";
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -576,10 +590,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.2;
 				MARKETING_VERSION = 0.1.0;
-				OTHER_SWIFT_FLAGS = (
-					"$(inherited)",
-					"-DHERMIT_EMBEDDED_SERVER",
-				);
+				OTHER_SWIFT_FLAGS = "$(inherited) -DHERMIT_EMBEDDED_SERVER";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.hashicorp.hermit-native";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "macosx iphonesimulator iphoneos";

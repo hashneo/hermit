@@ -1,4 +1,4 @@
-.PHONY: build run debug clean ui-build validate-config validate-config-structure validate-config-access gitea-up gitea-down gitea-logs gitea-reset gitea-seed-pr native-build native-build-macos native-build-ipad native-test native-clean native-open gomobile-build dev
+.PHONY: build run debug clean ui-build validate-config validate-config-structure validate-config-access gitea-up gitea-down gitea-logs gitea-reset gitea-seed-pr native-build native-build-macos native-build-ipad native-test native-clean native-open gomobile-build dev ipad-deploy
 
 APP_NAME := hermit
 BIN_DIR := bin
@@ -168,7 +168,35 @@ native-open: build gomobile-build native-build-macos ## Build Go binary + xcfram
 	@sleep 0.5
 	@open $(NATIVE_APP_DEST)
 
-dev: native-open ## Full automated dev cycle: gomobile → build → launch
+dev: ## Build macOS + iPad apps, restart macOS app, and push to iPad
+	@$(MAKE) build
+	@$(MAKE) native-build-macos
+	@pkill -x HermitNative 2>/dev/null || true
+	@sleep 0.5
+	@cp -R $(NATIVE_APP_SRC) $(NATIVE_APP_DEST)
+	@open $(NATIVE_APP_DEST)
+	@$(MAKE) ipad-deploy
+
+IPAD_UDID        := 00008142-000905D10A11401C
+IPAD_DEVICE_ID   := 86A8E39E-99D9-5A95-BD57-EE3DAD48E223
+IPAD_APP_BUNDLE  := $(NATIVE_BUILD_DIR)/Build/Products/Debug-iphoneos/HermitNative.app
+
+ipad-deploy: ## Build and push to connected iPad (requires Developer Mode enabled)
+	@echo "Building HermitNative for iPad..."
+	$(XCODE) \
+		-project $(NATIVE_PROJECT) \
+		-scheme $(NATIVE_SCHEME) \
+		-destination "platform=iOS,id=$(IPAD_UDID)" \
+		-configuration Debug \
+		-derivedDataPath $(NATIVE_BUILD_DIR) \
+		-allowProvisioningUpdates \
+		EXCLUDED_SOURCE_FILE_NAMES="HermitServer.xcframework" \
+		OTHER_SWIFT_FLAGS="-DDEBUG" \
+		build
+	@echo "Installing on iPad..."
+	DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl device install app \
+		--device $(IPAD_DEVICE_ID) \
+		$(IPAD_APP_BUNDLE)
 
 # ── gomobile xcframework ───────────────────────────────────────────────────────
 

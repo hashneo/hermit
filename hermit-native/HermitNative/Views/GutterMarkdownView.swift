@@ -265,11 +265,7 @@ struct MarkdownBlockView: View {
     var onTapped: (() -> Void)? = nil
 
     private var codeBackground: Color {
-#if os(macOS)
-        Color(nsColor: .windowBackgroundColor)
-#else
-        Color(uiColor: .secondarySystemBackground)
-#endif
+        Color(red: 0.92, green: 0.98, blue: 0.92)  // light green
     }
 
 #if os(macOS)
@@ -342,21 +338,21 @@ struct MarkdownBlockView: View {
         }
     }
 
-    // MARK: Code block — monospaced selectable text inside styled container
+    // MARK: Code block — syntax-highlighted selectable text inside styled container
     private func codeBlockView(language: String, code: String) -> some View {
+        let attr: NSAttributedString
+        if language.isEmpty {
+            // No language — plain monospaced text
 #if os(macOS)
-        let font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize - 1, weight: .regular)
-        let attr = NSAttributedString(string: code, attributes: [
-            .font: font,
-            .foregroundColor: NSColor.labelColor
-        ])
+            let font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize - 1, weight: .regular)
+            attr = NSAttributedString(string: code, attributes: [.font: font, .foregroundColor: NSColor.labelColor])
 #else
-        let font = UIFont.monospacedSystemFont(ofSize: UIFont.systemFontSize - 1, weight: .regular)
-        let attr = NSAttributedString(string: code, attributes: [
-            .font: font,
-            .foregroundColor: UIColor.label
-        ])
+            let font = UIFont.monospacedSystemFont(ofSize: UIFont.systemFontSize - 1, weight: .regular)
+            attr = NSAttributedString(string: code, attributes: [.font: font, .foregroundColor: UIColor.label])
 #endif
+        } else {
+            attr = SyntaxHighlighter.highlight(code: code, language: language)
+        }
         return selectable(attr)
             .fixedSize(horizontal: false, vertical: true)
             .padding(12)

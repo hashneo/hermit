@@ -221,9 +221,9 @@ final class QuotableUITextView: UITextView {
                                   image: UIImage(systemName: "quote.bubble")) { [weak self] _ in
                 self?.quoteAndComment(nil)
             }
-            builder.insertSiblingMenu(
+            builder.insertSibling(
                 UIMenu(title: "", options: .displayInline, children: [action]),
-                afterMenuFor: .standardEdit
+                afterMenu: .edit
             )
         }
     }
@@ -272,7 +272,7 @@ extension MarkdownInline {
             let mono = NSFont.monospacedSystemFont(ofSize: bodyFont.pointSize - 1, weight: .regular)
             return NSAttributedString(string: s, attributes: [
                 .font: mono,
-                .backgroundColor: NSColor.windowBackgroundColor,
+                .backgroundColor: NSColor(red: 0.92, green: 0.98, blue: 0.92, alpha: 1.0),  // light green
                 .foregroundColor: NSColor.labelColor
             ])
         case .link(let text, let url):
@@ -300,7 +300,7 @@ extension MarkdownInline {
             let mono = UIFont.monospacedSystemFont(ofSize: bodyFont.pointSize - 1, weight: .regular)
             return NSAttributedString(string: s, attributes: [
                 .font: mono,
-                .backgroundColor: UIColor.secondarySystemBackground,
+                .backgroundColor: UIColor(red: 0.92, green: 0.98, blue: 0.92, alpha: 1.0),  // light green
                 .foregroundColor: UIColor.label
             ])
         case .link(let text, let url):
