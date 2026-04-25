@@ -3,7 +3,7 @@ title: Voice Mode and Hands-Free Conversation
 status: Draft
 author: Steven Taylor
 created: 2026-04-24T00:00:00Z
-tags: [voice, stt, tts, avfoundation, speech, hands-free, rfc]
+tags: [avfoundation, hands-free, rfc, speech, stt, tts, voice]
 id: rfc-011
 project_id: hermit
 doc_uuid: a1b2c3d4-0006-4000-8000-100000000011
@@ -186,7 +186,7 @@ Voice selection: defaults to the system Siri voice when available (via `AVSpeech
 
 `RFCInterviewSession` drives the voice loop:
 
-```
+```text
 ┌─────────────────────────────────────────────────────────┐
 │                 Voice Interview Loop                    │
 │                                                         │
@@ -243,7 +243,7 @@ If neither pattern matches, the full text is passed to the AI to interpret in co
 
 `VoiceCommentSession.swift` is a simplified single-turn flow used from `ComposeCommentView`:
 
-```
+```text
 AI speaks: "What would you like to comment on this section?"
     ↓
 VoiceEngine listens

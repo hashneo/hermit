@@ -3,7 +3,7 @@ title: GitHub-Only Client Architecture
 status: Draft
 author: Steven Taylor
 created: 2026-04-24T00:00:00Z
-tags: [github, api, client, architecture, auth, rfc]
+tags: [api, architecture, auth, client, github, rfc]
 id: rfc-007
 project_id: hermit
 doc_uuid: a1b2c3d4-0002-4000-8000-100000000007
@@ -66,7 +66,7 @@ For public repositories, `public_repo` is sufficient in place of `repo`.
 
 All requests include:
 
-```
+```text
 Authorization: Bearer {pat}
 Accept: application/vnd.github+json
 X-GitHub-Api-Version: 2022-11-28

@@ -3,7 +3,7 @@ title: Native Swift App — Vision and Architecture
 status: Draft
 author: Steven Taylor
 created: 2026-04-24T00:00:00Z
-tags: [native, swift, macos, ipad, architecture, rfc]
+tags: [architecture, ipad, macos, native, rfc, swift]
 id: rfc-006
 project_id: hermit
 doc_uuid: a1b2c3d4-0001-4000-8000-100000000006
@@ -35,7 +35,7 @@ A single Xcode multiplatform target produces both apps from one Swift codebase. 
 
 ## High-Level Architecture
 
-```
+```text
 hermit-native/
 │
 ├── AI/                         # AI provider abstraction + RFC interview prompts
@@ -105,7 +105,7 @@ No third-party Swift packages are required.
 
 ## Data Flow: Reading an RFC
 
-```
+```text
 App launch
   → KeychainHelper loads PAT
   → GitHubAPIClient.listRepositories() [GitHub API: GET /user/repos or configured list]
@@ -124,7 +124,7 @@ App launch
 
 See rfc-010 (AI-Assisted RFC Authoring) and rfc-012 (RFC Publishing via GitHub API) for full detail.
 
-```
+```text
 User triggers "New RFC"
   → RFCInterviewSession begins (text or voice mode)
   → Multi-turn AI conversation collects: title, problem, proposal, alternatives, questions

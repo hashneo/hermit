@@ -1,14 +1,13 @@
 import Foundation
 
-// MARK: - MarkdownRenderer: marked.js + mermaid.js via CDN
+// MARK: - MarkdownRenderer: legacy shim (superseded by MarkdownRendererView + MarkdownParser)
+//
+// hermit-sqo: RFCDetailView now uses MarkdownRendererView (native SwiftUI) directly.
+// This file is retained for reference and potential reuse (e.g. export/share flows).
 
-/// Converts raw RFC markdown to a self-contained HTML string ready for WKWebView.
-/// - Uses marked.js (CDN) for full CommonMark rendering
-/// - Uses mermaid.js (CDN) for diagram fences
-/// - Strips YAML frontmatter via JS
-/// - Wraps content in .doc-card.rfc-page layout matching the web GUI
 enum MarkdownRenderer {
 
+    @available(*, deprecated, renamed: "MarkdownRendererView", message: "Use MarkdownRendererView + MarkdownParser for native rendering.")
     static func htmlString(from markdown: String, css: String, mermaidScript: String) -> String {
         // JSON-encode the markdown by wrapping it in an array so NSJSONSerialization
         // accepts it (it requires an array or dict root object). We then strip the
