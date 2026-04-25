@@ -352,29 +352,56 @@ struct MarkdownBlockView: View {
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2), lineWidth: 1))
     }
 
-    // MARK: Lists — each item is its own selectable run
+    // MARK: Lists — each item built as a single NSAttributedString with paragraph indent
+    // so the marker and text are typeset together and align correctly regardless of wrapping.
+
     private func bulletListView(items: [[MarkdownInline]]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, inlines in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("•").foregroundStyle(.secondary)
-                    selectable(inlines.nsAttributedString())
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                selectable(listItemString(marker: "•", inlines: inlines))
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
     private func orderedListView(items: [[MarkdownInline]]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, inlines in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("\(index + 1).").foregroundStyle(.secondary).frame(minWidth: 20, alignment: .trailing)
-                    selectable(inlines.nsAttributedString())
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                selectable(listItemString(marker: "\(index + 1).", inlines: inlines))
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    /// Builds a single NSAttributedString for a list item using paragraph tab stops
+    /// so the marker sits at column 0 and the body text indents consistently.
+    private func listItemString(marker: String, inlines: [MarkdownInline]) -> NSAttributedString {
+#if os(macOS)
+        let bodyFont = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let markerColor = NSColor.secondaryLabelColor
+#else
+        let bodyFont = UIFont.preferredFont(forTextStyle: .body)
+        let markerColor = UIColor.secondaryLabel
+#endif
+        let indent: CGFloat = 20
+        let para = NSMutableParagraphStyle()
+        para.firstLineHeadIndent = 0
+        para.headIndent = indent
+        para.tabStops = [NSTextTab(textAlignment: .left, location: indent)]
+
+        let result = NSMutableAttributedString()
+        // Marker + tab
+        result.append(NSAttributedString(string: "\(marker)\t", attributes: [
+            .font: bodyFont,
+            .foregroundColor: markerColor,
+            .paragraphStyle: para
+        ]))
+        // Body inlines — apply the same paragraph style so wrapping aligns
+        let body = inlines.nsAttributedString(font: bodyFont)
+        let bodyM = NSMutableAttributedString(attributedString: body)
+        bodyM.addAttribute(.paragraphStyle, value: para, range: NSRange(location: 0, length: bodyM.length))
+        result.append(bodyM)
+        return result
     }
 
     // MARK: Blockquote
