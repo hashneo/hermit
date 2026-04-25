@@ -75,6 +75,16 @@ struct GutterMarkdownView: View {
                             bubbleLine = nil
                             bubbleText = ""
                         }
+                    },
+                    onTapped: {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            if selectedLine == line {
+                                selectedLine = nil; composeText = ""; submitError = nil
+                            } else {
+                                selectedLine = line; composeText = ""; submitError = nil
+                            }
+                        }
+                        onLineTapped?(line)
                     }
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -251,6 +261,8 @@ struct MarkdownBlockView: View {
     /// Called when text selection changes inside this block.
     /// Receives (selectedText, selectionRect-in-view-coords) — nil text means deselected.
     var onSelectionChanged: ((String?, CGRect) -> Void)? = nil
+    /// Fired on a plain tap (no text selected) so the gutter can open the comment composer.
+    var onTapped: (() -> Void)? = nil
 
     private var codeBackground: Color {
 #if os(macOS)
@@ -301,7 +313,8 @@ struct MarkdownBlockView: View {
         SelectableTextView(
             attributedText: attrStr,
             onQuoteSelected: onQuoteSelected,
-            onSelectionChanged: { text, rect in onSelectionChanged?(text, rect) }
+            onSelectionChanged: { text, rect in onSelectionChanged?(text, rect) },
+            onTapped: onTapped
         )
     }
 

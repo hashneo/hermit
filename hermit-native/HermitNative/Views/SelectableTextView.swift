@@ -15,6 +15,8 @@ struct SelectableTextView: NSViewRepresentable {
     let attributedText: NSAttributedString
     var onQuoteSelected: ((String) -> Void)? = nil
     var onSelectionChanged: ((String?, CGRect) -> Void)? = nil
+    /// Fired when the user clicks without making a text selection (i.e. a plain tap).
+    var onTapped: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -23,6 +25,7 @@ struct SelectableTextView: NSViewRepresentable {
         tv.delegate = context.coordinator
         tv.onQuoteSelected = onQuoteSelected
         tv.onSelectionChanged = onSelectionChanged
+        tv.onTapped = onTapped
         tv.isEditable = false
         tv.isSelectable = true
         tv.drawsBackground = false
@@ -39,6 +42,7 @@ struct SelectableTextView: NSViewRepresentable {
     func updateNSView(_ nsView: QuotableNSTextView, context: Context) {
         nsView.onQuoteSelected = onQuoteSelected
         nsView.onSelectionChanged = onSelectionChanged
+        nsView.onTapped = onTapped
         if nsView.attributedString() != attributedText {
             nsView.textStorage?.setAttributedString(attributedText)
         }
@@ -55,11 +59,22 @@ struct SelectableTextView: NSViewRepresentable {
 final class QuotableNSTextView: NSTextView {
     var onQuoteSelected: ((String) -> Void)?
     var onSelectionChanged: ((String?, CGRect) -> Void)?
+    var onTapped: (() -> Void)?
 
     override var intrinsicContentSize: NSSize {
         guard let lm = layoutManager, let tc = textContainer else { return super.intrinsicContentSize }
         lm.ensureLayout(for: tc)
         return NSSize(width: NSView.noIntrinsicMetric, height: ceil(lm.usedRect(for: tc).height))
+    }
+
+    // Forward single clicks (no drag, no selection) to SwiftUI as a tap.
+    // This allows code blocks and list items to open the comment composer
+    // even though NSTextView normally consumes all mouse events.
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        if selectedRange().length == 0 {
+            onTapped?()
+        }
     }
 
     func reportSelection() {
@@ -108,6 +123,8 @@ struct SelectableTextView: UIViewRepresentable {
     let attributedText: NSAttributedString
     var onQuoteSelected: ((String) -> Void)? = nil
     var onSelectionChanged: ((String?, CGRect) -> Void)? = nil
+    /// Fired when the user taps without making a text selection.
+    var onTapped: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onQuoteSelected: onQuoteSelected, onSelectionChanged: onSelectionChanged)
@@ -117,6 +134,7 @@ struct SelectableTextView: UIViewRepresentable {
         let tv = QuotableUITextView()
         tv.delegate = context.coordinator
         tv.coordinator = context.coordinator
+        tv.onTapped = onTapped
         tv.attributedText = attributedText
         tv.isEditable = false
         tv.isSelectable = true
@@ -133,6 +151,7 @@ struct SelectableTextView: UIViewRepresentable {
         context.coordinator.onQuoteSelected = onQuoteSelected
         context.coordinator.onSelectionChanged = onSelectionChanged
         uiView.coordinator = context.coordinator
+        uiView.onTapped = onTapped
         if uiView.attributedText != attributedText {
             uiView.attributedText = attributedText
         }
@@ -155,6 +174,22 @@ struct SelectableTextView: UIViewRepresentable {
 
 final class QuotableUITextView: UITextView {
     weak var coordinator: SelectableTextView.Coordinator?
+    var onTapped: (() -> Void)?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // Add a tap recogniser that fires onTapped when no text is selected.
+        // requiresExclusiveTouchType = false so it coexists with UITextView's own gestures.
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        tap.cancelsTouchesInView = false
+        addGestureRecognizer(tap)
+    }
+
+    @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
+        if selectedTextRange?.isEmpty ?? true {
+            onTapped?()
+        }
+    }
 
     override var intrinsicContentSize: CGSize {
         layoutIfNeeded()
