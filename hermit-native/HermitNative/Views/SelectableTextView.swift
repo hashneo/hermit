@@ -154,6 +154,7 @@ struct SelectableTextView: UIViewRepresentable {
         uiView.onTapped = onTapped
         if uiView.attributedText != attributedText {
             uiView.attributedText = attributedText
+            uiView.invalidateIntrinsicContentSize()
         }
     }
 
@@ -192,8 +193,22 @@ final class QuotableUITextView: UITextView {
     }
 
     override var intrinsicContentSize: CGSize {
-        layoutIfNeeded()
-        return contentSize
+        // contentSize is unreliable during SwiftUI's measure pass (the scroll view
+        // hasn't been given a width yet). Compute height from the layout manager
+        // so SwiftUI gets the correct size at layout time.
+        let lm = layoutManager
+        let tc = textContainer
+        let width = bounds.width > 0 ? bounds.width : UIScreen.main.bounds.width
+        tc.size = CGSize(width: width, height: .greatestFiniteMagnitude)
+        lm.ensureLayout(for: tc)
+        let used = lm.usedRect(for: tc)
+        return CGSize(width: UIView.noIntrinsicMetric, height: ceil(used.height))
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // Re-measure when width changes (rotation, split-view resize, etc.)
+        invalidateIntrinsicContentSize()
     }
 
     func reportSelection() {
