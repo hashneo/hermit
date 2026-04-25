@@ -113,6 +113,27 @@ actor GitHubAPIClient {
             .map { $0.path }
     }
 
+    /// Returns the .md paths changed by a PR (via the PR files API).
+    func listPRChangedFiles(prNumber: Int, docsPath: String) async throws -> [String] {
+        var results: [String] = []
+        var page = 1
+        while true {
+            var url = apiURL("repos/\(config.owner)/\(config.repo)/pulls/\(prNumber)/files")
+            url = url.appending(queryItems: [
+                URLQueryItem(name: "per_page", value: "100"),
+                URLQueryItem(name: "page", value: "\(page)"),
+            ])
+            let batch = try await get([GitHubPRFile].self, from: url)
+            results.append(contentsOf:
+                batch.filter { $0.filename.hasPrefix(docsPath) && $0.filename.hasSuffix(".md") }
+                     .map { $0.filename }
+            )
+            if batch.count < 100 { break }
+            page += 1
+        }
+        return results
+    }
+
     func listOpenRFCPullRequests() async throws -> [RFCPullRequest] {
         var results: [RFCPullRequest] = []
         var page = 1
@@ -469,6 +490,10 @@ private struct GitHubUser: Decodable { let login: String }
 private struct GitHubRef: Decodable {
     struct Object: Decodable { let sha: String }
     let object: Object
+}
+
+private struct GitHubPRFile: Decodable {
+    let filename: String
 }
 
 private struct GitHubCommitResult: Decodable {

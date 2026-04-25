@@ -42,9 +42,14 @@ final class RFCStore: ObservableObject {
         isLoading = false
     }
 
-    /// Lists files on the PR's head branch under docsPath and returns the first .md path found.
+    /// Returns the RFC .md path for a PR: prefers the file the PR actually changed,
+    /// falling back to the first .md file on the head branch.
     private func resolvePRPath(client: GitHubAPIClient, config: GitHubAPIClient.Config, pr: RFCPullRequest) async -> String {
         do {
+            // First: ask the PR files API which .md files the PR touches
+            let changed = try await client.listPRChangedFiles(prNumber: pr.number, docsPath: config.docsPath)
+            if let path = changed.first { return path }
+            // Fallback: list all .md files on the head branch
             let files = try await client.listFilesOnRef(docsPath: config.docsPath, ref: pr.headRef)
             return files.first ?? ""
         } catch {
