@@ -1,16 +1,31 @@
 import Foundation
 
-// MARK: - hermit-m8j: Markdown → HTML conversion
+// MARK: - MarkdownRenderer: marked.js + mermaid.js via CDN
 
 /// Converts raw RFC markdown to a self-contained HTML string ready for WKWebView.
-/// - Injects hermit-reader.css (inline)
-/// - Adds heading anchor IDs
-/// - Rewrites ```mermaid fences to <div class="mermaid"> for Mermaid.js
-/// - Adds data-line attributes for gutter markers
+/// - Uses marked.js (CDN) for full CommonMark rendering
+/// - Uses mermaid.js (CDN) for diagram fences
+/// - Strips YAML frontmatter via JS
+/// - Wraps content in .doc-card.rfc-page layout matching the web GUI
 enum MarkdownRenderer {
 
     static func htmlString(from markdown: String, css: String, mermaidScript: String) -> String {
-        let body = convertToHTML(markdown)
+        // JSON-encode the markdown so it's safe to embed in a JS string literal.
+        // JSONSerialization encodes as a quoted string including escaping of backslashes,
+        // backticks, dollar signs, etc.
+        let markdownJSON: String
+        if let data = try? JSONSerialization.data(withJSONObject: markdown, options: []),
+           let s = String(data: data, encoding: .utf8) {
+            markdownJSON = s
+        } else {
+            // Fallback: escape manually
+            let escaped = markdown
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "`", with: "\\`")
+                .replacingOccurrences(of: "$", with: "\\$")
+            markdownJSON = "\"\(escaped)\""
+        }
+
         return """
         <!DOCTYPE html>
         <html>
@@ -18,128 +33,67 @@ enum MarkdownRenderer {
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>\(css)</style>
+        <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
         </head>
         <body>
-        \(body)
-        <script>\(mermaidScript)</script>
+        <div class="rfc-stage-bg">
+          <div class="doc-card rfc-page">
+            <div class="doc-body" id="content"></div>
+          </div>
+        </div>
         <script>
-        if (typeof mermaid !== 'undefined') {
-          mermaid.initialize({ startOnLoad: true, theme: 'default' });
-        }
-        // Notify Swift of text selections
-        document.addEventListener('selectionchange', function() {
-          var sel = window.getSelection();
-          if (sel && sel.toString().length > 0) {
-            window.webkit.messageHandlers.textSelected.postMessage({
-              text: sel.toString(),
-              range: sel.getRangeAt(0).startOffset
-            });
+        (function() {
+          var raw = \(markdownJSON);
+
+          // Strip YAML frontmatter (--- ... ---)
+          raw = raw.replace(/^---[\\s\\S]*?\\n---\\n?/, '');
+
+          // Configure marked with a custom renderer that converts mermaid fences
+          // to <div class="mermaid"> elements
+          var renderer = new marked.Renderer();
+          var origCode = renderer.code.bind(renderer);
+          renderer.code = function(token) {
+            // marked v12+ passes a token object; extract lang and text
+            var lang = (token && token.lang) ? token.lang : (typeof token === 'string' ? '' : '');
+            var text = (token && token.text != null) ? token.text : (typeof token === 'string' ? token : '');
+            // Fallback for older marked API (string, lang, escaped)
+            if (typeof arguments[0] === 'string') {
+              text = arguments[0];
+              lang = arguments[1] || '';
+            }
+            if (lang === 'mermaid') {
+              return '<div class="mermaid">' + text + '</div>';
+            }
+            return origCode(token);
+          };
+
+          marked.setOptions({ renderer: renderer });
+
+          document.getElementById('content').innerHTML = marked.parse(raw);
+
+          // Initialize mermaid after content is injected
+          if (typeof mermaid !== 'undefined') {
+            mermaid.initialize({ startOnLoad: false, theme: 'default' });
+            mermaid.run({ nodes: document.querySelectorAll('.mermaid') });
           }
-        });
+
+          // Notify Swift of text selections
+          document.addEventListener('selectionchange', function() {
+            var sel = window.getSelection();
+            if (sel && sel.toString().length > 0) {
+              try {
+                window.webkit.messageHandlers.textSelected.postMessage({
+                  text: sel.toString(),
+                  range: sel.getRangeAt(0).startOffset
+                });
+              } catch(e) {}
+            }
+          });
+        })();
         </script>
         </body>
         </html>
         """
-    }
-
-    // MARK: - Private conversion
-
-    /// Minimal line-by-line markdown → HTML.
-    /// Handles: headings, mermaid fences, code fences, paragraphs, blank lines.
-    /// Full fidelity rendering is deferred to a future goldmark-based server pass.
-    private static func convertToHTML(_ markdown: String) -> String {
-        let lines = markdown.components(separatedBy: "\n")
-        var html: [String] = []
-        var inFence = false
-        var fenceTag = ""
-        var lineNumber = 0
-        var inParagraph = false
-
-        func closeParagraph() {
-            if inParagraph { html.append("</p>"); inParagraph = false }
-        }
-
-        for line in lines {
-            lineNumber += 1
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            // Mermaid / code fence toggle
-            if trimmed.hasPrefix("```") {
-                if inFence {
-                    html.append(fenceTag == "mermaid" ? "</div>" : "</code></pre>")
-                    inFence = false
-                    fenceTag = ""
-                } else {
-                    closeParagraph()
-                    fenceTag = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
-                    inFence = true
-                    if fenceTag == "mermaid" {
-                        html.append("<div class=\"mermaid\" data-line=\"\(lineNumber)\">")
-                    } else {
-                        let lang = fenceTag.isEmpty ? "" : " class=\"language-\(fenceTag)\""
-                        html.append("<pre data-line=\"\(lineNumber)\"><code\(lang)>")
-                    }
-                }
-                continue
-            }
-
-            if inFence {
-                html.append(escapeHTML(line))
-                continue
-            }
-
-            // Headings
-            if trimmed.hasPrefix("#") {
-                closeParagraph()
-                let level = trimmed.prefix(while: { $0 == "#" }).count
-                let capped = min(level, 6)
-                let text = trimmed.dropFirst(level).trimmingCharacters(in: .whitespaces)
-                let slug = text.lowercased()
-                    .components(separatedBy: .alphanumerics.inverted).joined(separator: "-")
-                    .replacingOccurrences(of: "--", with: "-")
-                html.append("<h\(capped) id=\"\(slug)\" data-line=\"\(lineNumber)\">\(escapeHTML(text))</h\(capped)>")
-                continue
-            }
-
-            // Blank lines close paragraphs
-            if trimmed.isEmpty {
-                closeParagraph()
-                continue
-            }
-
-            // Paragraph
-            if !inParagraph {
-                html.append("<p data-line=\"\(lineNumber)\">")
-                inParagraph = true
-            }
-            html.append(inlineMarkdown(trimmed))
-        }
-
-        closeParagraph()
-        return html.joined(separator: "\n")
-    }
-
-    private static func inlineMarkdown(_ text: String) -> String {
-        var s = escapeHTML(text)
-        // Bold
-        s = s.replacingOccurrences(of: #"\*\*(.*?)\*\*"#, with: "<strong>$1</strong>",
-                                    options: .regularExpression)
-        // Italic
-        s = s.replacingOccurrences(of: #"\*(.*?)\*"#, with: "<em>$1</em>",
-                                    options: .regularExpression)
-        // Inline code
-        s = s.replacingOccurrences(of: #"`(.*?)`"#, with: "<code>$1</code>",
-                                    options: .regularExpression)
-        // Links
-        s = s.replacingOccurrences(of: #"\[(.*?)\]\((.*?)\)"#,
-                                    with: "<a href=\"$2\">$1</a>",
-                                    options: .regularExpression)
-        return s
-    }
-
-    private static func escapeHTML(_ s: String) -> String {
-        s.replacingOccurrences(of: "&", with: "&amp;")
-         .replacingOccurrences(of: "<", with: "&lt;")
-         .replacingOccurrences(of: ">", with: "&gt;")
     }
 }
