@@ -132,13 +132,21 @@ struct MenuBarRFCListView: View {
             }
             await store.load()
         }
-        // hermit-z9j: open RFC window when a Handoff continuation arrives from iPad
+        // hermit-z9j/txn: open RFC window when a Handoff or deep-link arrives
         .onChange(of: store.rfcs) { _, rfcs in
-            guard let rfcID = appState.pendingHandoffRFCID,
-                  let rfc = rfcs.first(where: { $0.id == rfcID }) else { return }
-            appState.pendingHandoffRFCID = nil
-            appState.pendingHandoffLine  = nil
-            RFCViewerWindowManager.shared.open(rfc: rfc, appState: appState)
+            // Handoff continuation
+            if let rfcID = appState.pendingHandoffRFCID,
+               let rfc = rfcs.first(where: { $0.id == rfcID }) {
+                appState.pendingHandoffRFCID = nil
+                appState.pendingHandoffLine  = nil
+                RFCViewerWindowManager.shared.open(rfc: rfc, appState: appState)
+            }
+            // hermit-txn: deep link
+            if let path = appState.pendingDeepLinkPath,
+               let rfc = rfcs.first(where: { $0.path == path }) {
+                appState.pendingDeepLinkPath = nil
+                RFCViewerWindowManager.shared.open(rfc: rfc, appState: appState)
+            }
         }
     }
 }

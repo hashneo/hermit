@@ -54,6 +54,12 @@ struct HermitNativeApp: App {
             KeychainHelper.shared.serverMode    = appState.serverMode
             KeychainHelper.shared.serverBaseURL = appState.serverBaseURL
         }
+        // hermit-txn: handle hermit://rfc/<path> deep links on iPadOS
+        .onOpenURL { url in
+            if let path = HermitActivity.rfcPath(from: url) {
+                appState.pendingDeepLinkPath = path
+            }
+        }
 #endif
     }
 }
@@ -91,6 +97,16 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
         appState.pendingHandoffRFCID = rfcID
         appState.pendingHandoffLine  = line
         return true
+    }
+
+    // hermit-txn: handle hermit://rfc/<path> deep links opened from external apps on macOS
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            if let path = HermitActivity.rfcPath(from: url) {
+                AppState.shared.pendingDeepLinkPath = path
+                break
+            }
+        }
     }
 
     private func startServerIfNeeded() {

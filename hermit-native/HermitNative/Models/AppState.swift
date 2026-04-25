@@ -69,6 +69,10 @@ final class AppState: ObservableObject {
     @Published var pendingHandoffRFCID: String? = nil
     @Published var pendingHandoffLine: Int?     = nil
 
+    // hermit-txn: pending deep-link navigation (set by onOpenURL / open(urls:), consumed once store loads)
+    /// Decoded RFC path from a hermit://rfc/<path> URL, waiting for the RFC store to load.
+    @Published var pendingDeepLinkPath: String? = nil
+
     // hermit-u1k / RFC-013: server connectivity
     @Published var serverMode: ServerMode = .embeddedLocal
     /// The resolved base URL of the active Hermit server (set by EmbeddedServerManager

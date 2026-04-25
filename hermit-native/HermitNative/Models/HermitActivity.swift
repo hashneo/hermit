@@ -24,4 +24,21 @@ enum HermitActivity {
         if let line = selectedLine { info[keySelectedLine] = line }
         return info
     }
+
+    // MARK: - hermit-txn: Deep link URL parsing
+
+    /// Parses a `hermit://rfc/<encoded-path>` URL and returns the decoded RFC path,
+    /// or `nil` if the URL does not match the expected format.
+    ///
+    /// Examples:
+    ///   hermit://rfc/docs-cms%2Frfcs%2Frfc-001.md  → "docs-cms/rfcs/rfc-001.md"
+    ///   hermit://rfc/rfc-002-my-design.md           → "rfc-002-my-design.md"
+    static func rfcPath(from url: URL) -> String? {
+        guard url.scheme == "hermit",
+              url.host == "rfc" else { return nil }
+        // path starts with "/" — drop the leading slash, then percent-decode
+        let raw = url.path.hasPrefix("/") ? String(url.path.dropFirst()) : url.path
+        guard !raw.isEmpty else { return nil }
+        return raw.removingPercentEncoding ?? raw
+    }
 }

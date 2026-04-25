@@ -154,12 +154,21 @@ struct iPadRootView: View {
         }
         // hermit-z9j: Navigate to pending Handoff RFC once the store has loaded
         .onChange(of: store.rfcs) { _, rfcs in
-            guard let rfcID = appState.pendingHandoffRFCID,
-                  let rfc = rfcs.first(where: { $0.id == rfcID }) else { return }
-            appState.selectedRFC          = rfc
-            appState.selectedLine         = appState.pendingHandoffLine
-            appState.pendingHandoffRFCID  = nil
-            appState.pendingHandoffLine   = nil
+            // Handoff continuation
+            if let rfcID = appState.pendingHandoffRFCID,
+               let rfc = rfcs.first(where: { $0.id == rfcID }) {
+                appState.selectedRFC          = rfc
+                appState.selectedLine         = appState.pendingHandoffLine
+                appState.pendingHandoffRFCID  = nil
+                appState.pendingHandoffLine   = nil
+            }
+            // hermit-txn: deep link navigation
+            if let path = appState.pendingDeepLinkPath,
+               let rfc = rfcs.first(where: { $0.path == path }) {
+                appState.selectedRFC         = rfc
+                appState.selectedLine        = nil
+                appState.pendingDeepLinkPath = nil
+            }
         }
     }
 
