@@ -46,6 +46,11 @@
 		B001A003 /* MarkdownRendererView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A004 /* MarkdownRendererView.swift */; };
 		B001A005 /* MermaidView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A006 /* MermaidView.swift */; };
 		F51CA0CA0595C036D8E2D00B /* CommentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 702547F1AF611276712EA42C /* CommentStore.swift */; };
+		B001B001 /* HermitModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B002 /* HermitModels.swift */; };
+		B001B003 /* HermitAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B004 /* HermitAPIClient.swift */; };
+		B001B005 /* EmbeddedServerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B006 /* EmbeddedServerManager.swift */; };
+		B001B007 /* ServerDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B008 /* ServerDiscoveryService.swift */; };
+		B001B009 /* PairingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B00A /* PairingService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -53,6 +58,11 @@
 		702547F1AF611276712EA42C /* CommentStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CommentStore.swift; sourceTree = "<group>"; };
 		7DEF0D01EB6E30FF8CF74D70 /* GutterMarkdownView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GutterMarkdownView.swift; sourceTree = "<group>"; };
 		B001000B /* HermitNativeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitNativeApp.swift; sourceTree = "<group>"; };
+		B001B002 /* HermitModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitModels.swift; sourceTree = "<group>"; };
+		B001B004 /* HermitAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitAPIClient.swift; sourceTree = "<group>"; };
+		B001B006 /* EmbeddedServerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedServerManager.swift; sourceTree = "<group>"; };
+		B001B008 /* ServerDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDiscoveryService.swift; sourceTree = "<group>"; };
+		B001B00A /* PairingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingService.swift; sourceTree = "<group>"; };
 		B001000D /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		B001000F /* RFC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFC.swift; sourceTree = "<group>"; };
 		B0010011 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
@@ -117,6 +127,7 @@
 				B0010093 /* Models */,
 				B0010094 /* Auth */,
 				B0010095 /* Clients */,
+				B001B00B /* Server */,
 				B0010096 /* AI */,
 				B0010097 /* Sessions */,
 				B0010098 /* Voice */,
@@ -140,6 +151,7 @@
 			children = (
 				B001000D /* AppState.swift */,
 				B001000F /* RFC.swift */,
+				B001B002 /* HermitModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -157,8 +169,19 @@
 			isa = PBXGroup;
 			children = (
 				B0010013 /* GitHubAPIClient.swift */,
+				B001B004 /* HermitAPIClient.swift */,
 			);
 			path = Clients;
+			sourceTree = "<group>";
+		};
+		B001B00B /* Server */ = {
+			isa = PBXGroup;
+			children = (
+				B001B006 /* EmbeddedServerManager.swift */,
+				B001B008 /* ServerDiscoveryService.swift */,
+				B001B00A /* PairingService.swift */,
+			);
+			path = Server;
 			sourceTree = "<group>";
 		};
 		B0010096 /* AI */ = {
@@ -341,6 +364,11 @@
 				B0010046 /* RFCPreviewPublishingView.swift in Sources */,
 				B0010048 /* ThreadPanelView.swift in Sources */,
 				F51CA0CA0595C036D8E2D00B /* CommentStore.swift in Sources */,
+				B001B001 /* HermitModels.swift in Sources */,
+				B001B003 /* HermitAPIClient.swift in Sources */,
+				B001B005 /* EmbeddedServerManager.swift in Sources */,
+				B001B007 /* ServerDiscoveryService.swift in Sources */,
+				B001B009 /* PairingService.swift in Sources */,
 				88C952BF1FC4569AAA227167 /* GutterMarkdownView.swift in Sources */,
 				AB7C0F2701C62D56AC09227C /* SelectableTextView.swift in Sources */,
 			);
