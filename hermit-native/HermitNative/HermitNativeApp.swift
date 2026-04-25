@@ -1,21 +1,41 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 
 // MARK: - hermit-y9x: Wire EmbeddedServerManager at app launch (macOS)
 
 @main
 struct HermitNativeApp: App {
+#if os(macOS)
     @NSApplicationDelegateAdaptor(HermitAppDelegate.self) var appDelegate
-    // Use a plain ObservedObject wrapping a shared instance so AppState
-    // is created at init time (before SwiftUI scenes render), making it
-    // available to the app delegate for server startup.
+    @ObservedObject private var advertiser = PairingAdvertiser.shared
+#endif
     @ObservedObject private var appState = AppState.shared
+#if os(iOS)
+    @StateObject private var pairingBrowser = PairingBrowser()
+#endif
+
+    init() {
+#if os(macOS)
+        // Start server and advertiser at launch — don't wait for delegate.
+        Task { @MainActor in
+            HermitNativeApp.startEmbeddedServer(appState: AppState.shared)
+        }
+#endif
+    }
 
     var body: some Scene {
 #if os(macOS)
-        MenuBarExtra("Hermit", systemImage: "doc.text.magnifyingglass") {
+        MenuBarExtra("Hermit", systemImage: advertiser.pendingInvitation != nil ? "person.crop.circle.badge.exclamationmark" : "doc.text.magnifyingglass") {
             MenuBarContentView()
                 .environmentObject(appState)
+                .task {
+                    // Start server then advertise. Runs once when the menu bar item is created.
+                    await MainActor.run {
+                        HermitNativeApp.startEmbeddedServer(appState: appState)
+                    }
+                }
         }
         .menuBarExtraStyle(.window)
 
@@ -27,6 +47,8 @@ struct HermitNativeApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(appState)
+                .environmentObject(pairingBrowser)
+                .task { pairingBrowser.start() }
         }
         .onChange(of: appState.serverMode) { _, _ in
             KeychainHelper.shared.serverMode    = appState.serverMode
@@ -39,10 +61,13 @@ struct HermitNativeApp: App {
 // MARK: - App Delegate (macOS)
 
 #if os(macOS)
+
 final class HermitAppDelegate: NSObject, NSApplicationDelegate {
     private var serverStarted = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let msg = "[\(Date())] [AppDelegate] applicationDidFinishLaunching\n"
+        if let d = msg.data(using: .utf8), let fh = FileHandle(forWritingAtPath: "/tmp/hermit-native-debug.log") { fh.seekToEndOfFile(); fh.write(d); try? fh.close() }
         DispatchQueue.main.async {
             self.startServerIfNeeded()
         }
@@ -50,15 +75,14 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         EmbeddedServerManager.shared.stop()
+        PairingAdvertiser.shared.stop()
     }
 
     private func startServerIfNeeded() {
         guard !serverStarted else { return }
         serverStarted = true
-        DispatchQueue.main.async {
-            Task { @MainActor in
-                HermitNativeApp.startEmbeddedServer(appState: AppState.shared)
-            }
+        Task { @MainActor in
+            HermitNativeApp.startEmbeddedServer(appState: AppState.shared)
         }
     }
 }
@@ -66,7 +90,13 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
 extension HermitNativeApp {
     @MainActor
     static func startEmbeddedServer(appState: AppState) {
-        guard appState.serverMode == .embeddedLocal else { return }
+        let msg = "[\(Date())] [startEmbeddedServer] serverMode=\(appState.serverMode) serverBaseURL=\(appState.serverBaseURL)\n"
+        if let d = msg.data(using: .utf8), let fh = FileHandle(forWritingAtPath: "/tmp/hermit-native-debug.log") { fh.seekToEndOfFile(); fh.write(d); try? fh.close() }
+        guard appState.serverMode == .embeddedLocal else {
+            let m = "[\(Date())] [startEmbeddedServer] skipped — not embeddedLocal\n"
+            if let d = m.data(using: .utf8), let fh = FileHandle(forWritingAtPath: "/tmp/hermit-native-debug.log") { fh.seekToEndOfFile(); fh.write(d); try? fh.close() }
+            return
+        }
         EmbeddedServerManager.shared.start(appState: appState)
         if let port = EmbeddedServerManager.shared.port {
             KeychainHelper.shared.serverBaseURL = "http://127.0.0.1:\(port)"

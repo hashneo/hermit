@@ -1,45 +1,48 @@
 import Foundation
 import MultipeerConnectivity
+#if os(macOS)
+import SystemConfiguration
+#endif
 
 // MARK: - hermit-1ow: Multipeer Connectivity pairing handshake
-
+//
 // ─────────────────────────────────────────────────────────────────────────────
-// OVERVIEW
+// DESIGN
 //
-// Mac (PairingAdvertiser)  ←→  iPad (PairingBrowser)
+// Mac (PairingAdvertiser) — always advertising via MCNearbyServiceAdvertiser.
+//   discoveryInfo carries everything the iPad needs to connect:
+//     "port"     — server listen port
+//     "owner"    — repo owner
+//     "repo"     — repo name
+//     "docsPath" — docs path
+//     "rfcLabel" — RFC label
 //
-// 1. Mac advertises via MCNearbyServiceAdvertiser ("hermit-pair").
-// 2. iPad discovers via MCNearbyServiceBrowser, sends invite.
-// 3. User accepts on Mac — confirmation alert shown by PairingAdvertiser.
-// 4. MCSession established; Mac generates 256-bit random token.
-// 5. Mac sends JSON {"token":"<hex>"} over encrypted MCSession channel.
-// 6. Both sides store token in Keychain.
-// 7. MCSession closed — pairing complete.
+// iPad (PairingBrowser) — runs forever in the background.
+//   foundPeer  → reads discoveryInfo, updates AppState (server URL + repo config)
+//   lostPeer   → clears serverBaseURL so the UI stops trying to connect
 //
-// Subsequent API calls (local network mode) include the token as
-//   Authorization: Bearer <token>
+// Pairing (one-time token exchange):
+//   1. iPad invites Mac via MCSession
+//   2. Mac accepts, generates a 256-bit random token, sends ONLY {"token":"<hex>"}
+//   3. iPad stores token; all future API calls use Authorization: Bearer <token>
+//   4. Session torn down — server URL always comes from mDNS, never from session data
 //
-// The Go server middleware validates Bearer tokens against the in-memory
-// token map populated at launch from Keychain storage.
+// If the Mac's port changes, the advertiser restarts with the new port.
+// The iPad's browser picks up the new discoveryInfo on the next foundPeer event.
 // ─────────────────────────────────────────────────────────────────────────────
 
 private let pairingServiceType = "hermit-pair"
 
-// MARK: - Shared token store (Go server side bridge)
+// MARK: - Shared token store (Mac side — Go server bridge)
 
-/// In-memory store of (peerID displayName → token) that the Go server
-/// middleware reads to authorise local-network requests.
-///
-/// Populated at app launch from Keychain; updated when a new device pairs.
 @MainActor
 final class PairedTokenStore: ObservableObject {
     static let shared = PairedTokenStore()
     private init() {}
 
-    @Published private(set) var pairedDevices: [String: String] = [:] // displayName → token
+    @Published private(set) var pairedDevices: [String: String] = [:]
 
     func load() {
-        // Load all persisted tokens from Keychain
         pairedDevices = KeychainHelper.shared.loadPairedTokens()
     }
 
@@ -52,26 +55,28 @@ final class PairedTokenStore: ObservableObject {
         pairedDevices.removeValue(forKey: peerName)
         KeychainHelper.shared.deletePairedToken(peerName: peerName)
     }
-
-    func token(for peerName: String) -> String? {
-        pairedDevices[peerName]
-    }
 }
 
 // MARK: - PairingAdvertiser (macOS)
 
 #if os(macOS)
-/// Runs on the Mac. Advertises the hermit-pair service, accepts invitations,
-/// generates a token, and sends it to the paired iPad over an encrypted MCSession.
+/// Always-on advertiser. Restarts when serverBaseURL changes so discoveryInfo
+/// stays current. The iPad derives the server URL purely from discoveryInfo —
+/// nothing is sent over the MCSession except the auth token.
 @MainActor
 final class PairingAdvertiser: NSObject, ObservableObject {
+    static let shared = PairingAdvertiser()
 
     @Published var pendingInvitation: PendingInvitation? = nil
     @Published var pairingStatus: String = ""
 
     private var advertiser: MCNearbyServiceAdvertiser?
     private var session: MCSession?
-    private let myPeerID = MCPeerID(displayName: Host.current().localizedName ?? "Hermit Mac")
+    // Use SCDynamicStoreCopyLocalHostName — this is the mDNS name (scutil --get LocalHostName),
+    // NOT Host.current().localizedName which is the computer name and may not resolve.
+    private let myPeerID = MCPeerID(
+        displayName: SCDynamicStoreCopyLocalHostName(nil) as String? ?? "hermit-mac"
+    )
 
     struct PendingInvitation {
         let peerName: String
@@ -80,15 +85,37 @@ final class PairingAdvertiser: NSObject, ObservableObject {
     }
 
     func start() {
-        let adv = MCNearbyServiceAdvertiser(
-            peer: myPeerID,
-            discoveryInfo: ["version": "1"],
-            serviceType: pairingServiceType
-        )
+        advertiser?.stopAdvertisingPeer()
+        let port = AppState.shared.serverBaseURL
+            .split(separator: ":").last.flatMap { String($0) } ?? "8080"
+        let info: [String: String] = [
+            "port":     port,
+            "owner":    AppState.shared.repoOwner,
+            "repo":     AppState.shared.repoName,
+            "docsPath": AppState.shared.docsPath,
+            "rfcLabel": AppState.shared.rfcLabel,
+        ]
+        let adv = MCNearbyServiceAdvertiser(peer: myPeerID,
+                                            discoveryInfo: info,
+                                            serviceType: pairingServiceType)
         adv.delegate = self
         adv.startAdvertisingPeer()
         advertiser = adv
-        pairingStatus = "Advertising for pairing"
+        pairingStatus = "Advertising"
+        let msg = "[\(Date())] [PairingAdvertiser] started advertising on port \(port)\n"
+        if let data = msg.data(using: .utf8),
+           let fh = FileHandle(forWritingAtPath: "/tmp/hermit-native-debug.log") {
+            fh.seekToEndOfFile(); fh.write(data); try? fh.close()
+        }
+    }
+
+    func restart() {
+        let msg = "[\(Date())] [PairingAdvertiser] restart() called — serverBaseURL=\(AppState.shared.serverBaseURL)\n"
+        if let data = msg.data(using: .utf8),
+           let fh = FileHandle(forWritingAtPath: "/tmp/hermit-native-debug.log") {
+            fh.seekToEndOfFile(); fh.write(data); try? fh.close()
+        }
+        start()
     }
 
     func stop() {
@@ -111,12 +138,9 @@ extension PairingAdvertiser: MCNearbyServiceAdvertiserDelegate {
                                  encryptionPreference: .required)
             sess.delegate = self
             self.session = sess
-
             self.pendingInvitation = PendingInvitation(
                 peerName: peerID.displayName,
-                accept: {
-                    invitationHandler(true, sess)
-                },
+                accept:  { invitationHandler(true, sess) },
                 decline: {
                     invitationHandler(false, nil)
                     Task { @MainActor in self.pendingInvitation = nil }
@@ -144,13 +168,12 @@ extension PairingAdvertiser: MCSessionDelegate {
 
     @MainActor
     private func sendToken(to peer: MCPeerID, session: MCSession) {
-        // Generate 32-byte (256-bit) random token
         var bytes = [UInt8](repeating: 0, count: 32)
         _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
         let token = bytes.map { String(format: "%02x", $0) }.joined()
 
-        let payload: [String: String] = ["token": token]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        // Only the token — iPad gets server URL from mDNS discoveryInfo, not here.
+        guard let data = try? JSONSerialization.data(withJSONObject: ["token": token]) else { return }
 
         do {
             try session.send(data, toPeers: [peer], with: .reliable)
@@ -160,44 +183,39 @@ extension PairingAdvertiser: MCSessionDelegate {
             pairingStatus = "Failed to send token: \(error.localizedDescription)"
         }
 
-        // Tear down the pairing session — API calls use HTTP Bearer from here
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            session.disconnect()
-        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { session.disconnect() }
     }
 
     nonisolated func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {}
-    nonisolated func session(_ session: MCSession, didReceive stream: InputStream,
-                  withName streamName: String, fromPeer peerID: MCPeerID) {}
-    nonisolated func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String,
-                  fromPeer peerID: MCPeerID, with progress: Progress) {}
-    nonisolated func session(_ session: MCSession, didFinishReceivingResourceWithName resourceName: String,
-                  fromPeer peerID: MCPeerID, at localURL: URL?, withError error: Error?) {}
+    nonisolated func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {}
+    nonisolated func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, with progress: Progress) {}
+    nonisolated func session(_ session: MCSession, didFinishReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, at localURL: URL?, withError error: Error?) {}
 }
 #endif
 
 // MARK: - PairingBrowser (iOS/iPadOS)
 
 #if os(iOS)
-/// Runs on the iPad. Discovers the Mac's hermit-pair service, sends an
-/// invitation, and stores the token received from the Mac.
+/// Runs forever on the iPad. On foundPeer, applies all config from discoveryInfo
+/// to AppState — this is the single source of truth for server URL and repo config.
+/// Pairing (MCSession) only exchanges the auth token.
 @MainActor
 final class PairingBrowser: NSObject, ObservableObject {
 
     @Published var discoveredMacs: [MCPeerID] = []
     @Published var pairingStatus: String = ""
-    @Published var isPaired = false
+    @Published var isPaired: Bool = false
 
     private var browser: MCNearbyServiceBrowser?
     private var session: MCSession?
     private let myPeerID = MCPeerID(displayName: UIDevice.current.name)
 
     func start() {
+        guard browser == nil else { return }
         let b = MCNearbyServiceBrowser(peer: myPeerID, serviceType: pairingServiceType)
         b.delegate = self
         b.startBrowsingForPeers()
         browser = b
-        pairingStatus = "Scanning for Macs…"
     }
 
     func stop() {
@@ -205,7 +223,6 @@ final class PairingBrowser: NSObject, ObservableObject {
         browser = nil
         session?.disconnect()
         session = nil
-        pairingStatus = ""
     }
 
     func invite(peer: MCPeerID) {
@@ -223,18 +240,47 @@ extension PairingBrowser: MCNearbyServiceBrowserDelegate {
     nonisolated func browser(_ browser: MCNearbyServiceBrowser,
                   foundPeer peerID: MCPeerID,
                   withDiscoveryInfo info: [String: String]?) {
+        // All connection info comes from discoveryInfo — this is the mDNS record.
+        let port      = info?["port"]     ?? "8080"
+        let owner     = info?["owner"]    ?? ""
+        let repo      = info?["repo"]     ?? ""
+        let docsPath  = info?["docsPath"] ?? "docs-cms/rfcs"
+        let rfcLabel  = info?["rfcLabel"] ?? "hermit:rfc-ready"
+        // peerID.displayName is the Mac's LocalHostName (e.g. Stevens-MacBook-Pro)
+        let serverURL = "http://\(peerID.displayName).local:\(port)"
+
         Task { @MainActor in
             if !self.discoveredMacs.contains(peerID) {
                 self.discoveredMacs.append(peerID)
             }
+            // Update AppState — always current with the live mDNS record.
+            AppState.shared.serverBaseURL = serverURL
+            AppState.shared.serverMode    = .localNetwork
+            AppState.shared.repoOwner     = owner
+            AppState.shared.repoName      = repo
+            AppState.shared.docsPath      = docsPath
+            AppState.shared.rfcLabel      = rfcLabel
+            KeychainHelper.shared.serverBaseURL = serverURL
+            KeychainHelper.shared.serverMode    = .localNetwork
+            KeychainHelper.shared.repoOwner     = owner
+            KeychainHelper.shared.repoName      = repo
+            KeychainHelper.shared.docsPath      = docsPath
+            KeychainHelper.shared.rfcLabel      = rfcLabel
         }
     }
 
     nonisolated func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
-        Task { @MainActor in self.discoveredMacs.removeAll { $0 == peerID } }
+        Task { @MainActor in
+            self.discoveredMacs.removeAll { $0 == peerID }
+            // Clear server URL so the UI stops trying to connect.
+            if AppState.shared.serverMode == .localNetwork {
+                AppState.shared.serverBaseURL = ""
+            }
+        }
     }
 
-    nonisolated func browser(_ browser: MCNearbyServiceBrowser, didNotStartBrowsingForPeers error: Error) {
+    nonisolated func browser(_ browser: MCNearbyServiceBrowser,
+                  didNotStartBrowsingForPeers error: Error) {
         Task { @MainActor in self.pairingStatus = "Browse failed: \(error.localizedDescription)" }
     }
 }
@@ -252,17 +298,15 @@ extension PairingBrowser: MCSessionDelegate {
               let token = payload["token"] else { return }
         Task { @MainActor in
             KeychainHelper.shared.localNetworkToken = token
+            AppState.shared.localNetworkToken = token
             self.isPaired = true
             self.pairingStatus = "Paired with \(peerID.displayName)"
             session.disconnect()
         }
     }
 
-    nonisolated func session(_ session: MCSession, didReceive stream: InputStream,
-                  withName streamName: String, fromPeer peerID: MCPeerID) {}
-    nonisolated func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String,
-                  fromPeer peerID: MCPeerID, with progress: Progress) {}
-    nonisolated func session(_ session: MCSession, didFinishReceivingResourceWithName resourceName: String,
-                  fromPeer peerID: MCPeerID, at localURL: URL?, withError error: Error?) {}
+    nonisolated func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {}
+    nonisolated func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, with progress: Progress) {}
+    nonisolated func session(_ session: MCSession, didFinishReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, at localURL: URL?, withError error: Error?) {}
 }
 #endif

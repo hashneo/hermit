@@ -63,6 +63,9 @@ final class AppState: ObservableObject {
     /// The resolved base URL of the active Hermit server (set by EmbeddedServerManager
     /// or chosen from discovered/remote servers).
     @Published var serverBaseURL: String = ""
+    /// Bearer token received via MPC pairing (local-network mode). Held in memory
+    /// so it works in both DEBUG (no Keychain) and release builds.
+    @Published var localNetworkToken: String = ""
 
     private let keychain = KeychainHelper.shared
 
@@ -100,6 +103,7 @@ final class AppState: ObservableObject {
         pat             = kc.pat       ?? ""
         serverMode      = kc.serverMode ?? .embeddedLocal
         serverBaseURL   = kc.serverBaseURL ?? ""
+        localNetworkToken = kc.localNetworkToken ?? ""
     }
 
     /// Refreshes published state from the Keychain (used by SetupView after saving).
@@ -123,7 +127,18 @@ final class AppState: ObservableObject {
     /// All GitHub interactions flow through the Go backend — there is no
     /// direct GitHub API fallback in the native client.
     func makeAPIClient() -> (any HermitClientProtocol)? {
-        guard isAuthenticated, !pat.isEmpty, !serverBaseURL.isEmpty else { return nil }
+        guard !serverBaseURL.isEmpty else { return nil }
+
+        // Local-network mode: authenticate with the MPC-paired bearer token.
+        // The Go server validates it against PairedTokenStore; no GitHub PAT needed.
+        let bearer: String
+        if case .localNetwork = serverMode {
+            guard !localNetworkToken.isEmpty else { return nil }
+            bearer = localNetworkToken
+        } else {
+            guard isAuthenticated, !pat.isEmpty else { return nil }
+            bearer = pat
+        }
 
         let cfg = HermitAPIClient.Config(
             baseURL:  serverBaseURL,
@@ -131,7 +146,7 @@ final class AppState: ObservableObject {
             repo:     repoName,
             docsPath: docsPath,
             rfcLabel: rfcLabel,
-            pat:      pat
+            pat:      bearer
         )
         return HermitAPIClient(config: cfg)
     }
