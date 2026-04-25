@@ -4,6 +4,8 @@ import SwiftUI
 // MARK: - CommentStore
 // Owns all PR review comments for the currently-viewed RFC.
 // Shared via EnvironmentObject between RFCDetailView, GutterMarkdownView and ThreadPanelView.
+// hermit-l00: migrated to HermitClientProtocol so it works with both
+//             HermitAPIClient (all production modes) and GitHubAPIClient (debug standalone).
 
 @MainActor
 final class CommentStore: ObservableObject {
@@ -16,9 +18,9 @@ final class CommentStore: ObservableObject {
     private(set) var commitSHA: String?
     private(set) var filePath: String?
 
-    private var client: GitHubAPIClient?
+    private var client: (any HermitClientProtocol)?
 
-    func configure(client: GitHubAPIClient, prNumber: Int, commitSHA: String, filePath: String) {
+    func configure(client: any HermitClientProtocol, prNumber: Int, commitSHA: String, filePath: String) {
         self.client      = client
         self.prNumber    = prNumber
         self.commitSHA   = commitSHA
@@ -71,7 +73,6 @@ final class CommentStore: ObservableObject {
             line: line
         )
         comments.append(new)
-        // Sort so newly added appears in order
         comments.sort { $0.createdAt < $1.createdAt }
     }
 }

@@ -19,14 +19,19 @@ final class KeychainHelper {
     // MARK: - Service identifiers
 
     private enum Key: String {
-        case baseURL    = "hermit.base-url"
-        case pat        = "hermit.pat"
-        case repoOwner  = "hermit.repo-owner"
-        case repoName   = "hermit.repo-name"
-        case docsPath   = "hermit.docs-path"
-        case rfcLabel   = "hermit.rfc-label"
-        case openAIKey  = "hermit.openai-key"
-        case aiProvider = "hermit.ai-provider"
+        case baseURL          = "hermit.base-url"
+        case pat              = "hermit.pat"
+        case repoOwner        = "hermit.repo-owner"
+        case repoName         = "hermit.repo-name"
+        case docsPath         = "hermit.docs-path"
+        case rfcLabel         = "hermit.rfc-label"
+        case openAIKey        = "hermit.openai-key"
+        case aiProvider       = "hermit.ai-provider"
+        case serverMode       = "hermit.server-mode"
+        case serverBaseURL    = "hermit.server-base-url"
+        case localNetworkToken = "hermit.local-token"
+        // Paired device tokens are stored with key "hermit.paired.<displayName>"
+        // handled by loadPairedTokens/savePairedToken/deletePairedToken helpers.
     }
 
     // MARK: - Public API
@@ -69,6 +74,88 @@ final class KeychainHelper {
     var aiProvider: String? {
         get { read(key: .aiProvider) }
         set { write(newValue, key: .aiProvider) }
+    }
+
+    /// Persists the active ServerMode as JSON.
+    var serverMode: ServerMode? {
+        get {
+            guard let raw = read(key: .serverMode),
+                  let data = raw.data(using: .utf8) else { return nil }
+            return try? JSONDecoder().decode(ServerMode.self, from: data)
+        }
+        set {
+            if let mode = newValue,
+               let data = try? JSONEncoder().encode(mode),
+               let str  = String(data: data, encoding: .utf8) {
+                write(str, key: .serverMode)
+            } else {
+                write(nil, key: .serverMode)
+            }
+        }
+    }
+
+    var serverBaseURL: String? {
+        get { read(key: .serverBaseURL) }
+        set { write(newValue, key: .serverBaseURL) }
+    }
+
+    var localNetworkToken: String? {
+        get { read(key: .localNetworkToken) }
+        set { write(newValue, key: .localNetworkToken) }
+    }
+
+    // MARK: - Paired device token store (macOS — hermit-1ow)
+
+    /// Returns all (peerName → token) pairs persisted in the Keychain.
+    func loadPairedTokens() -> [String: String] {
+#if DEBUG
+        return [:]
+#else
+        let query: [CFString: Any] = [
+            kSecClass:            kSecClassGenericPassword,
+            kSecAttrService:      "hermit.paired" as CFString,
+            kSecReturnAttributes: true,
+            kSecReturnData:       true,
+            kSecMatchLimit:       kSecMatchLimitAll,
+        ]
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let items = result as? [[CFString: Any]] else { return [:] }
+        var map: [String: String] = [:]
+        for item in items {
+            if let account = item[kSecAttrAccount] as? String,
+               let data    = item[kSecValueData]    as? Data,
+               let token   = String(data: data, encoding: .utf8) {
+                map[account] = token
+            }
+        }
+        return map
+#endif
+    }
+
+    func savePairedToken(peerName: String, token: String) {
+#if !DEBUG
+        guard let data = token.data(using: .utf8) else { return }
+        let query: [CFString: Any] = [
+            kSecClass:        kSecClassGenericPassword,
+            kSecAttrService:  "hermit.paired" as CFString,
+            kSecAttrAccount:  peerName,
+            kSecValueData:    data,
+        ]
+        SecItemDelete(query as CFDictionary)
+        SecItemAdd(query as CFDictionary, nil)
+#endif
+    }
+
+    func deletePairedToken(peerName: String) {
+#if !DEBUG
+        let query: [CFString: Any] = [
+            kSecClass:       kSecClassGenericPassword,
+            kSecAttrService: "hermit.paired" as CFString,
+            kSecAttrAccount: peerName,
+        ]
+        SecItemDelete(query as CFDictionary)
+#endif
     }
 
     // MARK: - Convenience: is fully configured?

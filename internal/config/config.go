@@ -11,6 +11,7 @@ const (
 	defaultEnvironment   = "development"
 	defaultListenAddress = ":8080"
 	defaultConfigPath    = "config/hermit.yaml"
+	defaultDataDir       = "data"
 )
 
 // Registry stores external provider configuration for repository integrations.
@@ -37,6 +38,11 @@ type Config struct {
 	ListenAddress string       `yaml:"listen_address"`
 	Registries    []Registry   `yaml:"registries"`
 	Repositories  []Repository `yaml:"repositories"`
+	// DataDir is the base directory for mutable runtime data (thread store, etc.).
+	// Defaults to "data" relative to the working directory.
+	// When the server is embedded in a macOS app via gomobile, this is set to
+	// the app sandbox Application Support directory.
+	DataDir       string       `yaml:"data_dir"`
 }
 
 // Load builds config from a JSON config file.
@@ -113,6 +119,10 @@ func Load() (Config, error) {
 				}
 			}
 		}
+	}
+
+	if cfg.DataDir == "" {
+		cfg.DataDir = defaultDataDir
 	}
 
 	return cfg, nil

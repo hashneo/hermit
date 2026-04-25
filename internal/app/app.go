@@ -99,7 +99,7 @@ func newMux(cfg config.Config) *http.ServeMux {
 	mux.HandleFunc("GET "+review.ReviewStatePath(), reviewHandler.GetReviewState)
 	mux.HandleFunc("POST "+review.ReviewApprovePath(), reviewHandler.Approve)
 
-	threadStorePath := filepath.Join("data", "hermit", "threads.json")
+	threadStorePath := filepath.Join(cfg.DataDir, "hermit", "threads.json")
 	threadService := thread.NewServiceWithStore(
 		thread.NewHTTPGitHubClient(repositoryService, registryBaseURLs),
 		thread.NewFileStore(threadStorePath),

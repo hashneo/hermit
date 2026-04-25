@@ -1,23 +1,69 @@
 import Foundation
 import Combine
 
+// MARK: - ServerMode (hermit-u1k / hermit-3wh)
+
+/// The three connectivity modes defined in RFC-013 / ADR-009.
+enum ServerMode: Codable, Equatable, Hashable {
+    /// macOS only: Go server runs in-process, client hits localhost.
+    case embeddedLocal
+    /// iPad (and macOS): server discovered via Bonjour on the local network.
+    case localNetwork
+    /// Both platforms: explicit hosted URL entered manually.
+    case remote(url: String)
+
+    // MARK: Codable
+
+    private enum CodingKeys: String, CodingKey { case type, url }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try c.decode(String.self, forKey: .type)
+        switch type {
+        case "embeddedLocal":  self = .embeddedLocal
+        case "localNetwork":   self = .localNetwork
+        case "remote":
+            let url = try c.decode(String.self, forKey: .url)
+            self = .remote(url: url)
+        default: self = .embeddedLocal
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .embeddedLocal:     try c.encode("embeddedLocal", forKey: .type)
+        case .localNetwork:      try c.encode("localNetwork",  forKey: .type)
+        case .remote(let url):
+            try c.encode("remote", forKey: .type)
+            try c.encode(url,      forKey: .url)
+        }
+    }
+}
+
+// MARK: - AppState
+
 /// Central application state shared across all views via @EnvironmentObject.
 @MainActor
 final class AppState: ObservableObject {
     @Published var isAuthenticated: Bool
-    @Published var baseURL: String
+    @Published var baseURL: String        // GitHub / Gitea API base URL
     @Published var repoOwner: String
     @Published var repoName: String
     @Published var docsPath: String
     @Published var rfcLabel: String
     @Published var pat: String
 
+    // hermit-u1k / RFC-013: server connectivity
+    @Published var serverMode: ServerMode = .embeddedLocal
+    /// The resolved base URL of the active Hermit server (set by EmbeddedServerManager
+    /// or chosen from discovered/remote servers).
+    @Published var serverBaseURL: String = ""
+
     private let keychain = KeychainHelper.shared
 
     init() {
 #if DEBUG
-        // In debug builds, load config directly from hermit.yaml + token file.
-        // Keychain is fully bypassed — no permission dialogs.
         do {
             let detected = try GiteaAutoConfig.detect()
             isAuthenticated = true
@@ -33,7 +79,6 @@ final class AppState: ObservableObject {
             debugLog("GiteaAutoConfig.detect() FAILED — \(error)")
         }
 #endif
-        // Release path (or debug fallback if config not found): use Keychain.
         let kc = KeychainHelper.shared
         isAuthenticated = kc.isConfigured
         baseURL         = kc.baseURL   ?? ""
@@ -42,6 +87,8 @@ final class AppState: ObservableObject {
         docsPath        = kc.docsPath  ?? "docs-cms/rfcs"
         rfcLabel        = kc.rfcLabel  ?? "hermit:rfc-ready"
         pat             = kc.pat       ?? ""
+        serverMode      = kc.serverMode ?? .embeddedLocal
+        serverBaseURL   = kc.serverBaseURL ?? ""
     }
 
     /// Applies a detected config into memory (used by SetupView in release).
@@ -64,12 +111,36 @@ final class AppState: ObservableObject {
         docsPath  = keychain.docsPath  ?? "docs-cms/rfcs"
         rfcLabel  = keychain.rfcLabel  ?? "hermit:rfc-ready"
         pat       = keychain.pat       ?? ""
+        serverMode    = keychain.serverMode    ?? .embeddedLocal
+        serverBaseURL = keychain.serverBaseURL ?? ""
     }
 
-    /// Builds a GitHubAPIClient from the current in-memory config.
-    func makeAPIClient() -> GitHubAPIClient? {
+    // MARK: - API client factory (hermit-u1k)
+
+    /// Returns the appropriate API client for the current server mode.
+    ///
+    /// - embeddedLocal / localNetwork / remote: returns a HermitAPIClient
+    ///   hitting `serverBaseURL`.
+    /// - Falls back to GitHubAPIClient in DEBUG if no serverBaseURL is set
+    ///   (standalone development against Gitea).
+    func makeAPIClient() -> (any HermitClientProtocol)? {
         guard isAuthenticated, !pat.isEmpty else { return nil }
-        let config = GitHubAPIClient.Config(
+
+        // Use HermitAPIClient if we have a resolved server URL
+        if !serverBaseURL.isEmpty {
+            let cfg = HermitAPIClient.Config(
+                baseURL:  serverBaseURL,
+                owner:    repoOwner,
+                repo:     repoName,
+                docsPath: docsPath,
+                rfcLabel: rfcLabel,
+                pat:      pat
+            )
+            return HermitAPIClient(config: cfg)
+        }
+
+        // Fallback: direct GitHub/Gitea client (debug standalone, or pre-server-start)
+        let cfg = GitHubAPIClient.Config(
             baseURL:  baseURL,
             owner:    repoOwner,
             repo:     repoName,
@@ -77,8 +148,10 @@ final class AppState: ObservableObject {
             rfcLabel: rfcLabel,
             pat:      pat
         )
-        return GitHubAPIClient(config: config)
+        return GitHubAPIClient(config: cfg)
     }
+
+    // MARK: - Display helpers
 
     /// Human-readable repo label for display in the UI.
     var repoLabel: String {

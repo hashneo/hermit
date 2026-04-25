@@ -1,6 +1,6 @@
 ---
 title: Hermit API as the Canonical Client Interface for Native Apps
-status: Proposed
+status: Accepted
 created: 2026-04-25T00:00:00Z
 deciders: Engineering Team
 tags: [api, architecture, bonjour, connectivity, gomobile, native]

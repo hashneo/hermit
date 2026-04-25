@@ -1,4 +1,4 @@
-.PHONY: build run debug clean ui-build validate-config validate-config-structure validate-config-access gitea-up gitea-down gitea-logs gitea-reset gitea-seed-pr native-build native-build-macos native-build-ipad native-test native-clean native-open
+.PHONY: build run debug clean ui-build validate-config validate-config-structure validate-config-access gitea-up gitea-down gitea-logs gitea-reset gitea-seed-pr native-build native-build-macos native-build-ipad native-test native-clean native-open gomobile-build
 
 APP_NAME := hermit
 BIN_DIR := bin
@@ -168,3 +168,22 @@ native-open: ## Build, copy to root, then launch HermitNative.app
 	@pkill -x HermitNative 2>/dev/null || true
 	@sleep 0.5
 	@open $(NATIVE_APP_DEST)
+
+# ── gomobile xcframework ───────────────────────────────────────────────────────
+
+GOMOBILE_OUT := $(NATIVE_DIR)/HermitNative/HermitServer.xcframework
+
+gomobile-build: ## Compile the Go mobile package into HermitServer.xcframework (requires gomobile)
+	@command -v gomobile >/dev/null 2>&1 || { \
+		echo "gomobile not found. Install with:"; \
+		echo "  go install golang.org/x/mobile/cmd/gomobile@latest && gomobile init"; \
+		exit 1; \
+	}
+	@echo "Building HermitServer.xcframework via gomobile bind..."
+	gomobile bind \
+		-target macos \
+		-o $(GOMOBILE_OUT) \
+		-v \
+		hermit/mobile
+	@echo "xcframework written to $(GOMOBILE_OUT)"
+	@echo "Remember to re-run 'make gomobile-build' whenever the Go server changes."

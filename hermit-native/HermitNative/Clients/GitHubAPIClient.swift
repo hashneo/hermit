@@ -520,3 +520,14 @@ private extension URL {
         return comps.url!
     }
 }
+
+// MARK: - HermitClientProtocol conformance
+// GitHubAPIClient's existing discoverRFCs() satisfies the protocol requirement
+// because Swift ignores tuple labels for type identity.
+// Only methods with different names need bridging stubs.
+
+extension GitHubAPIClient: HermitClientProtocol {
+    func approve(prNumber: Int) async throws {
+        try await approvePR(prNumber: prNumber)
+    }
+}

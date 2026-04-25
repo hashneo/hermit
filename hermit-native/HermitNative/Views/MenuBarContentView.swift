@@ -99,14 +99,7 @@ struct MenuBarRFCListView: View {
         .frame(width: 300, height: 420)
         .task {
             if let client = appState.makeAPIClient() {
-                store.configure(client: client, config: GitHubAPIClient.Config(
-                    baseURL:  appState.baseURL,
-                    owner:    appState.repoOwner,
-                    repo:     appState.repoName,
-                    docsPath: appState.docsPath,
-                    rfcLabel: appState.rfcLabel,
-                    pat:      appState.pat
-                ))
+                store.configure(client: client, docsPath: appState.docsPath)
             }
             await store.load()
         }

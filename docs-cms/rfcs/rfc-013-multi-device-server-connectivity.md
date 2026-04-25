@@ -1,6 +1,6 @@
 ---
 title: Multi-Device Server Connectivity
-status: Draft
+status: Accepted
 author: Steven Taylor
 created: 2026-04-25T00:00:00Z
 tags: [bonjour, embedded-server, go, ipad, ipados, macos, native, networking]

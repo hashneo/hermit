@@ -6,9 +6,16 @@
 	     and write diagnostic logs without Keychain permission prompts. -->
 	<key>com.apple.security.app-sandbox</key>
 	<false/>
+	<!-- hermit-y9x: embedded Go server binds a TCP port -->
+	<key>com.apple.security.network.server</key>
+	<true/>
+	<!-- outbound HTTP to local / remote server -->
 	<key>com.apple.security.network.client</key>
 	<true/>
 	<key>com.apple.security.device.microphone</key>
+	<true/>
+	<!-- hermit-1ow: Multipeer Connectivity pairing handshake -->
+	<key>com.apple.developer.nearby-interaction</key>
 	<true/>
 </dict>
 </plist>

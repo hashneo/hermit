@@ -2,6 +2,7 @@ import SwiftUI
 
 // MARK: - hermit-3dc: NavigationSplitView root layout (iPad)
 // hermit-80m: Post-publish RFC list refresh and new RFC highlight
+// hermit-l00: RFCStore migrated to HermitClientProtocol
 
 @MainActor
 final class RFCStore: ObservableObject {
@@ -10,16 +11,17 @@ final class RFCStore: ObservableObject {
     @Published var errorMessage: String? = nil
     @Published var newlyPublishedID: String? = nil  // hermit-80m: highlight after publish
 
-    private var client: GitHubAPIClient?
-    private var config: GitHubAPIClient.Config?
+    private var client: (any HermitClientProtocol)?
+    // docsPath retained for the resolvePRPath fallback that needs the path prefix
+    private var docsPath: String = "docs-cms/rfcs"
 
-    func configure(client: GitHubAPIClient, config: GitHubAPIClient.Config) {
-        self.client = client
-        self.config = config
+    func configure(client: any HermitClientProtocol, docsPath: String) {
+        self.client   = client
+        self.docsPath = docsPath
     }
 
     func load() async {
-        guard let client, let config else { return }
+        guard let client else { return }
         isLoading = true
         errorMessage = nil
         do {
@@ -29,8 +31,7 @@ final class RFCStore: ObservableObject {
                     path: $0.path, sha: $0.sha, source: .mainBranch)
             }
             for pr in prs {
-                // Resolve the RFC file path on the PR's head branch
-                let path = await resolvePRPath(client: client, config: config, pr: pr)
+                let path = await resolvePRPath(client: client, pr: pr)
                 result.append(RFC(id: "pr-\(pr.id)", title: pr.title,
                                   path: path, sha: pr.headSHA,
                                   source: .pullRequest(pr)))
@@ -44,13 +45,11 @@ final class RFCStore: ObservableObject {
 
     /// Returns the RFC .md path for a PR: prefers the file the PR actually changed,
     /// falling back to the first .md file on the head branch.
-    private func resolvePRPath(client: GitHubAPIClient, config: GitHubAPIClient.Config, pr: RFCPullRequest) async -> String {
+    private func resolvePRPath(client: any HermitClientProtocol, pr: RFCPullRequest) async -> String {
         do {
-            // First: ask the PR files API which .md files the PR touches
-            let changed = try await client.listPRChangedFiles(prNumber: pr.number, docsPath: config.docsPath)
+            let changed = try await client.listPRChangedFiles(prNumber: pr.number, docsPath: docsPath)
             if let path = changed.first { return path }
-            // Fallback: list all .md files on the head branch
-            let files = try await client.listFilesOnRef(docsPath: config.docsPath, ref: pr.headRef)
+            let files = try await client.listFilesOnRef(docsPath: docsPath, ref: pr.headRef)
             return files.first ?? ""
         } catch {
             return ""
@@ -114,14 +113,7 @@ struct iPadRootView: View {
         }
         .task {
             if let client = appState.makeAPIClient() {
-                store.configure(client: client, config: GitHubAPIClient.Config(
-                    baseURL:  appState.baseURL,
-                    owner:    appState.repoOwner,
-                    repo:     appState.repoName,
-                    docsPath: appState.docsPath,
-                    rfcLabel: appState.rfcLabel,
-                    pat:      appState.pat
-                ))
+                store.configure(client: client, docsPath: appState.docsPath)
             }
             await store.load()
         }
