@@ -48,6 +48,7 @@ final class RFCViewerWindowManager {
             .frame(minWidth: 760, minHeight: 540)
 
         let hostingController = NSHostingController(rootView: detail)
+        hostingController.sizingOptions = []  // don't let content drive window size
         let window = NSWindow(contentViewController: hostingController)
         window.title = rfc.title
         window.setContentSize(NSSize(width: 900, height: 620))
