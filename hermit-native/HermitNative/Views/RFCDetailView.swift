@@ -48,9 +48,11 @@ struct RFCDetailView: View {
     }
 
     private var rfcContentView: some View {
-        ScrollView {
+        ScrollView(.vertical, showsIndicators: true) {
             MarkdownRendererView(blocks: MarkdownParser.parse(markdown))
                 .padding(40)
+                .frame(maxWidth: 900, alignment: .leading)
+                .frame(maxWidth: .infinity)
         }
     }
 

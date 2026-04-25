@@ -88,13 +88,12 @@ struct MarkdownRendererView: View {
     // MARK: - Code block
 
     private func codeBlockView(language: String, code: String) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            Text(code)
-                .font(.system(.callout, design: .monospaced))
-                .foregroundStyle(.primary)
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
+        Text(code)
+            .font(.system(.callout, design: .monospaced))
+            .foregroundStyle(.primary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 8)
                 .fill(codeBackground)
