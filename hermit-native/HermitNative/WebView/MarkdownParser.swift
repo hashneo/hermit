@@ -12,15 +12,24 @@ indirect enum MarkdownInline: Equatable {
 }
 
 enum MarkdownBlock {
-    case heading(level: Int, inlines: [MarkdownInline])
-    case paragraph(inlines: [MarkdownInline])
-    case codeBlock(language: String, code: String)
-    case mermaidBlock(source: String)
-    case bulletList(items: [[MarkdownInline]])
-    case orderedList(items: [[MarkdownInline]])
-    case blockquote(inlines: [MarkdownInline])
-    case horizontalRule
-    case table(headers: [[MarkdownInline]], rows: [[[MarkdownInline]]])
+    case heading(level: Int, inlines: [MarkdownInline], sourceLine: Int)
+    case paragraph(inlines: [MarkdownInline], sourceLine: Int)
+    case codeBlock(language: String, code: String, sourceLine: Int)
+    case mermaidBlock(source: String, sourceLine: Int)
+    case bulletList(items: [[MarkdownInline]], sourceLine: Int)
+    case orderedList(items: [[MarkdownInline]], sourceLine: Int)
+    case blockquote(inlines: [MarkdownInline], sourceLine: Int)
+    case horizontalRule(sourceLine: Int)
+    case table(headers: [[MarkdownInline]], rows: [[[MarkdownInline]]], sourceLine: Int)
+
+    var sourceLine: Int {
+        switch self {
+        case .heading(_, _, let l), .paragraph(_, let l), .codeBlock(_, _, let l),
+             .mermaidBlock(_, let l), .bulletList(_, let l), .orderedList(_, let l),
+             .blockquote(_, let l), .horizontalRule(let l), .table(_, _, let l):
+            return l
+        }
+    }
 }
 
 // MARK: - Parser
@@ -30,12 +39,18 @@ enum MarkdownParser {
     static func parse(_ input: String) -> [MarkdownBlock] {
         var lines = input.components(separatedBy: "\n")
 
-        // Strip YAML frontmatter
+        // Strip YAML frontmatter — track how many lines we skip so sourceLine is correct
+        var frontmatterOffset = 0
         if lines.first?.trimmingCharacters(in: .whitespaces) == "---" {
             if let end = lines.dropFirst().firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == "---" }) {
+                frontmatterOffset = end + 1  // lines consumed (includes both --- delimiters)
                 lines = Array(lines[(end + 1)...])
             }
         }
+
+        // sourceLine converts the local index i (into the post-frontmatter array) to a
+        // 1-based raw file line number.
+        func rawLine(_ localIndex: Int) -> Int { localIndex + frontmatterOffset + 1 }
 
         var blocks: [MarkdownBlock] = []
         var i = 0
@@ -49,6 +64,7 @@ enum MarkdownParser {
 
             // Fenced code block
             if trimmed.hasPrefix("```") {
+                let blockStart = i
                 let lang = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
                 i += 1
                 var codeLines: [String] = []
@@ -60,16 +76,16 @@ enum MarkdownParser {
                 }
                 let source = codeLines.joined(separator: "\n")
                 if lang == "mermaid" {
-                    blocks.append(.mermaidBlock(source: source))
+                    blocks.append(.mermaidBlock(source: source, sourceLine: rawLine(blockStart)))
                 } else {
-                    blocks.append(.codeBlock(language: lang, code: source))
+                    blocks.append(.codeBlock(language: lang, code: source, sourceLine: rawLine(blockStart)))
                 }
                 continue
             }
 
             // Horizontal rule
             if trimmed == "---" || trimmed == "***" || trimmed == "___" {
-                blocks.append(.horizontalRule)
+                blocks.append(.horizontalRule(sourceLine: rawLine(i)))
                 i += 1; continue
             }
 
@@ -77,12 +93,13 @@ enum MarkdownParser {
             if trimmed.hasPrefix("#") {
                 let level = min(trimmed.prefix(while: { $0 == "#" }).count, 6)
                 let text = String(trimmed.dropFirst(level)).trimmingCharacters(in: .whitespaces)
-                blocks.append(.heading(level: level, inlines: parseInline(text)))
+                blocks.append(.heading(level: level, inlines: parseInline(text), sourceLine: rawLine(i)))
                 i += 1; continue
             }
 
             // Blockquote
             if trimmed.hasPrefix(">") {
+                let blockStart = i
                 var bqLines: [String] = []
                 while i < lines.count {
                     let bl = lines[i].trimmingCharacters(in: .whitespaces)
@@ -91,12 +108,13 @@ enum MarkdownParser {
                     i += 1
                 }
                 let text = bqLines.joined(separator: " ")
-                blocks.append(.blockquote(inlines: parseInline(text)))
+                blocks.append(.blockquote(inlines: parseInline(text), sourceLine: rawLine(blockStart)))
                 continue
             }
 
             // Bullet list
             if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
+                let blockStart = i
                 var items: [[MarkdownInline]] = []
                 while i < lines.count {
                     let bl = lines[i].trimmingCharacters(in: .whitespaces)
@@ -109,13 +127,14 @@ enum MarkdownParser {
                         break
                     }
                 }
-                blocks.append(.bulletList(items: items))
+                blocks.append(.bulletList(items: items, sourceLine: rawLine(blockStart)))
                 continue
             }
 
             // Ordered list
             let olPattern = #"^\d+\.\s"#
             if trimmed.range(of: olPattern, options: .regularExpression) != nil {
+                let blockStart = i
                 var items: [[MarkdownInline]] = []
                 while i < lines.count {
                     let bl = lines[i].trimmingCharacters(in: .whitespaces)
@@ -129,7 +148,7 @@ enum MarkdownParser {
                         break
                     }
                 }
-                blocks.append(.orderedList(items: items))
+                blocks.append(.orderedList(items: items, sourceLine: rawLine(blockStart)))
                 continue
             }
 
@@ -144,6 +163,7 @@ enum MarkdownParser {
                             .replacingOccurrences(of: " ", with: "")
                             .isEmpty
                 if isSep {
+                    let blockStart = i
                     let headers = parseTableRow(trimmed)
                     i += 2  // skip header + separator
                     var rows: [[[MarkdownInline]]] = []
@@ -153,12 +173,13 @@ enum MarkdownParser {
                         rows.append(parseTableRow(rl))
                         i += 1
                     }
-                    blocks.append(.table(headers: headers, rows: rows))
+                    blocks.append(.table(headers: headers, rows: rows, sourceLine: rawLine(blockStart)))
                     continue
                 }
             }
 
             // Paragraph — accumulate until blank line or block-level element
+            let paraStart = i
             var paraLines: [String] = []
             while i < lines.count {
                 let pl = lines[i]
@@ -173,7 +194,7 @@ enum MarkdownParser {
             }
             if !paraLines.isEmpty {
                 let text = paraLines.joined(separator: " ")
-                blocks.append(.paragraph(inlines: parseInline(text)))
+                blocks.append(.paragraph(inlines: parseInline(text), sourceLine: rawLine(paraStart)))
             }
         }
 

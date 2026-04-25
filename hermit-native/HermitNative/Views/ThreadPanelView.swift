@@ -8,6 +8,8 @@ import SwiftUI
 struct ThreadPanelView: View {
     let prNumber: Int
     let selectedText: String
+    /// The 1-based raw markdown source line the user tapped, if any.
+    var selectedLine: Int? = nil
 
     @State private var comments: [PRReviewComment] = []
     @State private var isLoading = false
@@ -50,11 +52,17 @@ struct ThreadPanelView: View {
 
             // Selected text context
             if !selectedText.isEmpty {
-                Text("\"\(selectedText.prefix(80))\"")
-                    .font(.caption).italic()
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .padding(.horizontal, 12).padding(.top, 6)
+                VStack(alignment: .leading, spacing: 2) {
+                    if let line = selectedLine {
+                        Text("Line \(line)")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Text("\"\(selectedText.prefix(80))\"")
+                        .font(.caption).italic()
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                .padding(.horizontal, 12).padding(.top, 6)
             }
 
             // Comment list
@@ -90,6 +98,7 @@ struct ThreadPanelView: View {
         .sheet(isPresented: $showCompose) {
             ComposeCommentView(
                 selectedText: selectedText,
+                selectedLine: selectedLine,
                 onSubmit: { _ in showCompose = false }
             )
         }
@@ -137,6 +146,7 @@ private struct CommentRow: View {
 
 struct ComposeCommentView: View {
     let selectedText: String
+    var selectedLine: Int? = nil
     var onSubmit: ((String) -> Void)? = nil
 
     @State private var commentText = ""
@@ -148,9 +158,15 @@ struct ComposeCommentView: View {
         NavigationStack {
             VStack(spacing: 16) {
                 if !selectedText.isEmpty {
-                    Text("Commenting on: \"\(selectedText.prefix(80))\"")
-                        .font(.caption).italic().foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let line = selectedLine {
+                            Text("Line \(line)")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Text("Commenting on: \"\(selectedText.prefix(80))\"")
+                            .font(.caption).italic().foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 // Voice / text toggle

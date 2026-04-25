@@ -80,6 +80,7 @@ struct iPadRootView: View {
     @State private var selectedRFC: RFC? = nil
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @State private var selectedText: String? = nil
+    @State private var selectedLine: Int? = nil
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -96,6 +97,8 @@ struct iPadRootView: View {
             if let rfc = selectedRFC {
                 RFCDetailView(rfc: rfc, onTextSelected: { text in
                     selectedText = text
+                }, onLineTapped: { line in
+                    selectedLine = line
                 })
             } else {
                 ContentUnavailableView("Select an RFC", systemImage: "doc.text")
@@ -103,7 +106,7 @@ struct iPadRootView: View {
         } detail: {
             if let text = selectedText, let rfc = selectedRFC,
                case .pullRequest(let pr) = rfc.source {
-                ThreadPanelView(prNumber: pr.number, selectedText: text)
+                ThreadPanelView(prNumber: pr.number, selectedText: text, selectedLine: selectedLine)
             } else {
                 ContentUnavailableView("Select text to comment", systemImage: "bubble.left")
             }

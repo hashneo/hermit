@@ -6,6 +6,7 @@ import SwiftUI
 struct RFCDetailView: View {
     let rfc: RFC
     var onTextSelected: ((String) -> Void)? = nil
+    var onLineTapped: ((Int) -> Void)? = nil
 
     @EnvironmentObject private var appState: AppState
     @State private var markdown: String = ""
@@ -49,7 +50,7 @@ struct RFCDetailView: View {
 
     private var rfcContentView: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            MarkdownRendererView(blocks: MarkdownParser.parse(markdown))
+            MarkdownRendererView(blocks: MarkdownParser.parse(markdown), onLineTapped: onLineTapped)
                 .padding(40)
                 .frame(maxWidth: 900, alignment: .leading)
                 .frame(maxWidth: .infinity)

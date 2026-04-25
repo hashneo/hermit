@@ -4,6 +4,8 @@ import SwiftUI
 
 struct MarkdownRendererView: View {
     let blocks: [MarkdownBlock]
+    /// Called when the user taps a block; receives the 1-based raw markdown source line number.
+    var onLineTapped: ((Int) -> Void)? = nil
 
     private var codeBackground: Color {
 #if os(macOS)
@@ -20,6 +22,8 @@ struct MarkdownRendererView: View {
     var body: some View {        VStack(alignment: .leading, spacing: 16) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 blockView(block)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onLineTapped?(block.sourceLine) }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -30,35 +34,35 @@ struct MarkdownRendererView: View {
     @ViewBuilder
     private func blockView(_ block: MarkdownBlock) -> some View {
         switch block {
-        case .heading(let level, let inlines):
+        case .heading(let level, let inlines, _):
             headingView(level: level, inlines: inlines)
 
-        case .paragraph(let inlines):
+        case .paragraph(let inlines, _):
             Text(attributedString(inlines))
                 .fixedSize(horizontal: false, vertical: true)
 
-        case .codeBlock(let lang, let code):
+        case .codeBlock(let lang, let code, _):
             codeBlockView(language: lang, code: code)
 
-        case .mermaidBlock(let source):
+        case .mermaidBlock(let source, _):
             MermaidView(source: source)
                 .frame(minHeight: 200)
                 .frame(maxWidth: .infinity)
 
-        case .bulletList(let items):
+        case .bulletList(let items, _):
             bulletListView(items: items)
 
-        case .orderedList(let items):
+        case .orderedList(let items, _):
             orderedListView(items: items)
 
-        case .blockquote(let inlines):
+        case .blockquote(let inlines, _):
             blockquoteView(inlines: inlines)
 
-        case .horizontalRule:
+        case .horizontalRule(_):
             Divider()
                 .padding(.vertical, 4)
 
-        case .table(let headers, let rows):
+        case .table(let headers, let rows, _):
             tableView(headers: headers, rows: rows)
         }
     }
