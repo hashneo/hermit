@@ -113,6 +113,10 @@ final class RFCViewerWindowManager {
     private var controllers: [String: NSWindowController] = [:]
 
     func open(rfc: RFC, appState: AppState) {
+        // hermit-olq: track selection in AppState for NSUserActivity access
+        appState.selectedRFC = rfc
+        appState.selectedLine = nil
+
         if let existing = controllers[rfc.id] {
             existing.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -145,6 +149,11 @@ final class RFCViewerWindowManager {
         ) { [weak self] _ in
             Task { @MainActor in
                 self?.controllers.removeValue(forKey: rfc.id)
+                // Clear shared selection when this RFC's window closes
+                if appState.selectedRFC?.id == rfc.id {
+                    appState.selectedRFC = nil
+                    appState.selectedLine = nil
+                }
             }
         }
 

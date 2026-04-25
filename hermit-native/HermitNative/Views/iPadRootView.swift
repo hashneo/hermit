@@ -80,8 +80,7 @@ struct iPadRootView: View {
 #endif
     @StateObject private var store = RFCStore()
     @StateObject private var commentStore = CommentStore()
-    @State private var selectedRFC: RFC? = nil
-    @State private var selectedLine: Int? = nil
+    // hermit-olq: selectedRFC and selectedLine promoted to AppState for NSUserActivity access
     @State private var showSettings = false
     @State private var showRFCPicker = false   // portrait: RFC menu popover
     @State private var showThread = false       // portrait: thread sheet
@@ -141,7 +140,7 @@ struct iPadRootView: View {
 
     private var landscapeLayout: some View {
         NavigationSplitView {
-            RFCListView(rfcs: store.rfcs, selectedRFC: $selectedRFC) {
+            RFCListView(rfcs: store.rfcs, selectedRFC: $appState.selectedRFC) {
                 await store.load()
             }
             .navigationTitle("Hermit")
@@ -157,7 +156,7 @@ struct iPadRootView: View {
     private var portraitLayout: some View {
         NavigationStack {
             detailView(showInlineThread: false)
-                .navigationTitle(selectedRFC?.title ?? "Hermit")
+                .navigationTitle(appState.selectedRFC?.title ?? "Hermit")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     // RFC picker — left side
@@ -170,8 +169,8 @@ struct iPadRootView: View {
                             } else {
                                 ForEach(store.rfcs) { rfc in
                                     Button {
-                                        selectedRFC = rfc
-                                        selectedLine = nil
+                                        appState.selectedRFC = rfc
+                                        appState.selectedLine = nil
                                     } label: {
                                         Label(rfc.title, systemImage: rfcIcon(rfc))
                                     }
@@ -189,7 +188,7 @@ struct iPadRootView: View {
                     ToolbarItemGroup(placement: .topBarTrailing) {
                         if store.isLoading { ProgressView().controlSize(.small) }
                         // Thread button — only for PR RFCs
-                        if let rfc = selectedRFC, case .pullRequest(let pr) = rfc.source {
+                        if let rfc = appState.selectedRFC, case .pullRequest(let pr) = rfc.source {
                             Button {
                                 showThread = true
                             } label: {
@@ -197,7 +196,7 @@ struct iPadRootView: View {
                             }
                             .sheet(isPresented: $showThread) {
                                 NavigationStack {
-                                    ThreadPanelView(prNumber: pr.number, selectedLine: selectedLine)
+                                    ThreadPanelView(prNumber: pr.number, selectedLine: appState.selectedLine)
                                         .environmentObject(commentStore)
                                         .navigationTitle("Comments")
                                         .navigationBarTitleDisplayMode(.inline)
@@ -251,14 +250,14 @@ struct iPadRootView: View {
 
     @ViewBuilder
     private func detailView(showInlineThread: Bool) -> some View {
-        if let rfc = selectedRFC {
+        if let rfc = appState.selectedRFC {
             VStack(spacing: 0) {
                 RFCDetailView(rfc: rfc, commentStore: commentStore, onLineTapped: { line in
-                    selectedLine = line
+                    appState.selectedLine = line
                 })
                 if showInlineThread, case .pullRequest(let pr) = rfc.source {
                     Divider()
-                    ThreadPanelView(prNumber: pr.number, selectedLine: selectedLine)
+                    ThreadPanelView(prNumber: pr.number, selectedLine: appState.selectedLine)
                         .environmentObject(commentStore)
                         .frame(maxHeight: 280)
                 }

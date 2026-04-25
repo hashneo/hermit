@@ -58,6 +58,13 @@ final class AppState: ObservableObject {
     @Published var rfcLabel: String
     @Published var pat: String
 
+    // hermit-999: NSUserActivity — shared selection state
+    /// The RFC currently being viewed. Written by iPadRootView (iOS) and
+    /// RFCViewerWindowManager (macOS) so NSUserActivity machinery can read it.
+    @Published var selectedRFC: RFC? = nil
+    /// The comment-thread line currently selected, coordinated across devices.
+    @Published var selectedLine: Int? = nil
+
     // hermit-u1k / RFC-013: server connectivity
     @Published var serverMode: ServerMode = .embeddedLocal
     /// The resolved base URL of the active Hermit server (set by EmbeddedServerManager
