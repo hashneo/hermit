@@ -97,7 +97,8 @@ struct MenuBarRFCListView: View {
             }
         }
         .frame(width: 300, height: 420)
-        .task {
+        .task(id: appState.serverBaseURL) {
+            guard !appState.serverBaseURL.isEmpty else { return }
             if let client = appState.makeAPIClient() {
                 store.configure(client: client, docsPath: appState.docsPath)
             }

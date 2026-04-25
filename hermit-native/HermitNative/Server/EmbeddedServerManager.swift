@@ -204,7 +204,7 @@ final class EmbeddedServerManager: ObservableObject {
     private func buildConfigJSON(appState: AppState) -> String {
         let dataDir = Self.appSupportDirectory()
         let payload: [String: String] = [
-            "baseURL":  appState.baseURL,
+            "baseURL":  appState.giteaBaseURL.isEmpty ? appState.baseURL : appState.giteaBaseURL,
             "pat":      appState.pat,
             "owner":    appState.repoOwner,
             "repo":     appState.repoName,

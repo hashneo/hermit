@@ -27,13 +27,13 @@ final class RFCStore: ObservableObject {
         do {
             let (mainFiles, prs) = try await client.discoverRFCs()
             var result: [RFC] = mainFiles.map {
-                RFC(id: $0.id, title: titleFromFilename($0.name),
+                RFC(id: $0.id, title: $0.name,
                     path: $0.path, sha: $0.sha, source: .mainBranch)
             }
             for pr in prs {
-                let path = await resolvePRPath(client: client, pr: pr)
                 result.append(RFC(id: "pr-\(pr.id)", title: pr.title,
-                                  path: path, sha: pr.headSHA,
+                                  path: pr.headRef,   // unused for PR RFCs — fetchPRRFCContent uses prNumber
+                                  sha: pr.headSHA,
                                   source: .pullRequest(pr)))
             }
             rfcs = result.sorted { $0.title < $1.title }

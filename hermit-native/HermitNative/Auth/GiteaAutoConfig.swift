@@ -13,7 +13,8 @@ import Foundation
 enum GiteaAutoConfig {
 
     struct DetectedConfig: Equatable {
-        let baseURL: String
+        let baseURL: String        // Hermit Go server URL (e.g. http://localhost:8080)
+        let giteaBaseURL: String   // Gitea/registry API base URL (e.g. http://localhost:3000/api/v1)
         let pat: String
         let owner: String
         let repo: String
@@ -108,7 +109,7 @@ enum GiteaAutoConfig {
         let tokenText  = try String(contentsOf: tokenURL,  encoding: .utf8)
 
         let token = try parseToken(from: tokenText)
-        let (_, owner, repo, docsPath) = try parseConfig(configText, token: token)
+        let (giteaBaseURL, owner, repo, docsPath) = try parseConfig(configText, token: token)
 
         // The native app talks to the Hermit Go backend, not Gitea directly.
         // GUI → Go server (:8080) → Gitea/GitHub
@@ -116,6 +117,7 @@ enum GiteaAutoConfig {
 
         return DetectedConfig(
             baseURL:       hermitServerURL,
+            giteaBaseURL:  giteaBaseURL,
             pat:           token,
             owner:         owner,
             repo:          repo,

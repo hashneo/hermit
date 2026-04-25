@@ -51,6 +51,7 @@ final class AppState: ObservableObject {
 
     @Published var isAuthenticated: Bool
     @Published var baseURL: String        // Hermit server base URL (legacy field, superseded by serverBaseURL)
+    @Published var giteaBaseURL: String   // Gitea/registry API base URL (e.g. http://localhost:3000/api/v1)
     @Published var repoOwner: String
     @Published var repoName: String
     @Published var docsPath: String
@@ -73,13 +74,14 @@ final class AppState: ObservableObject {
             let detected = try GiteaAutoConfig.detect()
             isAuthenticated = true
             baseURL         = detected.baseURL
+            giteaBaseURL    = detected.giteaBaseURL
             repoOwner       = detected.owner
             repoName        = detected.repo
             docsPath        = detected.docsPath
             rfcLabel        = detected.rfcLabel
             pat             = detected.pat
             serverMode      = .embeddedLocal
-            serverBaseURL   = detected.baseURL
+            serverBaseURL   = ""   // populated by EmbeddedServerManager once the server binds a port
             debugLog("loaded from config — \(detected.owner)/\(detected.repo) @ \(detected.baseURL)")
             return
         } catch {
@@ -90,6 +92,7 @@ final class AppState: ObservableObject {
         let kc = KeychainHelper.shared
         isAuthenticated = kc.isConfigured
         baseURL         = kc.baseURL   ?? ""
+        giteaBaseURL    = ""
         repoOwner       = kc.repoOwner ?? ""
         repoName        = kc.repoName  ?? ""
         docsPath        = kc.docsPath  ?? "docs-cms/rfcs"

@@ -75,22 +75,20 @@ struct RFCDetailView: View {
             isLoading = false
             return
         }
-        guard !rfc.path.isEmpty else {
+        // Main branch RFCs need a path; PR RFCs use prNumber via fetchPRRFCContent
+        if case .mainBranch = rfc.source, rfc.path.isEmpty {
             errorMessage = "No RFC file found on this branch."
             isLoading = false
             return
         }
 
-        let ref: String
-        switch rfc.source {
-        case .mainBranch:
-            ref = "main"
-        case .pullRequest(let pr):
-            ref = pr.headRef
-        }
-
         do {
-            markdown = try await client.fetchRFCContent(path: rfc.path, ref: ref)
+            switch rfc.source {
+            case .mainBranch:
+                markdown = try await client.fetchRFCContent(path: rfc.path, ref: "main")
+            case .pullRequest(let pr):
+                markdown = try await client.fetchPRRFCContent(prNumber: pr.number)
+            }
         } catch {
             errorMessage = error.localizedDescription
             isLoading = false
