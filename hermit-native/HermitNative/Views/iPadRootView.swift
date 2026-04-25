@@ -81,67 +81,17 @@ struct iPadRootView: View {
     @StateObject private var store = RFCStore()
     @StateObject private var commentStore = CommentStore()
     @State private var selectedRFC: RFC? = nil
-    @State private var columnVisibility = NavigationSplitViewVisibility.all
     @State private var selectedLine: Int? = nil
     @State private var showSettings = false
+    @State private var showRFCPicker = false   // portrait: RFC menu popover
+    @State private var showThread = false       // portrait: thread sheet
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            RFCListView(rfcs: store.rfcs, selectedRFC: $selectedRFC) {
-                await store.load()
-            }
-            .navigationTitle("Hermit")
-            .overlay {
-                if let err = store.errorMessage {
-                    ContentUnavailableView("Could not load RFCs",
-                        systemImage: "exclamationmark.triangle",
-                        description: Text(err))
-                } else if store.rfcs.isEmpty && !store.isLoading {
-                    ContentUnavailableView("No RFCs", systemImage: "doc.text")
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .automatic) {
-                    if store.isLoading { ProgressView().controlSize(.small) }
-                }
-                ToolbarItem(placement: .automatic) {
-                    Button { showSettings = true } label: {
-                        Image(systemName: "gear")
-                    }
-                }
-            }
-            .sheet(isPresented: $showSettings) {
-                NavigationStack {
-                    SettingsView()
-                        .environmentObject(appState)
-                        .navigationTitle("Settings")
-#if os(iOS)
-                        .navigationBarTitleDisplayMode(.inline)
-#endif
-                        .toolbar {
-                            ToolbarItem(placement: .automatic) {
-                                Button("Done") { showSettings = false }
-                            }
-                        }
-                }
-            }
-        } content: {
-            if let rfc = selectedRFC {
-                RFCDetailView(rfc: rfc, commentStore: commentStore, onLineTapped: { line in
-                    selectedLine = line
-                })
+        GeometryReader { geo in
+            if geo.size.width > geo.size.height {
+                landscapeLayout
             } else {
-                ContentUnavailableView("Select an RFC", systemImage: "doc.text")
-            }
-        } detail: {
-            if let rfc = selectedRFC, case .pullRequest(let pr) = rfc.source {
-                ThreadPanelView(prNumber: pr.number, selectedLine: selectedLine)
-                    .environmentObject(commentStore)
-            } else if selectedRFC != nil {
-                ContentUnavailableView("Main-branch RFC", systemImage: "doc.text",
-                    description: Text("Comments are only available on PR branches."))
-            } else {
-                ContentUnavailableView("Select an RFC", systemImage: "bubble.left")
+                portraitLayout
             }
         }
         .task {
@@ -162,6 +112,152 @@ struct iPadRootView: View {
 #if os(iOS)
             ConnectionStatusBar(appState: appState, pairingBrowser: pairingBrowser)
 #endif
+        }
+        .sheet(isPresented: $showSettings) {
+            NavigationStack {
+                SettingsView()
+                    .environmentObject(appState)
+                    .navigationTitle("Settings")
+#if os(iOS)
+                    .navigationBarTitleDisplayMode(.inline)
+#endif
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showSettings = false }
+                        }
+                    }
+            }
+        }
+    }
+
+    // MARK: - Landscape: two-column split (list | detail+thread)
+
+    private var landscapeLayout: some View {
+        NavigationSplitView {
+            RFCListView(rfcs: store.rfcs, selectedRFC: $selectedRFC) {
+                await store.load()
+            }
+            .navigationTitle("Hermit")
+            .overlay { listOverlay }
+            .toolbar { listToolbarItems }
+        } detail: {
+            detailView(showInlineThread: true)
+        }
+    }
+
+    // MARK: - Portrait: full-screen detail, RFC picked from toolbar menu
+
+    private var portraitLayout: some View {
+        NavigationStack {
+            detailView(showInlineThread: false)
+                .navigationTitle(selectedRFC?.title ?? "Hermit")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    // RFC picker — left side
+                    ToolbarItem(placement: .topBarLeading) {
+                        Menu {
+                            if store.isLoading {
+                                Label("Loading…", systemImage: "arrow.clockwise")
+                            } else if store.rfcs.isEmpty {
+                                Label("No RFCs found", systemImage: "doc.text")
+                            } else {
+                                ForEach(store.rfcs) { rfc in
+                                    Button {
+                                        selectedRFC = rfc
+                                        selectedLine = nil
+                                    } label: {
+                                        Label(rfc.title, systemImage: rfcIcon(rfc))
+                                    }
+                                }
+                            }
+                            Divider()
+                            Button { Task { await store.load() } } label: {
+                                Label("Refresh", systemImage: "arrow.clockwise")
+                            }
+                        } label: {
+                            Label("RFCs", systemImage: "list.bullet.rectangle")
+                        }
+                    }
+                    // Right side
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        if store.isLoading { ProgressView().controlSize(.small) }
+                        // Thread button — only for PR RFCs
+                        if let rfc = selectedRFC, case .pullRequest(let pr) = rfc.source {
+                            Button {
+                                showThread = true
+                            } label: {
+                                Image(systemName: "bubble.left.and.bubble.right")
+                            }
+                            .sheet(isPresented: $showThread) {
+                                NavigationStack {
+                                    ThreadPanelView(prNumber: pr.number, selectedLine: selectedLine)
+                                        .environmentObject(commentStore)
+                                        .navigationTitle("Comments")
+                                        .navigationBarTitleDisplayMode(.inline)
+                                        .toolbar {
+                                            ToolbarItem(placement: .topBarTrailing) {
+                                                Button("Done") { showThread = false }
+                                            }
+                                        }
+                                }
+                            }
+                        }
+                        Button { showSettings = true } label: {
+                            Image(systemName: "gear")
+                        }
+                    }
+                }
+        }
+    }
+
+    // MARK: - Helpers
+
+    @ViewBuilder
+    private var listOverlay: some View {
+        if let err = store.errorMessage {
+            ContentUnavailableView("Could not load RFCs",
+                systemImage: "exclamationmark.triangle",
+                description: Text(err))
+        } else if store.rfcs.isEmpty && !store.isLoading {
+            ContentUnavailableView("No RFCs", systemImage: "doc.text")
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var listToolbarItems: some ToolbarContent {
+        ToolbarItem(placement: .automatic) {
+            if store.isLoading { ProgressView().controlSize(.small) }
+        }
+        ToolbarItem(placement: .automatic) {
+            Button { showSettings = true } label: {
+                Image(systemName: "gear")
+            }
+        }
+    }
+
+    private func rfcIcon(_ rfc: RFC) -> String {
+        if case .pullRequest = rfc.source { return "arrow.triangle.pull" }
+        return "doc.text"
+    }
+
+    // MARK: - Detail view (shared; showInlineThread controls landscape thread panel)
+
+    @ViewBuilder
+    private func detailView(showInlineThread: Bool) -> some View {
+        if let rfc = selectedRFC {
+            VStack(spacing: 0) {
+                RFCDetailView(rfc: rfc, commentStore: commentStore, onLineTapped: { line in
+                    selectedLine = line
+                })
+                if showInlineThread, case .pullRequest(let pr) = rfc.source {
+                    Divider()
+                    ThreadPanelView(prNumber: pr.number, selectedLine: selectedLine)
+                        .environmentObject(commentStore)
+                        .frame(maxHeight: 280)
+                }
+            }
+        } else {
+            ContentUnavailableView("Select an RFC", systemImage: "doc.text")
         }
     }
 }
