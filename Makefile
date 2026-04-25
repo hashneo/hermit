@@ -174,12 +174,12 @@ dev: native-open ## Full automated dev cycle: gomobile → build → launch
 
 GOMOBILE_OUT := $(NATIVE_DIR)/HermitNative/HermitServer.xcframework
 
-gomobile-build: ## Compile the Go mobile package into HermitServer.xcframework (requires gomobile)
-	@command -v gomobile >/dev/null 2>&1 || { \
-		echo "gomobile not found. Run:"; \
-		echo "  go install golang.org/x/mobile/cmd/gomobile@latest && gomobile init"; \
-		exit 1; \
-	}
+gomobile-build: ## Compile the Go mobile package into HermitServer.xcframework (auto-installs gomobile if needed)
+	@if ! command -v gomobile >/dev/null 2>&1; then \
+		echo "gomobile not found — installing..."; \
+		go install golang.org/x/mobile/cmd/gomobile@latest; \
+	fi
+	@DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer gomobile init 2>/dev/null || true
 	@echo "Building HermitServer.xcframework via gomobile bind..."
 	DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 	gomobile bind \
