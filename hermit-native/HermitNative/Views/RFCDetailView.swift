@@ -50,19 +50,20 @@ struct RFCDetailView: View {
     }
 
     private var rfcContentView: some View {
-        // Always inject a CommentStore — use the provided one or a default no-op instance
         let store = commentStore ?? CommentStore()
         let gutterView = GutterMarkdownView(
             blocks: MarkdownParser.parse(markdown),
             onLineTapped: onLineTapped
         )
-        return ScrollView(.vertical, showsIndicators: true) {
-            gutterView
-                .environmentObject(store)
-                .padding(.horizontal, 32)
-                .padding(.vertical, 40)
-                .frame(maxWidth: 940, alignment: .leading)
-                .frame(maxWidth: .infinity)
+        return GeometryReader { geo in
+            ScrollView(.vertical, showsIndicators: true) {
+                gutterView
+                    .environmentObject(store)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 40)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(width: geo.size.width * 0.50, height: geo.size.height * 0.95, alignment: .topLeading)
         }
     }
 
