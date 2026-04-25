@@ -51,6 +51,7 @@
 		B001B005 /* EmbeddedServerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B006 /* EmbeddedServerManager.swift */; };
 		B001B007 /* ServerDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B008 /* ServerDiscoveryService.swift */; };
 		B001B009 /* PairingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B00A /* PairingService.swift */; };
+		B001C001 /* HermitServer.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B001C002 /* HermitServer.xcframework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -63,6 +64,7 @@
 		B001B006 /* EmbeddedServerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedServerManager.swift; sourceTree = "<group>"; };
 		B001B008 /* ServerDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDiscoveryService.swift; sourceTree = "<group>"; };
 		B001B00A /* PairingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingService.swift; sourceTree = "<group>"; };
+		B001C002 /* HermitServer.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = HermitServer.xcframework; sourceTree = "<group>"; };
 		B001000D /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		B001000F /* RFC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFC.swift; sourceTree = "<group>"; };
 		B0010011 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
@@ -106,6 +108,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B001C001 /* HermitServer.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -134,6 +137,7 @@
 				B0010099 /* WebView */,
 				B001009A /* Views */,
 				B001009B /* Resources */,
+				B001C003 /* Frameworks */,
 			);
 			path = HermitNative;
 			sourceTree = "<group>";
@@ -182,6 +186,14 @@
 				B001B00A /* PairingService.swift */,
 			);
 			path = Server;
+			sourceTree = "<group>";
+		};
+		B001C003 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				B001C002 /* HermitServer.xcframework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 		B0010096 /* AI */ = {
@@ -502,6 +514,10 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
 				ENABLE_PREVIEWS = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/HermitNative",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Hermit uses the microphone to let you dictate RFC content and voice comments.";
@@ -516,6 +532,10 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.2;
 				MARKETING_VERSION = 0.1.0;
+				OTHER_SWIFT_FLAGS = (
+					"$(inherited)",
+					"-DHERMIT_EMBEDDED_SERVER",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.hashicorp.hermit-native";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "macosx iphonesimulator iphoneos";
@@ -538,6 +558,10 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
 				ENABLE_PREVIEWS = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/HermitNative",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Hermit uses the microphone to let you dictate RFC content and voice comments.";
@@ -552,6 +576,10 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.2;
 				MARKETING_VERSION = 0.1.0;
+				OTHER_SWIFT_FLAGS = (
+					"$(inherited)",
+					"-DHERMIT_EMBEDDED_SERVER",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.hashicorp.hermit-native";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "macosx iphonesimulator iphoneos";

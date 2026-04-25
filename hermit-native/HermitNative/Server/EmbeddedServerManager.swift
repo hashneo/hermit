@@ -1,5 +1,8 @@
 import Foundation
 import Network
+#if HERMIT_EMBEDDED_SERVER
+import HermitServer
+#endif
 
 // MARK: - hermit-y9x: Launch embedded Go server at app startup
 // MARK: - hermit-6et: Register Bonjour _hermit._tcp service after server starts
