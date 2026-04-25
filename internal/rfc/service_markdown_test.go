@@ -20,16 +20,18 @@ func TestMarkdownToHTMLWithFrontmatter_UsesStrictMarkdownRenderer(t *testing.T) 
 	}
 }
 
-func TestMarkdownToHTMLWithFrontmatter_RendersMermaidAsImage(t *testing.T) {
+func TestMarkdownToHTMLWithFrontmatter_PassesMermaidFenceThrough(t *testing.T) {
 	markdown := "## Diagram\n\n```mermaid\ngraph TD\nA-->B\n```"
 
 	html := markdownToHTMLWithFrontmatter(nil, markdown)
 
-	if !strings.Contains(html, `<img src="https://mermaid.ink/img/`) {
-		t.Fatalf("expected mermaid code block to render as image, got %q", html)
+	// mermaid.ink must NOT be referenced — that would leak RFC content to a third party.
+	if strings.Contains(html, "mermaid.ink") {
+		t.Fatalf("mermaid.ink must not appear in rendered output (security leak), got %q", html)
 	}
-	if strings.Contains(html, "<code") {
-		t.Fatalf("expected mermaid code fence to be replaced before markdown rendering, got %q", html)
+	// Fenced block passes through as a <code class="language-mermaid"> block for client-side rendering.
+	if !strings.Contains(html, "language-mermaid") {
+		t.Fatalf("expected mermaid fence to pass through as language-mermaid code block, got %q", html)
 	}
 }
 

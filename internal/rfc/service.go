@@ -3,10 +3,8 @@ package rfc
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"fmt"
 	stdhtml "html"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -523,51 +521,11 @@ func renderStrictMarkdownWithMermaid(markdown string) string {
 	return enforceExternalLinkTargets(b.String())
 }
 
+// rewriteMermaidFencesAsImages is intentionally disabled.
+// Encoding diagram source into mermaid.ink URLs sends RFC content to a
+// third-party server. Mermaid rendering is handled client-side instead.
 func rewriteMermaidFencesAsImages(markdown string) string {
-	lines := strings.Split(markdown, "\n")
-	out := strings.Builder{}
-
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		if !strings.HasPrefix(strings.TrimSpace(line), "```mermaid") {
-			out.WriteString(line)
-			if i < len(lines)-1 {
-				out.WriteString("\n")
-			}
-			continue
-		}
-
-		diagramLines := []string{}
-		closed := false
-		for j := i + 1; j < len(lines); j++ {
-			if strings.HasPrefix(strings.TrimSpace(lines[j]), "```") {
-				definition := strings.TrimSpace(strings.Join(diagramLines, "\n"))
-				if definition != "" {
-					encoded := url.PathEscape(base64.StdEncoding.EncodeToString([]byte(definition)))
-					out.WriteString("![Mermaid diagram](https://mermaid.ink/img/" + encoded + ")")
-				}
-				if j < len(lines)-1 {
-					out.WriteString("\n")
-				}
-				i = j
-				closed = true
-				break
-			}
-			diagramLines = append(diagramLines, lines[j])
-		}
-
-		if closed {
-			continue
-		}
-
-		out.WriteString(line)
-		for _, diagramLine := range diagramLines {
-			out.WriteString("\n")
-			out.WriteString(diagramLine)
-		}
-	}
-
-	return out.String()
+	return markdown
 }
 
 func enforceExternalLinkTargets(rendered string) string {
