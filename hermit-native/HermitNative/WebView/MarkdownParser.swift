@@ -158,77 +158,109 @@ enum MarkdownParser {
 
     static func parseInline(_ input: String) -> [MarkdownInline] {
         var result: [MarkdownInline] = []
-        var s = input
-        while !s.isEmpty {
+        var chars = Array(input) // work on character array to avoid index hell
+        var i = 0
+
+        // Append a plain text character, merging with previous text run if possible
+        func emitChar(_ c: Character) {
+            if case .text(let s) = result.last {
+                result[result.count - 1] = .text(s + String(c))
+            } else {
+                result.append(.text(String(c)))
+            }
+        }
+
+        while i < chars.count {
+            let c = chars[i]
+
             // Image ![alt](url)
-            if let r = s.range(of: #"^!\[([^\]]*)\]\(([^)]*)\)"#, options: .regularExpression) {
-                let match = String(s[r])
-                let inner = match.dropFirst(2) // drop ![ 
-                if let altEnd = inner.firstIndex(of: "]"),
-                   let urlStart = inner[altEnd...].firstIndex(of: "("),
-                   let urlEnd = inner[urlStart...].firstIndex(of: ")") {
-                    let alt = String(inner[inner.startIndex..<altEnd])
-                    let urlRange = inner.index(after: urlStart)..<urlEnd
-                    let url = String(inner[urlRange])
+            if c == "!" && i + 1 < chars.count && chars[i + 1] == "[" {
+                if let (alt, url, advance) = parseLinkOrImage(chars: chars, from: i + 1, isImage: true) {
                     result.append(.image(alt: alt, url: url))
-                    s = String(s[r.upperBound...])
+                    i += advance + 1
                     continue
                 }
             }
 
             // Link [text](url)
-            if let r = s.range(of: #"^\[([^\]]*)\]\(([^)]*)\)"#, options: .regularExpression) {
-                let match = String(s[r])
-                let inner = match.dropFirst() // drop [
-                if let textEnd = inner.firstIndex(of: "]"),
-                   let urlStart = inner[textEnd...].firstIndex(of: "("),
-                   let urlEnd = inner[urlStart...].firstIndex(of: ")") {
-                    let text = String(inner[inner.startIndex..<textEnd])
-                    let urlRange = inner.index(after: urlStart)..<urlEnd
-                    let url = String(inner[urlRange])
+            if c == "[" {
+                if let (text, url, advance) = parseLinkOrImage(chars: chars, from: i, isImage: false) {
                     result.append(.link(text: text, url: url))
-                    s = String(s[r.upperBound...])
+                    i += advance
                     continue
                 }
             }
 
             // Bold **...**
-            if s.hasPrefix("**"), let end = s.dropFirst(2).range(of: "**") {
-                let inner = String(s[s.index(s.startIndex, offsetBy: 2)..<s.index(end.lowerBound, offsetBy: 2)])
-                result.append(.bold(parseInline(inner)))
-                s = String(s[s.index(end.upperBound, offsetBy: 2)...])
-                continue
+            if c == "*" && i + 1 < chars.count && chars[i + 1] == "*" {
+                let start = i + 2
+                if let end = findClosing(chars: chars, from: start, marker: ["*", "*"]) {
+                    let inner = String(chars[start..<end])
+                    result.append(.bold(parseInline(inner)))
+                    i = end + 2
+                    continue
+                }
             }
 
-            // Italic *...*
-            if s.hasPrefix("*"), !s.hasPrefix("**") {
-                let rest = s.dropFirst()
-                if let end = rest.firstIndex(of: "*"), !rest[rest.startIndex..<end].isEmpty {
-                    let inner = String(rest[rest.startIndex..<end])
+            // Italic *...*  (but not **)
+            if c == "*" && !(i + 1 < chars.count && chars[i + 1] == "*") {
+                let start = i + 1
+                if let end = findClosing(chars: chars, from: start, marker: ["*"]), end > start {
+                    let inner = String(chars[start..<end])
                     result.append(.italic(parseInline(inner)))
-                    s = String(rest[rest.index(after: end)...])
+                    i = end + 1
                     continue
                 }
             }
 
             // Inline code `...`
-            if s.hasPrefix("`"), let end = s.dropFirst().firstIndex(of: "`") {
-                let inner = String(s.dropFirst()[s.dropFirst().startIndex..<end])
-                result.append(.code(inner))
-                s = String(s.dropFirst()[s.dropFirst().index(after: end)...])
-                continue
+            if c == "`" {
+                let start = i + 1
+                if let end = findClosing(chars: chars, from: start, marker: ["`"]) {
+                    let inner = String(chars[start..<end])
+                    result.append(.code(inner))
+                    i = end + 1
+                    continue
+                }
             }
 
-            // Plain text — consume until next special char
-            var text = ""
-            while !s.isEmpty {
-                let c = s.first!
-                if c == "*" || c == "`" || c == "[" || c == "!" { break }
-                text.append(c)
-                s = String(s.dropFirst())
-            }
-            if !text.isEmpty { result.append(.text(text)) }
+            // No match — emit as plain text and advance
+            emitChar(c)
+            i += 1
         }
+
         return result
+    }
+
+    // Finds the next occurrence of `marker` in `chars` starting at `from`.
+    // Returns the index where the marker starts (i.e. content ends before it).
+    private static func findClosing(chars: [Character], from: Int, marker: [Character]) -> Int? {
+        guard from < chars.count else { return nil }
+        var j = from
+        while j <= chars.count - marker.count {
+            if Array(chars[j..<(j + marker.count)]) == marker {
+                return j
+            }
+            j += 1
+        }
+        return nil
+    }
+
+    // Parses [text](url) or (for isImage: true) the [alt](url) part after the !.
+    // `from` is the index of the opening `[`.
+    // Returns (text/alt, url, characters consumed including the opening char).
+    private static func parseLinkOrImage(chars: [Character], from: Int, isImage: Bool) -> (String, String, Int)? {
+        guard from < chars.count, chars[from] == "[" else { return nil }
+        // Find closing ]
+        guard let bracketClose = findClosing(chars: chars, from: from + 1, marker: ["]"]) else { return nil }
+        // Expect ( immediately after ]
+        let parenOpen = bracketClose + 1
+        guard parenOpen < chars.count, chars[parenOpen] == "(" else { return nil }
+        guard let parenClose = findClosing(chars: chars, from: parenOpen + 1, marker: [")"]) else { return nil }
+
+        let text = String(chars[(from + 1)..<bracketClose])
+        let url  = String(chars[(parenOpen + 1)..<parenClose])
+        let consumed = parenClose - from + 1  // number of chars from `from` through `)`
+        return (text, url, consumed)
     }
 }
