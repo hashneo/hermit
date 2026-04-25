@@ -100,7 +100,7 @@ actor GitHubAPIClient {
         let items = try await get([GitHubContentItem].self, from: url)
         return items
             .filter { $0.type == "file" && $0.name.hasSuffix(".md") }
-            .map { RFCFile(id: $0.sha, name: $0.name, path: $0.path, sha: $0.sha, htmlURL: $0.htmlUrl ?? "") }
+            .map { RFCFile(id: $0.path, name: $0.name, path: $0.path, sha: $0.sha, htmlURL: $0.htmlUrl ?? "") }
     }
 
     /// Lists .md file paths under docsPath on a given ref (branch/SHA).
