@@ -20,6 +20,7 @@ enum MarkdownBlock {
     case orderedList(items: [[MarkdownInline]])
     case blockquote(inlines: [MarkdownInline])
     case horizontalRule
+    case table(headers: [[MarkdownInline]], rows: [[[MarkdownInline]]])
 }
 
 // MARK: - Parser
@@ -132,6 +133,31 @@ enum MarkdownParser {
                 continue
             }
 
+            // GFM Table — header row | sep row (|---|) | data rows
+            // Detect: current line contains |, next line is a separator
+            if trimmed.contains("|") && i + 1 < lines.count {
+                let sepLine = lines[i + 1].trimmingCharacters(in: .whitespaces)
+                let isSep = sepLine.contains("|") &&
+                    sepLine.replacingOccurrences(of: "|", with: "")
+                            .replacingOccurrences(of: "-", with: "")
+                            .replacingOccurrences(of: ":", with: "")
+                            .replacingOccurrences(of: " ", with: "")
+                            .isEmpty
+                if isSep {
+                    let headers = parseTableRow(trimmed)
+                    i += 2  // skip header + separator
+                    var rows: [[[MarkdownInline]]] = []
+                    while i < lines.count {
+                        let rl = lines[i].trimmingCharacters(in: .whitespaces)
+                        if rl.isEmpty || !rl.contains("|") { break }
+                        rows.append(parseTableRow(rl))
+                        i += 1
+                    }
+                    blocks.append(.table(headers: headers, rows: rows))
+                    continue
+                }
+            }
+
             // Paragraph — accumulate until blank line or block-level element
             var paraLines: [String] = []
             while i < lines.count {
@@ -155,6 +181,14 @@ enum MarkdownParser {
     }
 
     // MARK: - Inline parser
+
+    private static func parseTableRow(_ line: String) -> [[MarkdownInline]] {
+        // Strip leading/trailing |, split on |, trim each cell
+        var s = line.trimmingCharacters(in: .whitespaces)
+        if s.hasPrefix("|") { s = String(s.dropFirst()) }
+        if s.hasSuffix("|") { s = String(s.dropLast()) }
+        return s.components(separatedBy: "|").map { parseInline($0.trimmingCharacters(in: .whitespaces)) }
+    }
 
     static func parseInline(_ input: String) -> [MarkdownInline] {
         var result: [MarkdownInline] = []

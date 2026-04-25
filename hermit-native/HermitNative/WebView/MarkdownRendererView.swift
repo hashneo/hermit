@@ -57,6 +57,9 @@ struct MarkdownRendererView: View {
         case .horizontalRule:
             Divider()
                 .padding(.vertical, 4)
+
+        case .table(let headers, let rows):
+            tableView(headers: headers, rows: rows)
         }
     }
 
@@ -131,6 +134,48 @@ struct MarkdownRendererView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Table
+
+    private func tableView(headers: [[MarkdownInline]], rows: [[[MarkdownInline]]]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header row
+            HStack(spacing: 0) {
+                ForEach(Array(headers.enumerated()), id: \.offset) { _, cell in
+                    Text(attributedString(cell))
+                        .font(.system(size: 13, weight: .semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.secondary.opacity(0.12))
+                    Divider().frame(width: 1)
+                }
+            }
+            Divider()
+            // Data rows
+            ForEach(Array(rows.enumerated()), id: \.offset) { rowIdx, row in
+                HStack(spacing: 0) {
+                    ForEach(Array(row.enumerated()), id: \.offset) { colIdx, cell in
+                        Text(attributedString(cell))
+                            .font(.system(size: 13))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(rowIdx % 2 == 0 ? Color.clear : Color.secondary.opacity(0.05))
+                        if colIdx < row.count - 1 {
+                            Divider().frame(width: 1)
+                        }
+                    }
+                }
+                Divider()
+            }
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+        )
+        .cornerRadius(6)
     }
 
     // MARK: - Blockquote
