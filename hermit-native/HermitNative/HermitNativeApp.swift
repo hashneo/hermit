@@ -183,6 +183,11 @@ final class RFCViewerWindowManager {
         activity.becomeCurrent()
         activities[rfc.id] = activity
 
+        // hermit-myr: donate to Spotlight / Siri (macOS)
+#if canImport(CoreSpotlight)
+        SpotlightDonor.shared.donate(rfc: rfc)
+#endif
+
         NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
             object: window,

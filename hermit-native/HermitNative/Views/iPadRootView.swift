@@ -170,6 +170,12 @@ struct iPadRootView: View {
                 appState.pendingDeepLinkPath = nil
             }
         }
+        // hermit-myr: donate to Spotlight / Siri whenever the viewed RFC changes (iPadOS)
+        .onChange(of: appState.selectedRFC) { _, rfc in
+#if canImport(CoreSpotlight)
+            if let rfc { SpotlightDonor.shared.donate(rfc: rfc) }
+#endif
+        }
     }
 
     // MARK: - Landscape: two-column split (list | detail+thread)
