@@ -73,6 +73,26 @@ final class AppState: ObservableObject {
     /// Decoded RFC path from a hermit://rfc/<path> URL, waiting for the RFC store to load.
     @Published var pendingDeepLinkPath: String? = nil
 
+    // hermit-iwq: UserDefaults keys for scene restoration
+    private enum RestoreKey {
+        static let rfcID   = "hermit.restore.rfcID"
+        static let rfcPath = "hermit.restore.rfcPath"
+    }
+
+    /// Persist the last-viewed RFC id and path so the next launch can restore it.
+    func persistLastViewedRFC(_ rfc: RFC?) {
+        if let rfc {
+            UserDefaults.standard.set(rfc.id,   forKey: RestoreKey.rfcID)
+            UserDefaults.standard.set(rfc.path, forKey: RestoreKey.rfcPath)
+        } else {
+            UserDefaults.standard.removeObject(forKey: RestoreKey.rfcID)
+            UserDefaults.standard.removeObject(forKey: RestoreKey.rfcPath)
+        }
+    }
+
+    /// Returns the persisted RFC id from the previous session, if any.
+    var restoredRFCID: String? { UserDefaults.standard.string(forKey: RestoreKey.rfcID) }
+
     // hermit-u1k / RFC-013: server connectivity
     @Published var serverMode: ServerMode = .embeddedLocal
     /// The resolved base URL of the active Hermit server (set by EmbeddedServerManager
@@ -101,6 +121,8 @@ final class AppState: ObservableObject {
             serverMode      = .embeddedLocal
             serverBaseURL   = ""   // populated by EmbeddedServerManager once the server binds a port
             debugLog("loaded from config — \(detected.owner)/\(detected.repo) @ \(detected.baseURL)")
+            // hermit-iwq: restore last-viewed RFC even in debug builds
+            pendingHandoffRFCID = UserDefaults.standard.string(forKey: RestoreKey.rfcID)
             return
         } catch {
             debugLog("GiteaAutoConfig.detect() FAILED — \(error)")
@@ -119,6 +141,8 @@ final class AppState: ObservableObject {
         serverMode      = kc.serverMode ?? .embeddedLocal
         serverBaseURL   = kc.serverBaseURL ?? ""
         localNetworkToken = kc.localNetworkToken ?? ""
+        // hermit-iwq: restore last-viewed RFC on next launch
+        pendingHandoffRFCID = UserDefaults.standard.string(forKey: RestoreKey.rfcID)
     }
 
     /// Refreshes published state from the Keychain (used by SetupView after saving).

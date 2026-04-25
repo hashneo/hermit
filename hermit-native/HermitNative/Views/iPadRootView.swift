@@ -171,7 +171,9 @@ struct iPadRootView: View {
             }
         }
         // hermit-myr: donate to Spotlight / Siri whenever the viewed RFC changes (iPadOS)
+        // hermit-iwq: persist last-viewed RFC for scene restoration on next launch
         .onChange(of: appState.selectedRFC) { _, rfc in
+            appState.persistLastViewedRFC(rfc)
 #if canImport(CoreSpotlight)
             if let rfc { SpotlightDonor.shared.donate(rfc: rfc) }
 #endif

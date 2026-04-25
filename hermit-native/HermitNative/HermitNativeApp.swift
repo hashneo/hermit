@@ -188,6 +188,9 @@ final class RFCViewerWindowManager {
         SpotlightDonor.shared.donate(rfc: rfc)
 #endif
 
+        // hermit-iwq: persist for scene restoration on next launch
+        appState.persistLastViewedRFC(rfc)
+
         NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
             object: window,
@@ -202,6 +205,8 @@ final class RFCViewerWindowManager {
                 if appState.selectedRFC?.id == rfc.id {
                     appState.selectedRFC = nil
                     appState.selectedLine = nil
+                    // hermit-iwq: clear persisted restore state when window is explicitly closed
+                    appState.persistLastViewedRFC(nil)
                 }
             }
         }
