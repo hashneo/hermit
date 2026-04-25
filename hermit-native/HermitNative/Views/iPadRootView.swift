@@ -85,14 +85,21 @@ struct iPadRootView: View {
     @State private var showSettings = false
     @State private var showRFCPicker = false   // portrait: RFC menu popover
     @State private var showThread = false       // portrait: thread sheet
+    @State private var isLandscape: Bool = UIDevice.current.orientation.isLandscape
 
     var body: some View {
-        GeometryReader { geo in
-            if geo.size.width > geo.size.height {
+        Group {
+            if isLandscape {
                 landscapeLayout
             } else {
                 portraitLayout
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+            let o = UIDevice.current.orientation
+            // Only flip on unambiguous landscape/portrait — ignore faceUp/faceDown/unknown
+            if o.isLandscape { isLandscape = true }
+            else if o.isPortrait { isLandscape = false }
         }
         .task {
             guard let client = appState.makeAPIClient() else {
