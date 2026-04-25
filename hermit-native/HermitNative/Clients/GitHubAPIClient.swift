@@ -242,7 +242,7 @@ actor GitHubAPIClient {
         let url = apiURL("repos/\(config.owner)/\(config.repo)/pulls/\(prNumber)/comments")
         let payload: [String: Any] = [
             "body": body, "commit_id": commitSHA, "path": path,
-            "line": line, "side": "RIGHT",
+            "line": line, "side": "RIGHT", "subject_type": "line",
         ]
         let c = try await post(GitHubReviewComment.self, to: url, body: payload)
         return PRReviewComment(id: c.id, body: c.body, path: c.path,
