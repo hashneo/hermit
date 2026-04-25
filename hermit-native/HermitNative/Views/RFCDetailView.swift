@@ -1,5 +1,4 @@
 import SwiftUI
-import WebKit
 
 // MARK: - hermit-ii0: RFCDetailView — WKWebView reading view with thread gutter markers
 // hermit-8q5: Reading Mode — full-screen RFC view with swipe-to-restore sidebar
@@ -22,7 +21,7 @@ struct RFCDetailView: View {
                 ContentUnavailableView("Load Failed", systemImage: "exclamationmark.triangle",
                                        description: Text(error))
             } else {
-                rfcWebView
+                rfcContentView
             }
         }
         .navigationTitle(rfc.title)
@@ -48,13 +47,11 @@ struct RFCDetailView: View {
         )
     }
 
-    private var rfcWebView: some View {
-        let html = MarkdownRenderer.htmlString(
-            from: markdown,
-            css: BundledAssets.readerCSS,
-            mermaidScript: BundledAssets.mermaidScript
-        )
-        return WebViewRenderer(html: html, onTextSelected: onTextSelected)
+    private var rfcContentView: some View {
+        ScrollView {
+            MarkdownRendererView(blocks: MarkdownParser.parse(markdown))
+                .padding(40)
+        }
     }
 
     private func loadContent() async {
