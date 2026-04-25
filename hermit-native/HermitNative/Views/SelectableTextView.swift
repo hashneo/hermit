@@ -1,13 +1,12 @@
 import SwiftUI
 
 // MARK: - SelectableTextView
-// A cross-platform selectable text view that:
-// 1. Renders an AttributedString with native OS text selection (cursor, copy, etc.)
-// 2. Adds a "Quote & Comment" item to the system selection menu
-// 3. Fires onQuoteSelected(selectedText) when that menu item is tapped
-//
-// Usage:
-//   SelectableTextView(attributedText: myAttributedString, onQuoteSelected: { text in ... })
+// Cross-platform NSTextView/UITextView wrapper.
+// - Full OS-level text selection (cursor, drag, double-click, Copy)
+// - "Quote & Comment" in the system context/selection menu
+// - onQuoteSelected(text)            — fired when that menu item is chosen
+// - onSelectionChanged(text?, rect)  — fired on every selection change;
+//   nil text = deselected. rect is in the view's own coordinate space.
 
 #if os(macOS)
 import AppKit
@@ -15,12 +14,15 @@ import AppKit
 struct SelectableTextView: NSViewRepresentable {
     let attributedText: NSAttributedString
     var onQuoteSelected: ((String) -> Void)? = nil
+    var onSelectionChanged: ((String?, CGRect) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> QuotableNSTextView {
         let tv = QuotableNSTextView()
+        tv.delegate = context.coordinator
         tv.onQuoteSelected = onQuoteSelected
+        tv.onSelectionChanged = onSelectionChanged
         tv.isEditable = false
         tv.isSelectable = true
         tv.drawsBackground = false
@@ -36,45 +38,63 @@ struct SelectableTextView: NSViewRepresentable {
 
     func updateNSView(_ nsView: QuotableNSTextView, context: Context) {
         nsView.onQuoteSelected = onQuoteSelected
+        nsView.onSelectionChanged = onSelectionChanged
         if nsView.attributedString() != attributedText {
             nsView.textStorage?.setAttributedString(attributedText)
         }
         nsView.invalidateIntrinsicContentSize()
     }
 
-    final class Coordinator: NSObject {}
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        func textViewDidChangeSelection(_ notification: Notification) {
+            (notification.object as? QuotableNSTextView)?.reportSelection()
+        }
+    }
 }
 
-// NSTextView subclass that injects "Quote & Comment" into the context menu
 final class QuotableNSTextView: NSTextView {
     var onQuoteSelected: ((String) -> Void)?
+    var onSelectionChanged: ((String?, CGRect) -> Void)?
 
     override var intrinsicContentSize: NSSize {
-        guard let lm = layoutManager, let tc = textContainer else {
-            return super.intrinsicContentSize
-        }
+        guard let lm = layoutManager, let tc = textContainer else { return super.intrinsicContentSize }
         lm.ensureLayout(for: tc)
-        let rect = lm.usedRect(for: tc)
-        return NSSize(width: NSView.noIntrinsicMetric, height: ceil(rect.height))
+        return NSSize(width: NSView.noIntrinsicMetric, height: ceil(lm.usedRect(for: tc).height))
+    }
+
+    func reportSelection() {
+        let range = selectedRange()
+        guard range.length > 0 else {
+            onSelectionChanged?(nil, .zero)
+            return
+        }
+        let text = (string as NSString).substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
+        var selRect = CGRect.zero
+        if let lm = layoutManager, let tc = textContainer {
+            let gr = lm.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            var r = lm.boundingRect(forGlyphRange: gr, in: tc)
+            r.origin.y += textContainerInset.height
+            r.origin.x += textContainerInset.width
+            selRect = r
+        }
+        onSelectionChanged?(text.isEmpty ? nil : text, selRect)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let base = super.menu(for: event) ?? NSMenu()
         let sel = string[Range(selectedRange(), in: string) ?? string.startIndex..<string.endIndex]
         if !sel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let item = NSMenuItem(
-                title: "Quote & Comment",
-                action: #selector(quoteAndComment(_:)),
-                keyEquivalent: ""
-            )
+            let item = NSMenuItem(title: "Quote & Comment",
+                                  action: #selector(quoteAndComment(_:)),
+                                  keyEquivalent: "")
             item.target = self
             base.insertItem(item, at: 0)
-            base.insertItem(NSMenuItem.separator(), at: 1)
+            base.insertItem(.separator(), at: 1)
         }
         return base
     }
 
-    @objc private func quoteAndComment(_ sender: Any?) {
+    @objc func quoteAndComment(_ sender: Any?) {
         let sel = string[Range(selectedRange(), in: string) ?? string.startIndex..<string.endIndex]
         let text = String(sel).trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty { onQuoteSelected?(text) }
@@ -87,11 +107,15 @@ import UIKit
 struct SelectableTextView: UIViewRepresentable {
     let attributedText: NSAttributedString
     var onQuoteSelected: ((String) -> Void)? = nil
+    var onSelectionChanged: ((String?, CGRect) -> Void)? = nil
 
-    func makeCoordinator() -> Coordinator { Coordinator(onQuoteSelected: onQuoteSelected) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onQuoteSelected: onQuoteSelected, onSelectionChanged: onSelectionChanged)
+    }
 
     func makeUIView(context: Context) -> QuotableUITextView {
         let tv = QuotableUITextView()
+        tv.delegate = context.coordinator
         tv.coordinator = context.coordinator
         tv.attributedText = attributedText
         tv.isEditable = false
@@ -107,15 +131,25 @@ struct SelectableTextView: UIViewRepresentable {
 
     func updateUIView(_ uiView: QuotableUITextView, context: Context) {
         context.coordinator.onQuoteSelected = onQuoteSelected
+        context.coordinator.onSelectionChanged = onSelectionChanged
         uiView.coordinator = context.coordinator
         if uiView.attributedText != attributedText {
             uiView.attributedText = attributedText
         }
     }
 
-    final class Coordinator: NSObject {
+    final class Coordinator: NSObject, UITextViewDelegate {
         var onQuoteSelected: ((String) -> Void)?
-        init(onQuoteSelected: ((String) -> Void)?) { self.onQuoteSelected = onQuoteSelected }
+        var onSelectionChanged: ((String?, CGRect) -> Void)?
+
+        init(onQuoteSelected: ((String) -> Void)?, onSelectionChanged: ((String?, CGRect) -> Void)?) {
+            self.onQuoteSelected = onQuoteSelected
+            self.onSelectionChanged = onSelectionChanged
+        }
+
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            (textView as? QuotableUITextView)?.reportSelection()
+        }
     }
 }
 
@@ -123,14 +157,24 @@ final class QuotableUITextView: UITextView {
     weak var coordinator: SelectableTextView.Coordinator?
 
     override var intrinsicContentSize: CGSize {
-        // Force re-layout so the view sizes to its content
         layoutIfNeeded()
         return contentSize
     }
 
+    func reportSelection() {
+        guard let range = selectedTextRange, !range.isEmpty else {
+            coordinator?.onSelectionChanged?(nil, .zero)
+            return
+        }
+        let text = self.text(in: range)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let rects = selectionRects(for: range).map { $0.rect }
+        let union = rects.reduce(CGRect.null) { $0.union($1) }
+        coordinator?.onSelectionChanged?(text.isEmpty ? nil : text, union)
+    }
+
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(quoteAndComment(_:)) {
-            return !selectedTextRange.map { $0.isEmpty }.unwrap(default: true)
+            return !(selectedTextRange?.isEmpty ?? true)
         }
         return super.canPerformAction(action, withSender: sender)
     }
@@ -142,8 +186,10 @@ final class QuotableUITextView: UITextView {
                                   image: UIImage(systemName: "quote.bubble")) { [weak self] _ in
                 self?.quoteAndComment(nil)
             }
-            let menu = UIMenu(title: "", options: .displayInline, children: [action])
-            builder.insertSiblingMenu(menu, afterMenuFor: .standardEdit)
+            builder.insertSiblingMenu(
+                UIMenu(title: "", options: .displayInline, children: [action]),
+                afterMenuFor: .standardEdit
+            )
         }
     }
 
@@ -154,23 +200,24 @@ final class QuotableUITextView: UITextView {
         coordinator?.onQuoteSelected?(text)
     }
 }
-
-private extension Optional where Wrapped == Bool {
-    func unwrap(default value: Bool) -> Bool { self ?? value }
-}
 #endif
 
-// MARK: - NSAttributedString from MarkdownInline
-// Converts [MarkdownInline] → NSAttributedString so SelectableTextView can render it.
+// MARK: - NSAttributedString helpers
 
 extension Array where Element == MarkdownInline {
+#if os(macOS)
     func nsAttributedString(font: NSFont? = nil) -> NSAttributedString {
         let result = NSMutableAttributedString()
-        for inline in self {
-            result.append(inline.nsAttributedString(baseFont: font))
-        }
+        for inline in self { result.append(inline.nsAttributedString(baseFont: font)) }
         return result
     }
+#else
+    func nsAttributedString(font: UIFont? = nil) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        for inline in self { result.append(inline.nsAttributedString(baseFont: font)) }
+        return result
+    }
+#endif
 }
 
 extension MarkdownInline {
@@ -179,24 +226,19 @@ extension MarkdownInline {
         let bodyFont = baseFont ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
         switch self {
         case .text(let s):
-            return NSAttributedString(string: s, attributes: [.font: bodyFont])
+            return NSAttributedString(string: s, attributes: [.font: bodyFont, .foregroundColor: NSColor.labelColor])
         case .bold(let children):
             let bold = NSFont.boldSystemFont(ofSize: bodyFont.pointSize)
-            let a = children.nsAttributedString(font: bodyFont)
-            let m = NSMutableAttributedString(attributedString: a)
-            m.addAttribute(.font, value: bold, range: NSRange(location: 0, length: m.length))
-            return m
+            return NSMutableAttributedString(attributedString: children.nsAttributedString(font: bold))
         case .italic(let children):
             let italic = NSFontManager.shared.convert(bodyFont, toHaveTrait: .italicFontMask)
-            let a = children.nsAttributedString(font: bodyFont)
-            let m = NSMutableAttributedString(attributedString: a)
-            m.addAttribute(.font, value: italic, range: NSRange(location: 0, length: m.length))
-            return m
+            return NSMutableAttributedString(attributedString: children.nsAttributedString(font: italic))
         case .code(let s):
             let mono = NSFont.monospacedSystemFont(ofSize: bodyFont.pointSize - 1, weight: .regular)
             return NSAttributedString(string: s, attributes: [
                 .font: mono,
-                .backgroundColor: NSColor.windowBackgroundColor
+                .backgroundColor: NSColor.windowBackgroundColor,
+                .foregroundColor: NSColor.labelColor
             ])
         case .link(let text, let url):
             var attrs: [NSAttributedString.Key: Any] = [.font: bodyFont, .foregroundColor: NSColor.controlAccentColor]
@@ -211,25 +253,20 @@ extension MarkdownInline {
         let bodyFont = baseFont ?? UIFont.preferredFont(forTextStyle: .body)
         switch self {
         case .text(let s):
-            return NSAttributedString(string: s, attributes: [.font: bodyFont])
+            return NSAttributedString(string: s, attributes: [.font: bodyFont, .foregroundColor: UIColor.label])
         case .bold(let children):
             let bold = UIFont.boldSystemFont(ofSize: bodyFont.pointSize)
-            let a = children.nsAttributedString(font: bodyFont)
-            let m = NSMutableAttributedString(attributedString: a)
-            m.addAttribute(.font, value: bold, range: NSRange(location: 0, length: m.length))
-            return m
+            return NSMutableAttributedString(attributedString: children.nsAttributedString(font: bold))
         case .italic(let children):
             let desc = bodyFont.fontDescriptor.withSymbolicTraits(.traitItalic) ?? bodyFont.fontDescriptor
             let italic = UIFont(descriptor: desc, size: bodyFont.pointSize)
-            let a = children.nsAttributedString(font: bodyFont)
-            let m = NSMutableAttributedString(attributedString: a)
-            m.addAttribute(.font, value: italic, range: NSRange(location: 0, length: m.length))
-            return m
+            return NSMutableAttributedString(attributedString: children.nsAttributedString(font: italic))
         case .code(let s):
             let mono = UIFont.monospacedSystemFont(ofSize: bodyFont.pointSize - 1, weight: .regular)
             return NSAttributedString(string: s, attributes: [
                 .font: mono,
-                .backgroundColor: UIColor.secondarySystemBackground
+                .backgroundColor: UIColor.secondarySystemBackground,
+                .foregroundColor: UIColor.label
             ])
         case .link(let text, let url):
             var attrs: [NSAttributedString.Key: Any] = [.font: bodyFont, .foregroundColor: UIColor.systemBlue]

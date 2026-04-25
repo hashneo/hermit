@@ -8,7 +8,6 @@ import SwiftUI
 
 struct GutterMarkdownView: View {
     let blocks: [MarkdownBlock]
-    /// Called whenever the user selects a new block (with its source line).
     var onLineTapped: ((Int) -> Void)? = nil
 
     @EnvironmentObject private var commentStore: CommentStore
@@ -16,6 +15,11 @@ struct GutterMarkdownView: View {
     @State private var composeText: String = ""
     @State private var isSubmitting: Bool = false
     @State private var submitError: String? = nil
+
+    // Floating + bubble state — tracks which block has an active text selection
+    @State private var bubbleLine: Int? = nil
+    @State private var bubbleText: String = ""
+    @State private var bubbleRect: CGRect = .zero   // in the block content's coord space
 
     private let gutterWidth: CGFloat = 28
 
@@ -51,39 +55,52 @@ struct GutterMarkdownView: View {
         let line = block.sourceLine
         let isSelected = selectedLine == line
         let count = commentStore.count(for: line)
+        let hasBubble = bubbleLine == line && !bubbleText.isEmpty
 
         VStack(alignment: .leading, spacing: 0) {
-            // Main row: gutter + content
             HStack(alignment: .top, spacing: 0) {
-                // Gutter
                 gutterCell(line: line, count: count, isSelected: isSelected)
 
-                // Content
-                MarkdownBlockView(block: block, onQuoteSelected: { text in
-                    handleQuote(text: text, line: line)
-                })
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            if selectedLine == line {
-                                // Deselect if tapping the same block again
-                                selectedLine = nil
-                                composeText = ""
-                                submitError = nil
-                            } else {
-                                selectedLine = line
-                                composeText = ""
-                                submitError = nil
-                            }
+                MarkdownBlockView(
+                    block: block,
+                    onQuoteSelected: { text in
+                        handleQuote(text: text, line: line)
+                    },
+                    onSelectionChanged: { text, rect in
+                        if let text {
+                            bubbleLine = line
+                            bubbleText = text
+                            bubbleRect = rect
+                        } else if bubbleLine == line {
+                            bubbleLine = nil
+                            bubbleText = ""
                         }
-                        onLineTapped?(line)
                     }
-                    .background(isSelected ? Color.accentColor.opacity(0.05) : Color.clear)
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        if selectedLine == line {
+                            selectedLine = nil; composeText = ""; submitError = nil
+                        } else {
+                            selectedLine = line; composeText = ""; submitError = nil
+                        }
+                    }
+                    onLineTapped?(line)
+                }
+                .background(isSelected ? Color.accentColor.opacity(0.05) : Color.clear)
+                // + bubble overlay — anchored to bottom-right of selection rect
+                .overlay(alignment: .topLeading) {
+                    if hasBubble {
+                        commentBubble(line: line)
+                            // Offset to sit just below-right of the selection end
+                            .offset(x: bubbleRect.maxX + 4, y: bubbleRect.maxY - 4)
+                    }
+                }
             }
 
-            // Inline compose — shown below the selected block
             if isSelected {
                 inlineCompose(for: line)
                     .transition(.move(edge: .top).combined(with: .opacity))
@@ -91,6 +108,28 @@ struct GutterMarkdownView: View {
 
             Divider().opacity(0.4)
         }
+    }
+
+    // MARK: - Floating + bubble
+
+    private func commentBubble(line: Int) -> some View {
+        Button {
+            handleQuote(text: bubbleText, line: line)
+            bubbleLine = nil; bubbleText = ""
+        } label: {
+            Image(systemName: "plus.bubble.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(
+                    Circle().fill(Color.accentColor)
+                        .shadow(color: .black.opacity(0.18), radius: 4, x: 0, y: 2)
+                )
+        }
+        .buttonStyle(.plain)
+        .transition(.scale(scale: 0.7).combined(with: .opacity))
+        .animation(.spring(response: 0.2, dampingFraction: 0.7), value: bubbleLine)
+        .help("Quote this selection and add a comment")
     }
 
     // MARK: - Gutter cell
@@ -205,14 +244,13 @@ struct GutterMarkdownView: View {
 }
 
 // MARK: - MarkdownBlockView
-// Thin wrapper that renders a single MarkdownBlock without the outer VStack/tap logic.
-// Extracted so GutterMarkdownView can compose it with its own tap handling.
-// Paragraphs, headings and blockquotes use SelectableTextView so OS-level text
-// selection + "Quote & Comment" menu action work natively.
 
 struct MarkdownBlockView: View {
     let block: MarkdownBlock
     var onQuoteSelected: ((String) -> Void)? = nil
+    /// Called when text selection changes inside this block.
+    /// Receives (selectedText, selectionRect-in-view-coords) — nil text means deselected.
+    var onSelectionChanged: ((String?, CGRect) -> Void)? = nil
 
     private var codeBackground: Color {
 #if os(macOS)
@@ -222,16 +260,23 @@ struct MarkdownBlockView: View {
 #endif
     }
 
+#if os(macOS)
+    private func monoFont(_ size: CGFloat = NSFont.systemFontSize - 1) -> NSFont {
+        NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    }
+#else
+    private func monoFont(_ size: CGFloat = UIFont.systemFontSize - 1) -> UIFont {
+        UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    }
+#endif
+
     var body: some View {
         switch block {
         case .heading(let level, let inlines, _):
             headingView(level: level, inlines: inlines)
         case .paragraph(let inlines, _):
-            SelectableTextView(
-                attributedText: inlines.nsAttributedString(),
-                onQuoteSelected: onQuoteSelected
-            )
-            .fixedSize(horizontal: false, vertical: true)
+            selectable(inlines.nsAttributedString())
+                .fixedSize(horizontal: false, vertical: true)
         case .codeBlock(let lang, let code, _):
             codeBlockView(language: lang, code: code)
         case .mermaidBlock(let source, _):
@@ -251,35 +296,55 @@ struct MarkdownBlockView: View {
         }
     }
 
+    // Convenience: wrap an NSAttributedString in a SelectableTextView with callbacks wired
+    private func selectable(_ attrStr: NSAttributedString) -> SelectableTextView {
+        SelectableTextView(
+            attributedText: attrStr,
+            onQuoteSelected: onQuoteSelected,
+            onSelectionChanged: { text, rect in onSelectionChanged?(text, rect) }
+        )
+    }
+
     // MARK: Heading
     @ViewBuilder
     private func headingView(level: Int, inlines: [MarkdownInline]) -> some View {
         let sizes: [Int: CGFloat] = [1: 28, 2: 22, 3: 18, 4: 16]
-        let size = sizes[level] ?? 14
-        let weight: NSFont.Weight = level <= 2 ? .semibold : .medium
+        let sz = sizes[level] ?? 14
 #if os(macOS)
-        let font = NSFont.systemFont(ofSize: size, weight: weight)
+        let wt: NSFont.Weight = level <= 2 ? .semibold : .medium
+        let font = NSFont.systemFont(ofSize: sz, weight: wt)
 #else
-        let font = UIFont.systemFont(ofSize: size, weight: UIFont.Weight(rawValue: weight.rawValue))
+        let wt: UIFont.Weight = level <= 2 ? .semibold : .medium
+        let font = UIFont.systemFont(ofSize: sz, weight: wt)
 #endif
         let attrStr = inlines.nsAttributedString(font: font)
-
         if level == 1 {
             VStack(alignment: .leading, spacing: 4) {
-                SelectableTextView(attributedText: attrStr, onQuoteSelected: onQuoteSelected)
+                selectable(attrStr)
                 Divider()
             }
         } else {
-            SelectableTextView(attributedText: attrStr, onQuoteSelected: onQuoteSelected)
+            selectable(attrStr)
                 .padding(.top, level == 2 ? 8 : level == 3 ? 4 : 0)
         }
     }
 
-    // MARK: Code block
+    // MARK: Code block — monospaced selectable text inside styled container
     private func codeBlockView(language: String, code: String) -> some View {
-        Text(code)
-            .font(.system(.callout, design: .monospaced))
-            .foregroundStyle(.primary)
+#if os(macOS)
+        let font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize - 1, weight: .regular)
+        let attr = NSAttributedString(string: code, attributes: [
+            .font: font,
+            .foregroundColor: NSColor.labelColor
+        ])
+#else
+        let font = UIFont.monospacedSystemFont(ofSize: UIFont.systemFontSize - 1, weight: .regular)
+        let attr = NSAttributedString(string: code, attributes: [
+            .font: font,
+            .foregroundColor: UIColor.label
+        ])
+#endif
+        return selectable(attr)
             .fixedSize(horizontal: false, vertical: true)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -287,13 +352,14 @@ struct MarkdownBlockView: View {
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2), lineWidth: 1))
     }
 
-    // MARK: Lists
+    // MARK: Lists — each item is its own selectable run
     private func bulletListView(items: [[MarkdownInline]]) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, inlines in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("•").foregroundStyle(.secondary)
-                    Text(attributedString(inlines)).fixedSize(horizontal: false, vertical: true)
+                    selectable(inlines.nsAttributedString())
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -304,7 +370,8 @@ struct MarkdownBlockView: View {
             ForEach(Array(items.enumerated()), id: \.offset) { index, inlines in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("\(index + 1).").foregroundStyle(.secondary).frame(minWidth: 20, alignment: .trailing)
-                    Text(attributedString(inlines)).fixedSize(horizontal: false, vertical: true)
+                    selectable(inlines.nsAttributedString())
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -314,22 +381,25 @@ struct MarkdownBlockView: View {
     private func blockquoteView(inlines: [MarkdownInline]) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Rectangle().fill(Color.accentColor.opacity(0.6)).frame(width: 3).cornerRadius(2)
-            SelectableTextView(
-                attributedText: inlines.nsAttributedString(),
-                onQuoteSelected: onQuoteSelected
-            )
-            .fixedSize(horizontal: false, vertical: true)
+            selectable(inlines.nsAttributedString())
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 4)
     }
 
-    // MARK: Table
+    // MARK: Table — each cell is selectable
     private func tableView(headers: [[MarkdownInline]], rows: [[[MarkdownInline]]]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+#if os(macOS)
+        let headerFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        let bodyFont   = NSFont.systemFont(ofSize: 13, weight: .regular)
+#else
+        let headerFont = UIFont.systemFont(ofSize: 13, weight: .semibold)
+        let bodyFont   = UIFont.systemFont(ofSize: 13, weight: .regular)
+#endif
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 0) {
                 ForEach(Array(headers.enumerated()), id: \.offset) { _, cell in
-                    Text(attributedString(cell))
-                        .font(.system(size: 13, weight: .semibold))
+                    selectable(cell.nsAttributedString(font: headerFont))
                         .padding(.horizontal, 10).padding(.vertical, 6)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color.secondary.opacity(0.12))
@@ -340,8 +410,7 @@ struct MarkdownBlockView: View {
             ForEach(Array(rows.enumerated()), id: \.offset) { rowIdx, row in
                 HStack(spacing: 0) {
                     ForEach(Array(row.enumerated()), id: \.offset) { colIdx, cell in
-                        Text(attributedString(cell))
-                            .font(.system(size: 13))
+                        selectable(cell.nsAttributedString(font: bodyFont))
                             .padding(.horizontal, 10).padding(.vertical, 5)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(rowIdx % 2 == 0 ? Color.clear : Color.secondary.opacity(0.05))
@@ -353,32 +422,5 @@ struct MarkdownBlockView: View {
         }
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
         .cornerRadius(6)
-    }
-
-    // MARK: AttributedString helpers
-    private func attributedString(_ inlines: [MarkdownInline]) -> AttributedString {
-        inlines.reduce(AttributedString()) { $0 + attributedStringForInline($1) }
-    }
-
-    private func attributedStringForInline(_ inline: MarkdownInline) -> AttributedString {
-        switch inline {
-        case .text(let s): return AttributedString(s)
-        case .bold(let children):
-            var a = attributedString(children); a.font = .body.bold(); return a
-        case .italic(let children):
-            var a = attributedString(children); a.font = .body.italic(); return a
-        case .code(let s):
-            var a = AttributedString(s)
-            a.font = .system(.body, design: .monospaced)
-            a.backgroundColor = codeBackground
-            return a
-        case .link(let text, let url):
-            var a = AttributedString(text)
-            if let u = URL(string: url) { a.link = u }
-            a.foregroundColor = .accentColor
-            return a
-        case .image(let alt, _):
-            var a = AttributedString("[\(alt)]"); a.foregroundColor = .secondary; return a
-        }
     }
 }
