@@ -22,6 +22,7 @@ struct MenuBarRFCListView: View {
     @ObservedObject private var advertiser = PairingAdvertiser.shared
     @StateObject private var store = RFCStore()
     @State private var searchText = ""
+    @Environment(\.openSettings) private var openSettings
 
     var filtered: [RFC] {
         guard !searchText.isEmpty else { return store.rfcs }
@@ -71,13 +72,7 @@ struct MenuBarRFCListView: View {
                     .help("Refresh")
                 }
                 Button {
-                    // Close the popover first, then open Settings so the
-                    // window isn't obscured by the menu bar panel.
-                    NSApplication.shared.keyWindow?.close()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                        NSApp.activate(ignoringOtherApps: true)
-                    }
+                    openSettings()
                 } label: {
                     Image(systemName: "gear")
                 }
