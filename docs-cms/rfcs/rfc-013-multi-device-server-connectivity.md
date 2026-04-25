@@ -111,7 +111,7 @@ iPad                                    Mac
 - **Mac (`PairingAdvertiser`):** `MCNearbyServiceAdvertiser` with service type `hermit-pair`. On invitation received, presents a system-style confirmation alert: *"Steven's iPad wants to connect to Hermit."* On accept, generates a `256-bit` random token via `SecRandomCopyBytes`, sends it as JSON over the `MCSession` data channel, stores `(peerID → token)` in an in-memory map that the Go server middleware checks.
 - **iPad (`PairingBrowser`):** `MCNearbyServiceBrowser` with the same service type. Discovers the Mac, sends an invitation, waits for session establishment, reads the token from the received data, stores it in Keychain under `hermit.local-token`.
 - **Go server middleware:** A new auth middleware checks the `Authorization: Bearer <token>` header against the in-memory token map for local network mode. Requests without a valid token receive `401`.
-- **Token lifetime:** Tokens persist in the Mac's in-memory map for the duration of the app session. Quitting and relaunching the Mac app invalidates all local tokens — paired iPads must re-pair. A future enhancement may persist tokens to the Mac's Keychain for session survival across restarts.
+- **Token lifetime:** Tokens are persisted to the Mac's Keychain mapped by `MCPeerID` display name. The iPad stores its token in Keychain under `hermit.local-token`. Both survive app restarts — pairing is a one-time gesture. The Mac loads all persisted tokens into its in-memory map at launch so previously paired iPads reconnect automatically without re-pairing.
 - **Revocation:** A paired device list in the Server settings tab on Mac shows all currently paired iPads by `MCPeerID` display name, with a "Revoke" button per device.
 
 #### Why Not iCloud Keychain Shared Secret
@@ -206,7 +206,7 @@ Use TinyGo or standard Go's WASM target to run server logic in a WKWebView on iP
 - Should the embedded server port be fixed (e.g. `8765`) or dynamically assigned? Dynamic avoids port conflicts but requires the Bonjour TXT record to carry the port for discovery.
 - Should the Mac advertise itself only when the app is in the foreground, or persistently as a background service (using a Launch Agent)?
 - What is the upgrade path when the Go server API version changes and an iPad is still running an older client? Version negotiation via the Bonjour TXT record `version` field is sketched above but not fully designed.
-- Should paired tokens survive Mac app restarts (persisted to Keychain) or require re-pairing each session?
+- Should paired tokens survive Mac app restarts (persisted to Keychain)? **Yes — resolved. Tokens are persisted to the Mac Keychain and loaded at launch. Pairing is one-time.**
 
 # Future Possibilities
 
