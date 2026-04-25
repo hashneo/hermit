@@ -160,12 +160,11 @@ final class KeychainHelper {
 
     // MARK: - Convenience: is fully configured?
 
+    /// True when the app has enough config to connect: a Hermit server URL,
+    /// a GitHub PAT, and repo owner/name. The legacy baseURL field is also
+    /// written for backward compat but serverBaseURL is the authoritative check.
     var isConfigured: Bool {
-#if DEBUG
-        return false   // Debug: always use config-file path, never Keychain
-#else
-        return pat != nil && baseURL != nil && repoOwner != nil && repoName != nil
-#endif
+        return pat != nil && serverBaseURL != nil && repoOwner != nil && repoName != nil
     }
 
     // MARK: - Bulk write (used by auto-config)

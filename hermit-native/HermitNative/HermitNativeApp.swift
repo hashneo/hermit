@@ -12,6 +12,11 @@ struct HermitNativeApp: App {
         MenuBarExtra("Hermit", systemImage: "doc.text.magnifyingglass") {
             MenuBarContentView()
                 .environmentObject(appState)
+                .task {
+                    // Start the embedded Go server once the content view (and
+                    // therefore @StateObject appState) is fully initialised.
+                    HermitNativeApp.startEmbeddedServer(appState: appState)
+                }
         }
         .menuBarExtraStyle(.window)
 
@@ -35,13 +40,8 @@ struct HermitNativeApp: App {
 #if os(macOS)
     // Called automatically by the SwiftUI lifecycle via the `init` below.
     init() {
-        // Kick off embedded Go server on macOS after a short delay so AppState
-        // can finish initialising from Keychain / config first.
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 s
-            let state = AppState()  // read-only snapshot — real appState drives the @StateObject
-            _ = state  // EmbeddedServerManager.shared.start(appState:) is called below
-        }
+        // Server startup is driven by the .task modifier on the Settings scene below,
+        // which has access to the real @StateObject appState instance.
     }
 #endif
 }
@@ -60,17 +60,20 @@ extension HermitNativeApp {
     /// Scene-level task body that starts the embedded server once AppState is ready.
     @MainActor
     static func startEmbeddedServer(appState: AppState) {
-        guard appState.isAuthenticated, !appState.pat.isEmpty else { return }
+        // Only start the embedded server when the user has selected embedded mode.
+        // Remote mode means a user-supplied serverBaseURL is already in Keychain.
+        guard appState.serverMode == .embeddedLocal else { return }
+
         EmbeddedServerManager.shared.start(appState: appState)
 
-        // Persist the resolved serverBaseURL to Keychain and AppState
+        // start() sets appState.serverBaseURL directly after the Go server binds.
+        // Persist it to Keychain so subsequent launches skip setup.
         if let port = EmbeddedServerManager.shared.port {
             let url = "http://127.0.0.1:\(port)"
-            appState.serverBaseURL = url
             KeychainHelper.shared.serverBaseURL = url
         }
 
-        // Also load paired token map into memory so Go middleware can validate
+        // Load paired token map into memory so Go middleware can validate requests.
         PairedTokenStore.shared.load()
     }
 }
