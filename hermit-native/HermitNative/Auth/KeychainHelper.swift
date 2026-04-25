@@ -4,9 +4,14 @@ import Security
 /// Securely stores and retrieves credentials from the system Keychain.
 ///
 /// Keys stored:
-/// - GitHub PAT (`hermit.pat`)
-/// - OpenAI API key (`hermit.openai-key`)
-/// - AI provider preference (`hermit.ai-provider`)
+/// - API base URL        (`hermit.base-url`)      e.g. http://localhost:3000/api/v1
+/// - PAT                 (`hermit.pat`)
+/// - Repo owner          (`hermit.repo-owner`)    e.g. gitea_admin
+/// - Repo name           (`hermit.repo-name`)     e.g. hermit-rfcs
+/// - Docs path           (`hermit.docs-path`)     e.g. docs-cms/rfcs
+/// - RFC label           (`hermit.rfc-label`)     e.g. hermit:rfc-ready
+/// - OpenAI API key      (`hermit.openai-key`)
+/// - AI provider pref    (`hermit.ai-provider`)
 final class KeychainHelper {
     static let shared = KeychainHelper()
     private init() {}
@@ -14,38 +19,89 @@ final class KeychainHelper {
     // MARK: - Service identifiers
 
     private enum Key: String {
-        case pat           = "hermit.pat"
-        case openAIKey     = "hermit.openai-key"
-        case aiProvider    = "hermit.ai-provider"
+        case baseURL    = "hermit.base-url"
+        case pat        = "hermit.pat"
+        case repoOwner  = "hermit.repo-owner"
+        case repoName   = "hermit.repo-name"
+        case docsPath   = "hermit.docs-path"
+        case rfcLabel   = "hermit.rfc-label"
+        case openAIKey  = "hermit.openai-key"
+        case aiProvider = "hermit.ai-provider"
     }
 
     // MARK: - Public API
 
+    var baseURL: String? {
+        get { read(key: .baseURL) }
+        set { write(newValue, key: .baseURL) }
+    }
+
     var pat: String? {
         get { read(key: .pat) }
-        set {
-            if let value = newValue { save(value, key: .pat) }
-            else { delete(key: .pat) }
-        }
+        set { write(newValue, key: .pat) }
+    }
+
+    var repoOwner: String? {
+        get { read(key: .repoOwner) }
+        set { write(newValue, key: .repoOwner) }
+    }
+
+    var repoName: String? {
+        get { read(key: .repoName) }
+        set { write(newValue, key: .repoName) }
+    }
+
+    var docsPath: String? {
+        get { read(key: .docsPath) }
+        set { write(newValue, key: .docsPath) }
+    }
+
+    var rfcLabel: String? {
+        get { read(key: .rfcLabel) }
+        set { write(newValue, key: .rfcLabel) }
     }
 
     var openAIKey: String? {
         get { read(key: .openAIKey) }
-        set {
-            if let value = newValue { save(value, key: .openAIKey) }
-            else { delete(key: .openAIKey) }
-        }
+        set { write(newValue, key: .openAIKey) }
     }
 
     var aiProvider: String? {
         get { read(key: .aiProvider) }
-        set {
-            if let value = newValue { save(value, key: .aiProvider) }
-            else { delete(key: .aiProvider) }
-        }
+        set { write(newValue, key: .aiProvider) }
+    }
+
+    // MARK: - Convenience: is fully configured?
+
+    var isConfigured: Bool {
+        pat != nil && baseURL != nil && repoOwner != nil && repoName != nil
+    }
+
+    // MARK: - Bulk write (used by auto-config)
+
+    struct RepoConfig {
+        let baseURL: String
+        let pat: String
+        let owner: String
+        let repo: String
+        let docsPath: String
+        let rfcLabel: String
+    }
+
+    func apply(_ config: RepoConfig) {
+        baseURL   = config.baseURL
+        pat       = config.pat
+        repoOwner = config.owner
+        repoName  = config.repo
+        docsPath  = config.docsPath
+        rfcLabel  = config.rfcLabel
     }
 
     // MARK: - Private helpers
+
+    private func write(_ value: String?, key: Key) {
+        if let value { save(value, key: key) } else { delete(key: key) }
+    }
 
     private func save(_ value: String, key: Key) {
         guard let data = value.data(using: .utf8) else { return }
@@ -60,10 +116,10 @@ final class KeychainHelper {
 
     private func read(key: Key) -> String? {
         let query: [CFString: Any] = [
-            kSecClass:            kSecClassGenericPassword,
-            kSecAttrAccount:      key.rawValue,
-            kSecReturnData:       true,
-            kSecMatchLimit:       kSecMatchLimitOne,
+            kSecClass:       kSecClassGenericPassword,
+            kSecAttrAccount: key.rawValue,
+            kSecReturnData:  true,
+            kSecMatchLimit:  kSecMatchLimitOne,
         ]
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)

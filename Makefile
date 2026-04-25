@@ -1,4 +1,4 @@
-.PHONY: build run debug clean ui-build validate-config validate-config-structure validate-config-access gitea-up gitea-down gitea-logs gitea-reset gitea-seed-pr
+.PHONY: build run debug clean ui-build validate-config validate-config-structure validate-config-access gitea-up gitea-down gitea-logs gitea-reset gitea-seed-pr native-build native-build-macos native-build-ipad native-test native-clean native-open
 
 APP_NAME := hermit
 BIN_DIR := bin
@@ -101,3 +101,62 @@ gitea-reset:
 
 gitea-seed-pr:
 	@bash $(GITEA_SEED_SCRIPT)
+
+# ── Native Swift App (macOS + iPadOS) ─────────────────────────────────────────
+
+NATIVE_DIR        := hermit-native
+NATIVE_PROJECT    := $(NATIVE_DIR)/HermitNative.xcodeproj
+NATIVE_SCHEME     := HermitNative
+NATIVE_BUILD_DIR  := $(NATIVE_DIR)/build
+XCODE             := DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild
+
+native-build: native-build-macos native-build-ipad ## Build the native app for macOS and iPad simulator
+
+native-build-macos: ## Build the native app for macOS
+	@echo "Building HermitNative for macOS..."
+	$(XCODE) \
+		-project $(NATIVE_PROJECT) \
+		-scheme $(NATIVE_SCHEME) \
+		-destination "platform=macOS" \
+		-configuration Debug \
+		-derivedDataPath $(NATIVE_BUILD_DIR) \
+		build | xcpretty 2>/dev/null || $(XCODE) \
+		-project $(NATIVE_PROJECT) \
+		-scheme $(NATIVE_SCHEME) \
+		-destination "platform=macOS" \
+		-configuration Debug \
+		-derivedDataPath $(NATIVE_BUILD_DIR) \
+		build
+
+native-build-ipad: ## Build the native app for iPad simulator
+	@echo "Building HermitNative for iPad simulator..."
+	$(XCODE) \
+		-project $(NATIVE_PROJECT) \
+		-scheme $(NATIVE_SCHEME) \
+		-destination "platform=iOS Simulator,name=iPad Pro 13-inch (M4)" \
+		-configuration Debug \
+		-derivedDataPath $(NATIVE_BUILD_DIR) \
+		build | xcpretty 2>/dev/null || $(XCODE) \
+		-project $(NATIVE_PROJECT) \
+		-scheme $(NATIVE_SCHEME) \
+		-destination "platform=iOS Simulator,name=iPad Pro 13-inch (M4)" \
+		-configuration Debug \
+		-derivedDataPath $(NATIVE_BUILD_DIR) \
+		build
+
+native-test: ## Run the native app test suite
+	@echo "Testing HermitNative..."
+	$(XCODE) \
+		-project $(NATIVE_PROJECT) \
+		-scheme $(NATIVE_SCHEME) \
+		-destination "platform=iOS Simulator,name=iPad Pro 13-inch (M4)" \
+		-derivedDataPath $(NATIVE_BUILD_DIR) \
+		test
+
+native-clean: ## Clean the native app build artifacts
+	@echo "Cleaning HermitNative build..."
+	rm -rf $(NATIVE_BUILD_DIR)
+	$(XCODE) -project $(NATIVE_PROJECT) -scheme $(NATIVE_SCHEME) clean 2>/dev/null || true
+
+native-open: ## Open the native app project in Xcode
+	@open $(NATIVE_PROJECT)

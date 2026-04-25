@@ -49,6 +49,7 @@ actor GitHubAPIClient {
     // MARK: Configuration
 
     struct Config {
+        let baseURL: String    // e.g. "https://api.github.com" or "http://localhost:3000/api/v1"
         let owner: String
         let repo: String
         let docsPath: String   // e.g. "docs-cms/rfcs"
@@ -58,6 +59,24 @@ actor GitHubAPIClient {
     private let config: Config
     private let session: URLSession
     private var contentCache: [String: (etag: String, data: Data)] = [:]
+
+    /// Builds a client directly from what is currently stored in the Keychain.
+    /// Returns nil if required credentials are missing.
+    static func fromKeychain() -> GitHubAPIClient? {
+        let kc = KeychainHelper.shared
+        guard let baseURL  = kc.baseURL,
+              let owner    = kc.repoOwner,
+              let repo     = kc.repoName
+        else { return nil }
+        let config = Config(
+            baseURL:  baseURL,
+            owner:    owner,
+            repo:     repo,
+            docsPath: kc.docsPath ?? "docs-cms/rfcs",
+            rfcLabel: kc.rfcLabel ?? "hermit:rfc-ready"
+        )
+        return GitHubAPIClient(config: config)
+    }
 
     init(config: Config, session: URLSession = .shared) {
         self.config = config
@@ -268,14 +287,20 @@ actor GitHubAPIClient {
     // MARK: - HTTP helpers
 
     private func apiURL(_ path: String) -> URL {
-        URL(string: "https://api.github.com/\(path)")!
+        // Trim trailing slash from baseURL to avoid double-slash
+        let base = config.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return URL(string: "\(base)/\(path)")!
     }
 
     private func authorizedRequest(url: URL) -> URLRequest {
         var r = URLRequest(url: url)
         r.setValue("Bearer \(KeychainHelper.shared.pat ?? "")", forHTTPHeaderField: "Authorization")
         r.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        r.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        // Only send the GitHub API version header for github.com — Gitea ignores it but some
+        // proxies reject unknown headers, so we only add it for the canonical GitHub host.
+        if config.baseURL.contains("api.github.com") {
+            r.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        }
         return r
     }
 

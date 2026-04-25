@@ -25,6 +25,7 @@ actor SpeechRecognizer {
 
         guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
             try await requestSpeechPermission()
+            throw RecognitionError.permissionDenied
         }
 
         guard let recognizer = SFSpeechRecognizer(locale: locale),
