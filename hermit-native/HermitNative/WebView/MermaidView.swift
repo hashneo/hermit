@@ -1,109 +1,146 @@
 import SwiftUI
 import WebKit
 
-// MARK: - MermaidView: inline WKWebView island for a single mermaid diagram
-// Reads rendered scrollHeight via JS and drives height through SwiftUI state.
+// MARK: - MermaidView: renders a mermaid diagram to a native image via offscreen WKWebView snapshot
 
 struct MermaidView: View {
     let source: String
-    @State private var height: CGFloat = 200
+    @State private var image: PlatformImage? = nil
+    @State private var failed = false
 
     var body: some View {
-        MermaidWebView(source: source, height: $height)
-            .frame(height: height)
-            .frame(maxWidth: .infinity)
-    }
-}
-
-// MARK: - Platform representable
-
+        Group {
+            if let img = image {
 #if os(macOS)
-private struct MermaidWebView: NSViewRepresentable {
-    let source: String
-    @Binding var height: CGFloat
-
-    func makeCoordinator() -> Coordinator { Coordinator(height: $height) }
-
-    func makeNSView(context: Context) -> WKWebView {
-        let wv = buildWebView(coordinator: context.coordinator)
-        wv.loadHTMLString(mermaidHTML(source: source), baseURL: nil)
-        return wv
-    }
-
-    func updateNSView(_ wv: WKWebView, context: Context) {}
-}
+                Image(nsImage: img)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
 #else
-private struct MermaidWebView: UIViewRepresentable {
-    let source: String
-    @Binding var height: CGFloat
-
-    func makeCoordinator() -> Coordinator { Coordinator(height: $height) }
-
-    func makeUIView(context: Context) -> WKWebView {
-        let wv = buildWebView(coordinator: context.coordinator)
-        wv.loadHTMLString(mermaidHTML(source: source), baseURL: nil)
-        return wv
-    }
-
-    func updateUIView(_ wv: WKWebView, context: Context) {}
-}
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
 #endif
-
-// MARK: - Coordinator
-
-private final class Coordinator: NSObject, WKNavigationDelegate {
-    @Binding var height: CGFloat
-
-    init(height: Binding<CGFloat>) { _height = height }
-
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // Poll until mermaid has finished rendering (SVG inserted into DOM)
-        poll(webView: webView, attempts: 20)
-    }
-
-    private func poll(webView: WKWebView, attempts: Int) {
-        webView.evaluateJavaScript("document.body.scrollHeight") { [weak self] result, _ in
-            guard let self else { return }
-            if let h = result as? CGFloat, h > 40 {
-                DispatchQueue.main.async { self.height = h }
-            } else if attempts > 0 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    self.poll(webView: webView, attempts: attempts - 1)
+            } else if failed {
+                Text("Diagram unavailable")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            } else {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text("Rendering diagram…").foregroundStyle(.secondary).font(.caption)
                 }
+                .frame(maxWidth: .infinity, minHeight: 60)
             }
         }
+        .task(id: source) {
+            image = await MermaidRenderer.shared.render(source: source)
+            failed = image == nil
+        }
     }
 }
 
-// MARK: - Shared WKWebView factory
+// MARK: - Offscreen renderer
 
-private func buildWebView(coordinator: Coordinator) -> WKWebView {
-    let config = WKWebViewConfiguration()
-    let prefs = WKWebpagePreferences()
-    prefs.allowsContentJavaScript = true
-    config.defaultWebpagePreferences = prefs
-    let wv = WKWebView(frame: .zero, configuration: config)
-    wv.navigationDelegate = coordinator
 #if os(macOS)
-    wv.setValue(false, forKey: "drawsBackground")
-    // Disable scroll indicators inside the WKWebView's NSScrollView
-    DispatchQueue.main.async {
-        if let sv = wv.subviews.compactMap({ $0 as? NSScrollView }).first {
-            sv.hasVerticalScroller = false
-            sv.hasHorizontalScroller = false
-            sv.verticalScrollElasticity = .none
-            sv.horizontalScrollElasticity = .none
+typealias PlatformImage = NSImage
+#else
+typealias PlatformImage = UIImage
+#endif
+
+@MainActor
+final class MermaidRenderer: NSObject {
+    static let shared = MermaidRenderer()
+
+    private var webView: WKWebView?
+    private var continuation: CheckedContinuation<PlatformImage?, Never>?
+    private var pollTask: Task<Void, Never>?
+
+    func render(source: String) async -> PlatformImage? {
+        // Cancel any in-flight render
+        pollTask?.cancel()
+        continuation?.resume(returning: nil)
+        continuation = nil
+
+        return await withCheckedContinuation { cont in
+            self.continuation = cont
+            self.startRender(source: source)
         }
     }
+
+    private func startRender(source: String) {
+        let config = WKWebViewConfiguration()
+        let prefs = WKWebpagePreferences()
+        prefs.allowsContentJavaScript = true
+        config.defaultWebpagePreferences = prefs
+
+        let wv = WKWebView(frame: CGRect(x: 0, y: 0, width: 900, height: 600), configuration: config)
+        wv.navigationDelegate = self
+#if os(macOS)
+        wv.setValue(false, forKey: "drawsBackground")
 #else
-    wv.isOpaque = false
-    wv.backgroundColor = .clear
-    wv.scrollView.backgroundColor = .clear
-    wv.scrollView.isScrollEnabled = false
-    wv.scrollView.showsVerticalScrollIndicator = false
-    wv.scrollView.showsHorizontalScrollIndicator = false
+        wv.isOpaque = false
+        wv.backgroundColor = .clear
 #endif
-    return wv
+        self.webView = wv
+        wv.loadHTMLString(mermaidHTML(source: source), baseURL: nil)
+    }
+
+    // Called by navigation delegate after page load — poll until mermaid SVG is ready
+    fileprivate func pageLoaded() {
+        guard let wv = webView else { return }
+        pollTask = Task { @MainActor in
+            for _ in 0..<40 {
+                if Task.isCancelled { return }
+                if let ready = try? await wv.evaluateJavaScript("document.querySelector('.mermaid svg') !== null") as? Bool, ready {
+                    await snapshot(wv: wv)
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(150))
+            }
+            // Timeout — snapshot whatever is there
+            await snapshot(wv: wv)
+        }
+    }
+
+    private func snapshot(wv: WKWebView) async {
+        // Resize frame to content height first
+        if let h = try? await wv.evaluateJavaScript("document.body.scrollHeight") as? CGFloat, h > 0 {
+            wv.frame.size.height = h
+        }
+
+        let config = WKSnapshotConfiguration()
+        config.rect = CGRect(origin: .zero, size: wv.frame.size)
+
+        do {
+            let img = try await wv.takeSnapshot(configuration: config)
+#if os(macOS)
+            finish(image: img)
+#else
+            finish(image: img)
+#endif
+        } catch {
+            finish(image: nil)
+        }
+    }
+
+    private func finish(image: PlatformImage?) {
+        pollTask?.cancel()
+        pollTask = nil
+        webView = nil
+        continuation?.resume(returning: image)
+        continuation = nil
+    }
+}
+
+extension MermaidRenderer: WKNavigationDelegate {
+    nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        Task { @MainActor in self.pageLoaded() }
+    }
+    nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        Task { @MainActor in self.finish(image: nil) }
+    }
 }
 
 // MARK: - HTML
@@ -129,7 +166,7 @@ private func mermaidHTML(source: String) -> String {
     <meta charset="utf-8">
     <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: transparent; display: flex; justify-content: center; padding: 8px; }
+    body { background: white; display: flex; justify-content: center; padding: 16px; }
     .mermaid svg { max-width: 100%; height: auto; display: block; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
