@@ -71,8 +71,13 @@ struct MenuBarRFCListView: View {
                     .help("Refresh")
                 }
                 Button {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                    NSApp.activate(ignoringOtherApps: true)
+                    // Close the popover first, then open Settings so the
+                    // window isn't obscured by the menu bar panel.
+                    NSApplication.shared.keyWindow?.close()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                        NSApp.activate(ignoringOtherApps: true)
+                    }
                 } label: {
                     Image(systemName: "gear")
                 }
