@@ -10,19 +10,22 @@ import Foundation
 enum MarkdownRenderer {
 
     static func htmlString(from markdown: String, css: String, mermaidScript: String) -> String {
-        // JSON-encode the markdown so it's safe to embed in a JS string literal.
-        // JSONSerialization encodes as a quoted string including escaping of backslashes,
-        // backticks, dollar signs, etc.
+        // JSON-encode the markdown by wrapping it in an array so NSJSONSerialization
+        // accepts it (it requires an array or dict root object). We then strip the
+        // surrounding [ ] to get a quoted JSON string literal safe for embedding in JS.
         let markdownJSON: String
-        if let data = try? JSONSerialization.data(withJSONObject: markdown, options: []),
-           let s = String(data: data, encoding: .utf8) {
-            markdownJSON = s
+        if let data = try? JSONSerialization.data(withJSONObject: [markdown], options: []),
+           let s = String(data: data, encoding: .utf8),
+           s.hasPrefix("["), s.hasSuffix("]") {
+            // Strip the enclosing array brackets to get the bare JSON string
+            markdownJSON = String(s.dropFirst().dropLast())
         } else {
-            // Fallback: escape manually
+            // Fallback: manual escaping
             let escaped = markdown
                 .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "`", with: "\\`")
-                .replacingOccurrences(of: "$", with: "\\$")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+                .replacingOccurrences(of: "\n", with: "\\n")
+                .replacingOccurrences(of: "\r", with: "\\r")
             markdownJSON = "\"\(escaped)\""
         }
 
