@@ -505,8 +505,9 @@ export function App() {
                     className={`doc-body ${activeRfcItem?.commentable ? "commentable" : ""}`}
                     onMouseUp={captureSelectionAnchor}
                     onKeyUp={captureSelectionAnchor}
-                    dangerouslySetInnerHTML={{ __html: document.rendered_html }}
-                  />
+                  >
+                    <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit" }}>{document.markdown_source}</pre>
+                  </div>
                 </article>
               </div>
 

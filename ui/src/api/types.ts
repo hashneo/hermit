@@ -73,8 +73,7 @@ export type RfcRender = {
   repository_id: string;
   pr_number: number;
   head_sha: string;
-  rendered_html: string;
-  markdown_source?: string;
+  markdown_source: string;
   anchor_map: Anchor[];
 };
 
@@ -155,6 +154,5 @@ export type RfcDocumentView = {
   id: string;
   title: string;
   path: string;
-  rendered_html: string;
   markdown_source: string;
 };

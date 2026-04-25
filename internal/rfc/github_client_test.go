@@ -162,8 +162,8 @@ func TestHTTPGitHubRFCClient_GetRFCFromPullRequest_UsesHeadSHAAndValidatesMember
 		t.Fatalf("GetRFCFromPullRequest returned error: %v", err)
 	}
 
-	if !strings.Contains(view.RenderedHTML, "PR document") {
-		t.Fatalf("expected rendered html to include markdown content")
+	if !strings.Contains(view.MarkdownSource, "PR document") {
+		t.Fatalf("expected markdown_source to include markdown content")
 	}
 
 	_, err = client.GetRFCFromPullRequest(context.Background(), server.URL, "owner", "repo", 23, "docs-cms/rfcs/rfc-999-missing.md", "token")

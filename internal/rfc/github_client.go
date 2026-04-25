@@ -135,7 +135,6 @@ func (c *HTTPGitHubRFCClient) GetRFC(ctx context.Context, baseURL, owner, name, 
 		ID:             payload.Path,
 		Title:          title,
 		Path:           payload.Path,
-		RenderedHTML:   markdownToHTMLWithFrontmatter(meta, body),
 		MarkdownSource: markdown,
 	}, nil
 }

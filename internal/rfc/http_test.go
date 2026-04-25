@@ -104,9 +104,6 @@ func TestRenderPRRFC(t *testing.T) {
 	if err := json.Unmarshal(resp.Body.Bytes(), &view); err != nil {
 		t.Fatalf("decode render response: %v", err)
 	}
-	if view.RenderedHTML == "" {
-		t.Fatal("expected non-empty rendered_html")
-	}
 	if view.MarkdownSource == "" {
 		t.Fatal("expected non-empty markdown_source")
 	}

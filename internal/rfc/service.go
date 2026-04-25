@@ -42,7 +42,6 @@ type Render struct {
 	RepositoryID   string   `json:"repository_id"`
 	PRNumber       int      `json:"pr_number"`
 	HeadSHA        string   `json:"head_sha"`
-	RenderedHTML   string   `json:"rendered_html"`
 	MarkdownSource string   `json:"markdown_source"`
 	AnchorMap      []Anchor `json:"anchor_map"`
 }
@@ -65,7 +64,6 @@ type DocumentView struct {
 	ID             string `json:"id"`
 	Title          string `json:"title"`
 	Path           string `json:"path"`
-	RenderedHTML   string `json:"rendered_html"`
 	MarkdownSource string `json:"markdown_source"`
 }
 
@@ -137,7 +135,6 @@ func (s *Service) Render(repositoryID string, prNumber int) (Render, error) {
 		RepositoryID:   repositoryID,
 		PRNumber:       prNumber,
 		HeadSHA:        doc.HeadSHA,
-		RenderedHTML:   markdownToHTMLWithFrontmatter(map[string]string{}, source),
 		MarkdownSource: source,
 		AnchorMap:      anchors,
 	}, nil
@@ -214,7 +211,6 @@ func (s *Service) RenderRFC(id string) (DocumentView, error) {
 		ID:             id,
 		Title:          title,
 		Path:           filepath.ToSlash(fullPath),
-		RenderedHTML:   markdownToHTMLWithFrontmatter(frontmatter, markdownBody),
 		MarkdownSource: markdown,
 	}, nil
 }
