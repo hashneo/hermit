@@ -63,6 +63,27 @@ final class AppState: ObservableObject {
     private let keychain = KeychainHelper.shared
 
     init() {
+#if DEBUG
+        // In debug builds, load config directly from hermit.yaml + token file.
+        // Keychain is fully bypassed — no permission dialogs.
+        do {
+            let detected = try GiteaAutoConfig.detect()
+            isAuthenticated = true
+            baseURL         = detected.baseURL
+            repoOwner       = detected.owner
+            repoName        = detected.repo
+            docsPath        = detected.docsPath
+            rfcLabel        = detected.rfcLabel
+            pat             = detected.pat
+            serverMode      = .embeddedLocal
+            serverBaseURL   = detected.baseURL
+            debugLog("loaded from config — \(detected.owner)/\(detected.repo) @ \(detected.baseURL)")
+            return
+        } catch {
+            debugLog("GiteaAutoConfig.detect() FAILED — \(error)")
+        }
+#endif
+        // Release path (or debug fallback if config not found): use Keychain.
         let kc = KeychainHelper.shared
         isAuthenticated = kc.isConfigured
         baseURL         = kc.baseURL   ?? ""
