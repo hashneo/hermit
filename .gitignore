@@ -21,3 +21,8 @@ bin/hermit
 
 # Native app build output
 HermitNative.app/
+hermit-native/build/
+hermit-native/HermitNative.xcodeproj/project.xcworkspace/xcuserdata/
+hermit-native/HermitNative.xcodeproj/xcuserdata/
+hermit-native/**/*.xcuserstate
+hermit-native/DerivedData/
