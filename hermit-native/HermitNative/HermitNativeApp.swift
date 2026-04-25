@@ -43,8 +43,10 @@ final class RFCViewerWindowManager {
             return
         }
 
-        let detail = RFCDetailView(rfc: rfc)
+        let commentStore = CommentStore()
+        let detail = RFCDetailView(rfc: rfc, commentStore: commentStore)
             .environmentObject(appState)
+            .environmentObject(commentStore)
             .frame(minWidth: 760, minHeight: 540)
 
         let hostingController = NSHostingController(rootView: detail)
