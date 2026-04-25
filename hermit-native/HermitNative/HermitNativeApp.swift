@@ -51,7 +51,8 @@ final class RFCViewerWindowManager {
         hostingController.sizingOptions = []  // don't let content drive window size
         let window = NSWindow(contentViewController: hostingController)
         window.title = rfc.title
-        window.setContentSize(NSSize(width: 900, height: 700))
+        let screenSize = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
+        window.setContentSize(NSSize(width: screenSize.width * 0.50, height: screenSize.height * 0.95))
         window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
         window.center()
         window.isReleasedWhenClosed = false
