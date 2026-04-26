@@ -100,10 +100,14 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
         guard !serverStarted else { return }
         serverStarted = true
         Task { @MainActor in
-            // If the app has no config (e.g. first launch after enabling sandbox),
-            // prompt the user to locate the repo before starting the server.
             let appState = AppState.shared
-            if !appState.isAuthenticated {
+
+            // Only prompt for the repo folder when there is genuinely no config
+            // at all — no bookmark and no ConfigStore values. If config is present
+            // but the PAT is missing (e.g. `make dev NO_KEYCHAIN=1`), skip the
+            // prompt and let SetupView handle PAT entry while the server starts.
+            let hasConfig = BookmarkStore.shared.hasBookmark || ConfigStore.shared.isConfigured
+            if !hasConfig {
                 do {
                     let detected = try GiteaAutoConfig.promptAndDetect()
                     appState.isAuthenticated = true
