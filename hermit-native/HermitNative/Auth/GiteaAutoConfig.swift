@@ -5,7 +5,7 @@ import AppKit
 
 // MARK: - GiteaAutoConfig
 // hermit-rij: Reads the local hermit repo config and Gitea token, then
-// produces a KeychainHelper.RepoConfig ready to apply.
+// produces a ConfigStore.RepoConfig ready to apply.
 //
 // Resolution strategy (in order):
 //  1. BookmarkStore (security-scoped bookmark, set by user via NSOpenPanel)
@@ -371,13 +371,12 @@ enum GiteaAutoConfig {
     }
 }
 
-// MARK: - Convenience: apply detected config to keychain
+// MARK: - Convenience: apply detected config to stores
 
 extension GiteaAutoConfig.DetectedConfig {
-    func toRepoConfig() -> KeychainHelper.RepoConfig {
-        KeychainHelper.RepoConfig(
+    func toRepoConfig() -> ConfigStore.RepoConfig {
+        ConfigStore.RepoConfig(
             baseURL:  baseURL,
-            pat:      pat,
             owner:    owner,
             repo:     repo,
             docsPath: docsPath,

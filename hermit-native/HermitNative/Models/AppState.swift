@@ -130,7 +130,8 @@ final class AppState: ObservableObject {
         // On macOS, `make dev` bootstraps both via scripts/install-keychain-pat.sh.
         let cs = ConfigStore.shared
         let kc = KeychainHelper.shared
-        pat               = kc.pat ?? ""
+        let resolvedPAT   = kc.pat ?? ""
+        pat               = resolvedPAT
         baseURL           = cs.baseURL   ?? ""
         giteaBaseURL      = ""
         repoOwner         = cs.repoOwner ?? ""
@@ -139,7 +140,7 @@ final class AppState: ObservableObject {
         rfcLabel          = cs.rfcLabel  ?? "hermit:rfc-ready"
         serverMode        = cs.serverMode ?? .embeddedLocal
         localNetworkToken = cs.localNetworkToken ?? ""
-        isAuthenticated   = cs.isConfigured && !pat.isEmpty
+        isAuthenticated   = cs.isConfigured && !resolvedPAT.isEmpty
 #if os(iOS)
         serverBaseURL = ""
 #else
