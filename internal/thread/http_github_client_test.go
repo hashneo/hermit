@@ -24,43 +24,39 @@ func (r resolverStub) ResolveRepositoryAccess(id string) (owner, name, registry,
 }
 
 func TestHTTPGitHubClient_CreateThreadPostsInlineComment(t *testing.T) {
-	commentCalled := false
+	reviewCalled := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/pulls/42":
-			// Head SHA prefetch
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"head": map[string]any{"sha": "abc123sha"},
-			})
-		case r.Method == http.MethodPost && r.URL.Path == "/repos/owner/repo/pulls/42/comments":
-			commentCalled = true
+		// Gitea creates inline comments via the review API.
+		if r.Method == http.MethodPost && r.URL.Path == "/repos/owner/repo/pulls/42/reviews" {
+			reviewCalled = true
 			if r.Header.Get("Authorization") != "Bearer test-token" {
 				t.Fatalf("expected bearer auth header")
 			}
 			var payload struct {
-				Body      string `json:"body"`
-				CommitID  string `json:"commit_id"`
-				Path      string `json:"path"`
-				Line      int    `json:"line"`
-				Side      string `json:"side"`
+				Event    string `json:"event"`
+				Comments []struct {
+					Path        string `json:"path"`
+					NewPosition int    `json:"new_position"`
+					Body        string `json:"body"`
+				} `json:"comments"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 				t.Fatalf("decode payload: %v", err)
 			}
-			if payload.Path != "docs-cms/rfcs/rfc-001.md" {
-				t.Fatalf("expected path docs-cms/rfcs/rfc-001.md, got %q", payload.Path)
+			if payload.Event != "COMMENT" {
+				t.Fatalf("expected event COMMENT, got %q", payload.Event)
 			}
-			if payload.Line != 13 {
-				t.Fatalf("expected line 13, got %d", payload.Line)
+			if len(payload.Comments) != 1 {
+				t.Fatalf("expected 1 comment, got %d", len(payload.Comments))
 			}
-			if payload.CommitID != "abc123sha" {
-				t.Fatalf("expected commit_id abc123sha, got %q", payload.CommitID)
+			if payload.Comments[0].Path != "docs-cms/rfcs/rfc-001.md" {
+				t.Fatalf("expected path docs-cms/rfcs/rfc-001.md, got %q", payload.Comments[0].Path)
 			}
-			if payload.Side != "RIGHT" {
-				t.Fatalf("expected side RIGHT, got %q", payload.Side)
+			if payload.Comments[0].NewPosition != 13 {
+				t.Fatalf("expected new_position 13, got %d", payload.Comments[0].NewPosition)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": int64(9001)})
-		default:
+		} else {
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 	}))
@@ -85,8 +81,8 @@ func TestHTTPGitHubClient_CreateThreadPostsInlineComment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateThread error: %v", err)
 	}
-	if !commentCalled {
-		t.Fatalf("expected github inline comment API to be called")
+	if !reviewCalled {
+		t.Fatalf("expected Gitea review API to be called")
 	}
 	if commentID != "9001" {
 		t.Fatalf("expected comment id 9001, got %q", commentID)

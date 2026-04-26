@@ -127,8 +127,6 @@ func (c *HTTPGitHubClient) getJSON(ctx context.Context, url, token string) ([]by
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -215,9 +213,7 @@ func (c *HTTPGitHubClient) postIssueComment(ctx context.Context, baseURL, owner,
 		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -245,21 +241,20 @@ func (c *HTTPGitHubClient) postIssueComment(ctx context.Context, baseURL, owner,
 }
 
 func (c *HTTPGitHubClient) postPullRequestInlineComment(ctx context.Context, baseURL, owner, repo string, prNumber int, token, filePath string, bodyLine int, body string) (string, error) {
-	// Fetch the PR head SHA — required by the single-comment endpoint.
-	headSHA, err := c.getPRHeadSHA(ctx, baseURL, owner, repo, prNumber, token)
-	if err != nil {
-		return "", fmt.Errorf("could not fetch PR head SHA: %w", err)
-	}
-
-	// POST /repos/{owner}/{repo}/pulls/{pull_number}/comments
-	// Uses "line" (not "new_position") and requires "commit_id".
-	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/comments", strings.TrimRight(baseURL, "/"), owner, repo, prNumber)
+	// Gitea uses the review API for inline PR comments.
+	// POST /repos/{owner}/{repo}/pulls/{index}/reviews
+	// with event="COMMENT" and a single entry in comments[].
+	// new_position is the line number in the new (right-side) file.
+	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews", strings.TrimRight(baseURL, "/"), owner, repo, prNumber)
 	payload, err := json.Marshal(map[string]any{
-		"body":      body,
-		"commit_id": headSHA,
-		"path":      strings.TrimPrefix(filePath, "/"),
-		"line":      bodyLine,
-		"side":      "RIGHT",
+		"event": "COMMENT",
+		"comments": []map[string]any{
+			{
+				"path":         strings.TrimPrefix(filePath, "/"),
+				"new_position": bodyLine,
+				"body":         body,
+			},
+		},
 	})
 	if err != nil {
 		return "", err
@@ -270,9 +265,7 @@ func (c *HTTPGitHubClient) postPullRequestInlineComment(ctx context.Context, bas
 		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -285,6 +278,8 @@ func (c *HTTPGitHubClient) postPullRequestInlineComment(ctx context.Context, bas
 		return "", fmt.Errorf("github inline comment create failed: %d %s", resp.StatusCode, strings.TrimSpace(string(msg)))
 	}
 
+	// The response is the review object. Use the review ID as the thread handle
+	// since Gitea doesn't return individual comment IDs in this response.
 	var result struct {
 		ID int64 `json:"id"`
 	}
@@ -298,40 +293,6 @@ func (c *HTTPGitHubClient) postPullRequestInlineComment(ctx context.Context, bas
 	return strconv.FormatInt(result.ID, 10), nil
 }
 
-func (c *HTTPGitHubClient) getPRHeadSHA(ctx context.Context, baseURL, owner, repo string, prNumber int, token string) (string, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d", strings.TrimRight(baseURL, "/"), owner, repo, prNumber)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return "", fmt.Errorf("github PR fetch failed: %d %s", resp.StatusCode, strings.TrimSpace(string(msg)))
-	}
-
-	var pr struct {
-		Head struct {
-			SHA string `json:"sha"`
-		} `json:"head"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
-		return "", err
-	}
-	if pr.Head.SHA == "" {
-		return "", fmt.Errorf("github PR response missing head SHA")
-	}
-	return pr.Head.SHA, nil
-}
 
 func (c *HTTPGitHubClient) resolve(repositoryID string) (owner, repo, baseURL, token string, err error) {
 	if c.repoResolver == nil {
