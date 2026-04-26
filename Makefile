@@ -188,8 +188,14 @@ native-clean: ## Clean the native app build artifacts
 	rm -rf $(NATIVE_BUILD_DIR) $(NATIVE_APP_DEST)
 	$(XCODE) -project $(NATIVE_PROJECT) -scheme $(NATIVE_SCHEME) clean 2>/dev/null || true
 
-native-open: build gomobile-build native-build-macos ## Build Go binary + xcframework + macOS app, then launch
+native-seed-prefs: ## Write hermit config into the non-sandboxed UserDefaults plist used by ad-hoc debug builds
+	@BUNDLE_ID=$$(grep -E '^HERMIT_BUNDLE_ID\s*=' hermit-native/Local.xcconfig 2>/dev/null | head -1 | sed 's/.*=[ \t]*//;s/[[:space:]]*//g'); \
+	if [ -z "$$BUNDLE_ID" ]; then echo "Warning: HERMIT_BUNDLE_ID not found in Local.xcconfig — skipping pref seed"; exit 0; fi; \
+	python3 scripts/seed-native-prefs.py "$$BUNDLE_ID" config/hermit.yaml
+
+native-open: build gomobile-build native-build-macos native-seed-prefs ## Build Go binary + xcframework + macOS app, then launch
 	@pkill -x HermitNative 2>/dev/null || true
+	@pkill -f "bin/hermit" 2>/dev/null || true
 	@sleep 0.5
 	@open $(NATIVE_APP_DEST)
 
@@ -198,7 +204,9 @@ dev: ## Zero-to-demo: start Gitea (idempotent), seed PRs, install PAT to Keychai
 	@bash scripts/install-keychain-pat.sh $(if $(NO_KEYCHAIN),--no-keychain)
 	@$(MAKE) build
 	@$(MAKE) native-build-macos
+	@$(MAKE) native-seed-prefs
 	@pkill -x HermitNative 2>/dev/null || true
+	@pkill -f "bin/hermit" 2>/dev/null || true
 	@sleep 0.5
 	@cp -R $(NATIVE_APP_SRC) $(NATIVE_APP_DEST)
 	@open $(NATIVE_APP_DEST)
@@ -215,6 +223,7 @@ dev: ## Zero-to-demo: start Gitea (idempotent), seed PRs, install PAT to Keychai
 reset: ## Full reset: kill app, destroy Gitea container + data, remove keychain entries, wipe build artifacts
 	@echo "Stopping HermitNative..."
 	@pkill -x HermitNative 2>/dev/null || true
+	@pkill -f "bin/hermit" 2>/dev/null || true
 	@echo "Tearing down Gitea..."
 	@$(MAKE) gitea-reset
 	@echo "Removing cached token..."
@@ -227,6 +236,12 @@ reset: ## Full reset: kill app, destroy Gitea container + data, remove keychain 
 			defaults delete "$$BUNDLE_ID" 2>/dev/null || true; \
 			SANDBOX_PLIST="$(HOME)/Library/Containers/$$BUNDLE_ID/Data/Library/Preferences/$$BUNDLE_ID.plist"; \
 			if [ -f "$$SANDBOX_PLIST" ]; then defaults delete "$$SANDBOX_PLIST" 2>/dev/null || true; fi; \
+			NONSANDBOX_PLIST="$(HOME)/Library/Preferences/$$BUNDLE_ID.plist"; \
+			if [ -f "$$NONSANDBOX_PLIST" ]; then \
+				for KEY in hermit.baseURL hermit.serverBaseURL hermit.repoOwner hermit.repoName hermit.docsPath hermit.rfcLabel hermit.serverMode; do \
+					defaults delete "$$NONSANDBOX_PLIST" "$$KEY" 2>/dev/null || true; \
+				done; \
+			fi; \
 		fi
 	@echo "Removing thread store..."
 	@rm -f data/hermit/threads.json
