@@ -1,0 +1,10 @@
+# .local.mk.example — copy to .local.mk and fill in your device details.
+# .local.mk is gitignored — never commit it.
+#
+#   cp .local.mk.example .local.mk
+#
+# Find your iPad UDID and device ID:
+#   DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl list devices
+
+IPAD_UDID       := YOUR_IPAD_UDID
+IPAD_DEVICE_ID  := YOUR_IPAD_DEVICE_ID

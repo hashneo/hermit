@@ -13,7 +13,12 @@ import (
 	"time"
 )
 
-const githubTokenEnvVar = "GITHUB_TOKEN"
+// hermitPATEnvVar is a fallback for the subprocess dev path.
+// When the Go server is launched as a subprocess by the native app,
+// the native app sets this env var to the keychain PAT.
+// In embedded (gomobile) mode this is never set; the PAT flows via
+// config.Repository.Token instead.
+const hermitPATEnvVar = "HERMIT_PAT"
 
 type AuthMetadata struct {
 	Method               string  `json:"method"`
@@ -92,7 +97,6 @@ func NewService(client GitHubClient) *Service {
 
 func (s *Service) SeedFromConfig(repositories []config.Repository) {
 	for _, repository := range repositories {
-		token := strings.TrimSpace(os.Getenv(repository.TokenEnvVar))
 		registry := repository.Registry
 		if registry == "" {
 			registry = "github"
@@ -105,12 +109,25 @@ func (s *Service) SeedFromConfig(repositories []config.Repository) {
 			continue
 		}
 		now := s.now().UTC().Format(time.RFC3339)
+		defaultBranch := repository.DefaultBranch
+		if defaultBranch == "" {
+			defaultBranch = "main"
+		}
+		docsPath := repository.DocsPathPolicy
+		if docsPath == "" {
+			docsPath = "docs-cms/rfcs/"
+		}
+
+		token := strings.TrimSpace(repository.Token)
+		if token == "" {
+			token = strings.TrimSpace(os.Getenv(hermitPATEnvVar))
+		}
 		validation := ValidationResponse{
 			Healthy: false,
 			Checks: []ValidationCheckResponse{{
-				Name:    "token_env",
+				Name:    "token_missing",
 				Status:  "warn",
-				Message: fmt.Sprintf("token env var %q is not set", repository.TokenEnvVar),
+				Message: "no token configured; use the API or native app to set a PAT",
 			}},
 			ValidatedAt:   now,
 			LastErrorCode: "token_missing",
@@ -132,13 +149,14 @@ func (s *Service) SeedFromConfig(repositories []config.Repository) {
 				validatedAt = &now
 			}
 		}
+
 		cfg := Config{
 			ID:             s.newID(),
 			Owner:          repository.Owner,
 			Name:           repository.Name,
 			Registry:       registry,
-			DefaultBranch:  repository.DefaultBranch,
-			DocsPathPolicy: repository.DocsPathPolicy,
+			DefaultBranch:  defaultBranch,
+			DocsPathPolicy: docsPath,
 			Auth: AuthMetadata{
 				Method:               "pat",
 				TokenLastValidatedAt: validatedAt,
@@ -146,12 +164,6 @@ func (s *Service) SeedFromConfig(repositories []config.Repository) {
 			Validation: validation,
 			CreatedAt:  now,
 			UpdatedAt:  now,
-		}
-		if cfg.DefaultBranch == "" {
-			cfg.DefaultBranch = "main"
-		}
-		if cfg.DocsPathPolicy == "" {
-			cfg.DocsPathPolicy = "docs-cms/rfcs/"
 		}
 		s.items[cfg.ID] = storedConfig{Config: cfg, EncryptedToken: encryptToken(token)}
 		s.byName[key] = cfg.ID
@@ -161,12 +173,9 @@ func (s *Service) SeedFromConfig(repositories []config.Repository) {
 
 func (s *Service) Create(ctx context.Context, input createInput) (Config, error) {
 	token := strings.TrimSpace(input.Token)
-	if token == "" {
-		token = strings.TrimSpace(os.Getenv(githubTokenEnvVar))
-	}
 
 	if input.Owner == "" || input.Name == "" || token == "" {
-		return Config{}, fmt.Errorf("owner, name, and personal_access_token are required (or set GITHUB_TOKEN)")
+		return Config{}, fmt.Errorf("owner, name, and personal_access_token are required")
 	}
 	if input.Registry == "" {
 		input.Registry = "github"

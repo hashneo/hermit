@@ -16,8 +16,10 @@ wait_for_gitea() {
   local max_attempts=60
   local attempt=1
 
+  # Wait for the API version endpoint — the root page responds before the API
+  # is fully initialised, which causes transient 404s on the first API call.
   while [ "$attempt" -le "$max_attempts" ]; do
-    if curl -fsS "${GITEA_BASE_URL}/" >/dev/null 2>&1; then
+    if curl -fsS "${GITEA_API_BASE}/version" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -355,8 +357,16 @@ print('1' if any(l['id'] == lid for l in labels) else '0')
 ensure_pull_request() {
   local has_pr
   local pulls
+  local attempt
 
-  pulls=$(curl -fsS -u "${GITEA_ADMIN_USER}:${GITEA_ADMIN_PASS}" "${GITEA_API_BASE}/repos/${GITEA_ADMIN_USER}/${GITEA_TEST_REPO}/pulls?state=open")
+  # Retry loop: after a fresh git push Gitea may not have indexed the repo
+  # yet, causing transient 404s on the pulls endpoint.
+  for attempt in $(seq 1 15); do
+    pulls=$(curl -fsS -u "${GITEA_ADMIN_USER}:${GITEA_ADMIN_PASS}" \
+      "${GITEA_API_BASE}/repos/${GITEA_ADMIN_USER}/${GITEA_TEST_REPO}/pulls?state=open" 2>/dev/null) && break
+    sleep 1
+  done
+
   has_pr=$(python3 - <<'PY' "${pulls}" "${GITEA_PR_BRANCH}" "${GITEA_MAIN_BRANCH}"
 import json
 import sys

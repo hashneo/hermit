@@ -15,11 +15,9 @@ registries:
   - name: github-public
     kind: github
     base_url: https://api.github.com
-    token_env_var: GITHUB_TOKEN
   - name: github-enterprise
     kind: github
     base_url: https://github.example.com/api/v3
-    token_env_var: GHE_TOKEN
 repositories:
   - owner: hashicorp
     name: hermit
@@ -41,15 +39,11 @@ repositories:
 		t.Fatalf("registries len = %d, want %d", got, want)
 	}
 
-	if cfg.Registries[1].TokenEnvVar != "GHE_TOKEN" {
-		t.Fatalf("second registry token env = %q, want GHE_TOKEN", cfg.Registries[1].TokenEnvVar)
-	}
-
 	if got, want := len(cfg.Repositories), 1; got != want {
 		t.Fatalf("repositories len = %d, want %d", got, want)
 	}
-	if cfg.Repositories[0].TokenEnvVar != "GITHUB_TOKEN" {
-		t.Fatalf("repository token env = %q, want GITHUB_TOKEN", cfg.Repositories[0].TokenEnvVar)
+	if cfg.Repositories[0].Owner != "hashicorp" {
+		t.Fatalf("repository owner = %q, want hashicorp", cfg.Repositories[0].Owner)
 	}
 }
 
@@ -81,12 +75,10 @@ registries:
   - name: github
     kind: github
     base_url: https://api.github.com
-    token_env_var: GITHUB_TOKEN
 repositories:
   - owner: hashicorp
     name: hermit
     registry: missing-registry
-    token_env_var: GITHUB_TOKEN
 `
 
 	if err := os.WriteFile(configPath, []byte(configYAML), 0o600); err != nil {

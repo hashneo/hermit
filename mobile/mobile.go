@@ -139,23 +139,14 @@ func buildConfig(sc StartConfig) (config.Config, error) {
 		dataDir = "."
 	}
 
-	// Inject the PAT via the env-var mechanism that config.Repository uses.
-	// We use a synthetic env-var name and set it in the process environment.
-	// This is safe because we're in a sandboxed app process.
-	envVarName := "HERMIT_MOBILE_PAT"
-	if err := setEnv(envVarName, sc.PAT); err != nil {
-		return config.Config{}, fmt.Errorf("set PAT env: %w", err)
-	}
-
 	cfg := config.Config{
 		Environment:   "production",
 		ListenAddress: "127.0.0.1:0", // overridden by Start()
 		Registries: []config.Registry{
 			{
-				Name:        "github",
-				Kind:        "github",
-				BaseURL:     sc.BaseURL,
-				TokenEnvVar: envVarName,
+				Name:    "github",
+				Kind:    "github",
+				BaseURL: sc.BaseURL,
 			},
 		},
 		Repositories: []config.Repository{
@@ -165,7 +156,7 @@ func buildConfig(sc StartConfig) (config.Config, error) {
 				Registry:       "github",
 				DefaultBranch:  "main",
 				DocsPathPolicy: sc.DocsPath,
-				TokenEnvVar:    envVarName,
+				Token:          sc.PAT,
 			},
 		},
 		DataDir: filepath.Join(dataDir, "hermit"),

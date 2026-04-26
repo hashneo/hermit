@@ -16,10 +16,9 @@ const (
 
 // Registry stores external provider configuration for repository integrations.
 type Registry struct {
-	Name        string `yaml:"name"`
-	Kind        string `yaml:"kind"`
-	BaseURL     string `yaml:"base_url"`
-	TokenEnvVar string `yaml:"token_env_var"`
+	Name    string `yaml:"name"`
+	Kind    string `yaml:"kind"`
+	BaseURL string `yaml:"base_url"`
 }
 
 // Repository stores repository bootstrap configuration.
@@ -29,7 +28,9 @@ type Repository struct {
 	Registry       string `yaml:"registry"`
 	DefaultBranch  string `yaml:"default_branch"`
 	DocsPathPolicy string `yaml:"docs_path_policy"`
-	TokenEnvVar    string `yaml:"token_env_var"`
+	// Token is an in-memory PAT used when building config programmatically
+	// (e.g. the embedded mobile server). It is never read from or written to YAML.
+	Token string `yaml:"-"`
 }
 
 // Config stores application runtime configuration.
@@ -77,9 +78,6 @@ func Load() (Config, error) {
 		if registry.BaseURL == "" {
 			return Config{}, fmt.Errorf("registry base_url is required")
 		}
-		if registry.TokenEnvVar == "" {
-			return Config{}, fmt.Errorf("registry token_env_var is required")
-		}
 	}
 
 	registryNames := make(map[string]struct{}, len(cfg.Registries))
@@ -106,18 +104,6 @@ func Load() (Config, error) {
 		}
 		if repository.DocsPathPolicy == "" {
 			repository.DocsPathPolicy = "docs-cms/rfcs/"
-		}
-	}
-
-	for i := range cfg.Repositories {
-		repository := &cfg.Repositories[i]
-		if repository.TokenEnvVar == "" {
-			for _, registry := range cfg.Registries {
-				if registry.Name == repository.Registry {
-					repository.TokenEnvVar = registry.TokenEnvVar
-					break
-				}
-			}
 		}
 	}
 

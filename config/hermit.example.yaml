@@ -4,15 +4,12 @@ registries:
   - name: github-public
     kind: github
     base_url: https://api.github.com
-    token_env_var: GITHUB_TOKEN
   - name: github-enterprise
     kind: github
     base_url: https://github.example.com/api/v3
-    token_env_var: GHE_TOKEN
   - name: gitea-local
     kind: github
     base_url: http://localhost:3000/api/v1
-    token_env_var: GITEA_TOKEN
 repositories:
   - owner: hashicorp
     name: hermit

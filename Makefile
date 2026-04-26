@@ -1,4 +1,7 @@
-.PHONY: build run debug clean ui-build validate-config validate-config-structure validate-config-access gitea-up gitea-down gitea-logs gitea-reset gitea-seed-pr native-build native-build-macos native-build-ipad native-test native-clean native-open gomobile-build dev ipad-deploy
+.PHONY: build run debug clean ui-build validate-config validate-config-structure validate-config-access gitea-up gitea-down gitea-logs gitea-reset gitea-seed-pr native-build native-build-macos native-build-ipad native-test native-clean native-open gomobile-build dev ipad-deploy reset
+
+# Include machine-local overrides (device IDs, etc.) — gitignored.
+-include .local.mk
 
 APP_NAME := hermit
 BIN_DIR := bin
@@ -82,6 +85,13 @@ gitea-up:
 			-e GITEA__service__DISABLE_REGISTRATION=true \
 			$(GITEA_IMAGE) >/dev/null; \
 	fi
+	@echo "Waiting for Gitea to be ready..."; \
+		for i in $$(seq 1 30); do \
+			if curl -sf http://localhost:$(GITEA_HTTP_PORT)/api/v1/version >/dev/null 2>&1; then \
+				echo "Gitea is ready."; break; \
+			fi; \
+			sleep 1; \
+		done
 	@$(MAKE) gitea-seed-pr
 	@TOKEN_EXPORT=$$(bash $(GITEA_TOKEN_SCRIPT) env); \
 		echo "$$TOKEN_EXPORT" > .tmp/gitea-token-export.sh; \
@@ -183,7 +193,9 @@ native-open: build gomobile-build native-build-macos ## Build Go binary + xcfram
 	@sleep 0.5
 	@open $(NATIVE_APP_DEST)
 
-dev: ## Build macOS + iPad apps, restart macOS app, and push to iPad
+dev: ## Zero-to-demo: start Gitea (idempotent), seed PRs, install PAT to Keychain, build + deploy app
+	@$(MAKE) gitea-up
+	@bash scripts/install-keychain-pat.sh
 	@$(MAKE) build
 	@$(MAKE) native-build-macos
 	@pkill -x HermitNative 2>/dev/null || true
@@ -191,9 +203,33 @@ dev: ## Build macOS + iPad apps, restart macOS app, and push to iPad
 	@cp -R $(NATIVE_APP_SRC) $(NATIVE_APP_DEST)
 	@open $(NATIVE_APP_DEST)
 	@$(MAKE) ipad-deploy
+	@printf '\n\033[1;32m══════════════════════════════════════════\033[0m\n'
+	@printf '\033[1;32m  Hermit is running\033[0m\n'
+	@printf '\033[1;32m══════════════════════════════════════════\033[0m\n'
+	@printf '  Gitea:   \033[4mhttp://localhost:$(GITEA_HTTP_PORT)\033[0m\n'
+	@printf '  Server:  \033[4mhttp://localhost:8080\033[0m\n'
+	@TOKEN=$$(grep -o 'GITEA_TOKEN=.*' .tmp/gitea-token-export.sh 2>/dev/null | cut -d= -f2 || echo "(not found)"); \
+		printf '  PAT:     \033[1;33m%s\033[0m\n' "$$TOKEN"
+	@printf '\033[1;32m══════════════════════════════════════════\033[0m\n\n'
 
-IPAD_UDID        := 00008142-000905D10A11401C
-IPAD_DEVICE_ID   := 86A8E39E-99D9-5A95-BD57-EE3DAD48E223
+reset: ## Full reset: kill app, destroy Gitea container + data, remove keychain entries, wipe build artifacts
+	@echo "Stopping HermitNative..."
+	@pkill -x HermitNative 2>/dev/null || true
+	@echo "Tearing down Gitea..."
+	@$(MAKE) gitea-reset
+	@echo "Removing cached token..."
+	@rm -f .tmp/gitea-token.env .tmp/gitea-token-export.sh
+	@echo "Removing Keychain entries..."
+	@security delete-generic-password -a "hermit.config" -s "HermitNative" 2>/dev/null || true
+	@echo "Removing thread store..."
+	@rm -f data/hermit/threads.json
+	@echo "Cleaning build artifacts..."
+	@$(MAKE) native-clean
+	@$(MAKE) clean
+	@echo "Reset complete. Run 'make dev' to start fresh."
+
+IPAD_UDID        ?= $(error IPAD_UDID not set — copy .local.mk.example to .local.mk)
+IPAD_DEVICE_ID   ?= $(error IPAD_DEVICE_ID not set — copy .local.mk.example to .local.mk)
 IPAD_APP_BUNDLE  := $(NATIVE_BUILD_DIR)/Build/Products/Debug-iphoneos/HermitNative.app
 
 ipad-deploy: ## Build and push to connected iPad (requires Developer Mode enabled)

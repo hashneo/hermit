@@ -1,5 +1,6 @@
-# Local IDE/project metadata
-.idea/
+# Local machine overrides (device IDs, signing identity)
+/.local.mk
+/hermit-native/Local.xcconfig
 .opencode/
 ui/node_modules/
 ui/dist/
