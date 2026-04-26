@@ -2,13 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Sandbox enabled: required for Handoff (macOS won't broker NSUserActivity
-	     without the sandbox). Repo root access is via security-scoped bookmark. -->
+	<!-- Sandbox disabled in debug so the app can read config/hermit.yaml
+	     and write diagnostic logs without Keychain permission prompts. -->
 	<key>com.apple.security.app-sandbox</key>
-	<true/>
-	<!-- hermit-y9x: embedded Go server (debug: subprocess) binds a TCP port -->
-	<key>com.apple.security.network.server</key>
-	<true/>
+	<false/>
 	<!-- outbound HTTP to local / remote server -->
 	<key>com.apple.security.network.client</key>
 	<true/>
