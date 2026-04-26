@@ -17,6 +17,7 @@
 		B0010010 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010011 /* KeychainHelper.swift */; };
 		B001D005 /* BookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D006 /* BookmarkStore.swift */; };
 		B001D007 /* DevConfig in Resources */ = {isa = PBXBuildFile; fileRef = B001D008 /* DevConfig */; };
+		B001D009 /* ThreadPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D00A /* ThreadPopoverView.swift */; };
 		B0010012 /* GitHubAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010013 /* GitHubAPIClient.swift */; };
 		B0010014 /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010015 /* AIProvider.swift */; };
 		B0010016 /* AppleIntelligenceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010017 /* AppleIntelligenceProvider.swift */; };
@@ -71,6 +72,7 @@
 		B0010011 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		B001D006 /* BookmarkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkStore.swift; sourceTree = "<group>"; };
 		B001D008 /* DevConfig */ = {isa = PBXFileReference; lastKnownFileType = folder; path = DevConfig; sourceTree = "<group>"; };
+		B001D00A /* ThreadPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadPopoverView.swift; sourceTree = "<group>"; };
 		B0010013 /* GitHubAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubAPIClient.swift; sourceTree = "<group>"; };
 		B0010015 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
 		B0010017 /* AppleIntelligenceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleIntelligenceProvider.swift; sourceTree = "<group>"; };
@@ -253,6 +255,7 @@
 				B0010045 /* RFCListView.swift */,
 				B0010047 /* RFCPreviewPublishingView.swift */,
 				B0010049 /* ThreadPanelView.swift */,
+				B001D00A /* ThreadPopoverView.swift */,
 				702547F1AF611276712EA42C /* CommentStore.swift */,
 				7DEF0D01EB6E30FF8CF74D70 /* GutterMarkdownView.swift */,
 				41AFAD009AFAE5101431EBE5 /* SelectableTextView.swift */,
@@ -394,6 +397,7 @@
 				B0010044 /* RFCListView.swift in Sources */,
 				B0010046 /* RFCPreviewPublishingView.swift in Sources */,
 				B0010048 /* ThreadPanelView.swift in Sources */,
+				B001D009 /* ThreadPopoverView.swift in Sources */,
 				F51CA0CA0595C036D8E2D00B /* CommentStore.swift in Sources */,
 				B001B001 /* HermitModels.swift in Sources */,
 				B001B003 /* HermitAPIClient.swift in Sources */,

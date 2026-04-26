@@ -16,6 +16,9 @@ struct GutterMarkdownView: View {
     @State private var isSubmitting: Bool = false
     @State private var submitError: String? = nil
 
+    // Popover state — which line's thread popover is currently showing
+    @State private var popoverLine: Int? = nil
+
     // Floating + bubble state — tracks which block has an active text selection
     @State private var bubbleLine: Int? = nil
     @State private var bubbleText: String = ""
@@ -151,12 +154,7 @@ struct GutterMarkdownView: View {
 
             if count > 0 {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        selectedLine = (selectedLine == line) ? nil : line
-                        composeText = ""
-                        submitError = nil
-                    }
-                    onLineTapped?(line)
+                    popoverLine = (popoverLine == line) ? nil : line
                 } label: {
                     Text("\(count)")
                         .font(.system(size: 10, weight: .semibold, design: .rounded))
@@ -166,6 +164,13 @@ struct GutterMarkdownView: View {
                         .background(Capsule().fill(Color.accentColor))
                 }
                 .buttonStyle(.plain)
+                .popover(isPresented: Binding(
+                    get: { popoverLine == line },
+                    set: { if !$0 { popoverLine = nil } }
+                ), arrowEdge: .trailing) {
+                    ThreadPopoverView(line: line)
+                        .environmentObject(commentStore)
+                }
             } else if isSelected {
                 Image(systemName: "plus.bubble.fill")
                     .font(.system(size: 11))
