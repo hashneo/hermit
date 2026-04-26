@@ -165,9 +165,19 @@ REPO_NAME="${REPO_NAME:-hermit-rfcs}"
 DOCS_PATH="${DOCS_PATH:-docs-cms/rfcs}"
 RFC_LABEL="${RFC_LABEL:-hermit:rfc-ready}"
 
-# ── Bundle ID (must match Xcode project) ─────────────────────────────────────
+# ── Bundle ID (read from Local.xcconfig, falls back to example) ──────────────
 
-BUNDLE_ID="com.hermit.HermitNative"
+LOCAL_XCCONFIG="${REPO_ROOT}/hermit-native/Local.xcconfig"
+EXAMPLE_XCCONFIG="${REPO_ROOT}/hermit-native/Local.xcconfig.example"
+
+BUNDLE_ID=$(grep -E '^HERMIT_BUNDLE_ID\s*=' "${LOCAL_XCCONFIG}" 2>/dev/null \
+    | head -1 | sed 's/.*=[ \t]*//' | tr -d '[:space:]')
+
+if [ -z "${BUNDLE_ID}" ] || echo "${BUNDLE_ID}" | grep -q "yourname"; then
+    printf 'ERROR: HERMIT_BUNDLE_ID not set in hermit-native/Local.xcconfig\n' >&2
+    printf 'Copy %s to Local.xcconfig and set your bundle ID.\n' "${EXAMPLE_XCCONFIG}" >&2
+    exit 1
+fi
 
 # ── 1. Write PAT to Keychain (service=HermitNative account=hermit.pat) ────────
 
