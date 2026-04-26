@@ -19,7 +19,7 @@ struct SettingsView: View {
                 .tabItem { Label("AI", systemImage: "sparkles") }
         }
 #if os(macOS)
-        .frame(width: 500, height: 380)
+        .frame(width: 600, height: 560)
 #endif
     }
 }
@@ -164,6 +164,8 @@ private struct ServerSettingsTab: View {
                         .controlSize(.small)
                 }
             }
+
+            RepositoryLocationRow()
         }
 
         Section("Paired Devices") {
@@ -326,6 +328,64 @@ private struct RemoteServerSection: View {
         }
     }
 }
+
+// MARK: - Repository location row (macOS, sandbox bookmark)
+
+#if os(macOS)
+private struct RepositoryLocationRow: View {
+    @State private var bookmarkPath: String? = nil
+    @State private var errorMessage: String? = nil
+
+    var body: some View {
+        Group {
+            LabeledContent("Repository") {
+                HStack(spacing: 8) {
+                    if let path = bookmarkPath {
+                        Text((path as NSString).abbreviatingWithTildeInPath)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    } else {
+                        Text("Not set")
+                            .foregroundStyle(.tertiary)
+                    }
+                    Button("Change…") { pickFolder() }
+                        .buttonStyle(.borderless)
+                }
+            }
+            if let err = errorMessage {
+                Text(err)
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            }
+        }
+        .onAppear {
+            if let url = BookmarkStore.shared.resolve() {
+                bookmarkPath = url.path
+                BookmarkStore.shared.stopAccessing()
+            }
+        }
+    }
+
+    private func pickFolder() {
+        Task { @MainActor in
+            do {
+                let config = try GiteaAutoConfig.promptAndDetect()
+                // resolvedFrom is the path to hermit.yaml; strip two components to get repo root
+                let repoRoot = ((config.resolvedFrom as NSString)
+                    .deletingLastPathComponent   // drops "hermit.yaml"
+                    as NSString)
+                    .deletingLastPathComponent   // drops "config/"
+                bookmarkPath = (repoRoot as NSString).abbreviatingWithTildeInPath
+                errorMessage = nil
+                EmbeddedServerManager.shared.restart()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+}
+#endif
 
 // MARK: - Paired devices section (macOS, hermit-1ow)
 

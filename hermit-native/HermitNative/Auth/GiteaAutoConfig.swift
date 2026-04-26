@@ -1,14 +1,22 @@
 import Foundation
+#if os(macOS)
+import AppKit
+#endif
 
 // MARK: - GiteaAutoConfig
 // hermit-rij: Reads the local hermit repo config and Gitea token, then
 // produces a KeychainHelper.RepoConfig ready to apply.
 //
 // Resolution strategy (in order):
-//  1. HERMIT_REPO_PATH environment variable
-//  2. The directory containing the running app bundle, walking up to find
+//  1. BookmarkStore (security-scoped bookmark, set by user via NSOpenPanel)
+//  2. HERMIT_REPO_PATH environment variable
+//  3. The directory containing the running app bundle, walking up to find
 //     a directory that contains both "config/hermit.yaml" and ".tmp/"
-//  3. Well-known developer path: ~/Development/github/hashicorp/hermit
+//  4. Well-known developer paths
+//
+// With app-sandbox enabled (required for Handoff), only strategy 1 can
+// reliably access paths outside the sandbox container. Strategies 2-4 are
+// retained for the initial setup flow where the user hasn't chosen a path yet.
 
 enum GiteaAutoConfig {
 
@@ -52,28 +60,65 @@ enum GiteaAutoConfig {
     // MARK: - Main entry point
 
     /// Detects the local Gitea config without any user input.
+    /// On a sandboxed build the bookmark must already be stored; call
+    /// `promptAndSaveBookmark()` first if `BookmarkStore.shared.hasBookmark` is false.
     static func detect() throws -> DetectedConfig {
         let repoRoot = try findRepoRoot()
         return try load(from: repoRoot)
     }
 
+#if os(macOS)
+    /// Presents NSOpenPanel asking the user to select the Hermit repo root,
+    /// saves a security-scoped bookmark, then returns the detected config.
+    /// Must be called on the main thread.
+    @MainActor
+    static func promptAndDetect() throws -> DetectedConfig {
+        let panel = NSOpenPanel()
+        panel.title = "Locate Hermit Repository"
+        panel.message = "Select the root folder of your local Hermit repository (the folder that contains config/hermit.yaml)."
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Select Repository"
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            throw AutoConfigError.repoNotFound
+        }
+        guard isHermitRoot(url) else {
+            throw AutoConfigError.configFileMissing(url.path)
+        }
+
+        BookmarkStore.shared.save(url)
+        return try load(from: url)
+    }
+#endif
+
     // MARK: - Repo root discovery
 
     private static func findRepoRoot() throws -> URL {
-        // 1. Environment override
+#if os(macOS)
+        // 1. Security-scoped bookmark (sandboxed access persisted by user)
+        if let bookmarked = BookmarkStore.shared.resolve() {
+            if isHermitRoot(bookmarked) { return bookmarked }
+            BookmarkStore.shared.stopAccessing()
+        }
+#endif
+
+        // 2. Environment override
         if let envPath = ProcessInfo.processInfo.environment["HERMIT_REPO_PATH"] {
             let url = URL(fileURLWithPath: envPath)
             if isHermitRoot(url) { return url }
         }
 
-        // 2. Walk up from the app bundle
+        // 3. Walk up from the app bundle
         var candidate = Bundle.main.bundleURL
         for _ in 0..<10 {
             candidate = candidate.deletingLastPathComponent()
             if isHermitRoot(candidate) { return candidate }
         }
 
-        // 3. Well-known developer paths
+        // 4. Well-known developer paths
         let knownPaths = [
             "~/Development/github/hashicorp/hermit",
             "~/code/hashicorp/hermit",

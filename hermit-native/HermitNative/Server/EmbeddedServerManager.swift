@@ -84,6 +84,17 @@ final class EmbeddedServerManager: ObservableObject {
         port = nil
     }
 
+    /// Stop the server and restart it with fresh AppState.
+    /// Used when the repo root bookmark changes.
+    func restart() {
+        let appState = AppState.shared
+        stop()
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            self.start(appState: appState)
+        }
+    }
+
     // MARK: - Dev subprocess fallback
     // Used when HERMIT_EMBEDDED_SERVER is not set (xcframework not yet built).
     // Runs the pre-built bin/hermit binary as a child process and polls until ready.
@@ -189,6 +200,15 @@ final class EmbeddedServerManager: ObservableObject {
     }
 
     private func findRepoRoot() -> URL? {
+        // 1. Security-scoped bookmark (sandboxed access)
+        if let bookmarked = BookmarkStore.shared.resolve() {
+            if FileManager.default.fileExists(atPath: bookmarked.appendingPathComponent("config/hermit.yaml").path) {
+                return bookmarked
+            }
+            BookmarkStore.shared.stopAccessing()
+        }
+
+        // 2. Walk up from app bundle (works in dev without sandbox)
         var candidate = Bundle.main.bundleURL
         for _ in 0..<10 {
             candidate = candidate.deletingLastPathComponent()
@@ -196,6 +216,8 @@ final class EmbeddedServerManager: ObservableObject {
                 return candidate
             }
         }
+
+        // 3. Well-known developer paths
         let known = ["~/Development/github/hashicorp/hermit", "~/code/hashicorp/hermit"]
         for raw in known {
             let url = URL(fileURLWithPath: (raw as NSString).expandingTildeInPath)
