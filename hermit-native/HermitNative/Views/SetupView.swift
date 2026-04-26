@@ -3,8 +3,9 @@ import SwiftUI
 /// First-run onboarding screen.
 ///
 /// Collects the Hermit server URL, GitHub PAT, and repository details.
-/// All GitHub interactions go through the Hermit Go backend — no direct
-/// GitHub API calls are made from the native client.
+/// If non-secret config is already present in ConfigStore (e.g. after
+/// `make dev NO_KEYCHAIN=1`), pre-fills the fields and collapses the form
+/// to show only the PAT entry.
 struct SetupView: View {
     @EnvironmentObject private var appState: AppState
 
@@ -17,6 +18,11 @@ struct SetupView: View {
     @State private var statusMessage: StatusMessage? = nil
     @State private var showSettings = false
     @FocusState private var patFieldFocused: Bool
+
+    /// True when all non-PAT fields are already filled from ConfigStore.
+    private var isPATOnly: Bool {
+        !serverURL.isEmpty && !owner.isEmpty && !repo.isEmpty
+    }
 
     var body: some View {
         NavigationStack {
@@ -44,6 +50,21 @@ struct SetupView: View {
                 }
 #endif
         }
+        .onAppear { prefill() }
+    }
+
+    // MARK: - Pre-fill from ConfigStore
+
+    private func prefill() {
+        let cs = ConfigStore.shared
+        if serverURL.isEmpty { serverURL = cs.serverBaseURL ?? cs.baseURL ?? "" }
+        if owner.isEmpty     { owner     = cs.repoOwner ?? "" }
+        if repo.isEmpty      { repo      = cs.repoName  ?? "" }
+        if docsPath == "docs-cms/rfcs" || docsPath.isEmpty {
+            docsPath = cs.docsPath ?? "docs-cms/rfcs"
+        }
+        // Auto-focus the PAT field when everything else is ready.
+        if isPATOnly { patFieldFocused = true }
     }
 
     private var setupBody: some View {
@@ -55,7 +76,9 @@ struct SetupView: View {
                     .foregroundStyle(.tint)
                 Text("Welcome to Hermit")
                     .font(.title2).bold()
-                Text("Connect to a Hermit server to start reviewing RFCs.")
+                Text(isPATOnly
+                     ? "Enter your personal access token to connect."
+                     : "Connect to a Hermit server to start reviewing RFCs.")
                     .multilineTextAlignment(.center)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -63,18 +86,37 @@ struct SetupView: View {
 
             // ── Form ──────────────────────────────────────────────────────
             VStack(alignment: .leading, spacing: 12) {
-                field("Hermit Server URL",
-                      placeholder: "http://localhost:8765 or https://hermit.example.com",
-                      text: $serverURL)
+                if isPATOnly {
+                    // Summarise the pre-filled config so the user can verify it.
+                    VStack(alignment: .leading, spacing: 4) {
+                        configSummaryRow(label: "Server", value: serverURL)
+                        configSummaryRow(label: "Repo",   value: "\(owner)/\(repo)")
+                        configSummaryRow(label: "Docs",   value: docsPath)
+                        Button("Change…") {
+                            // Clear pre-fill so full form re-appears.
+                            serverURL = ""; owner = ""; repo = ""
+                        }
+                        .font(.caption)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.tint)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                } else {
+                    field("Hermit Server URL",
+                          placeholder: "http://localhost:8765 or https://hermit.example.com",
+                          text: $serverURL)
 
-                HStack(spacing: 8) {
-                    field("Owner", placeholder: "org-or-user", text: $owner)
-                    field("Repo",  placeholder: "my-repo",     text: $repo)
+                    HStack(spacing: 8) {
+                        field("Owner", placeholder: "org-or-user", text: $owner)
+                        field("Repo",  placeholder: "my-repo",     text: $repo)
+                    }
+                    field("Docs Path", placeholder: "docs-cms/rfcs", text: $docsPath)
                 }
-                field("Docs Path", placeholder: "docs-cms/rfcs", text: $docsPath)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("GitHub Personal Access Token")
+                    Text("Personal Access Token")
                         .font(.caption).bold().foregroundStyle(.secondary)
                     SecureField("token…", text: $pat)
                         .textContentType(.password)
@@ -109,6 +151,19 @@ struct SetupView: View {
         .frame(width: 420)
 #endif
     }   // end setupBody
+
+    @ViewBuilder
+    private func configSummaryRow(label: String, value: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(label + ":")
+                .font(.caption).bold().foregroundStyle(.secondary)
+                .frame(width: 44, alignment: .trailing)
+            Text(value)
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+        }
+    }
 
     // MARK: - Connect
 
