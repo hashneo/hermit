@@ -219,8 +219,10 @@ reset: ## Full reset: kill app, destroy Gitea container + data, remove keychain 
 	@$(MAKE) gitea-reset
 	@echo "Removing cached token..."
 	@rm -f .tmp/gitea-token.env .tmp/gitea-token-export.sh
-	@echo "Removing Keychain entries..."
-	@security delete-generic-password -a "hermit.config" -s "HermitNative" 2>/dev/null || true
+	@echo "Removing Keychain PAT..."
+	@security delete-generic-password -a "hermit.pat" -s "HermitNative" 2>/dev/null || true
+	@echo "Removing UserDefaults config..."
+	@defaults delete com.hermit.HermitNative 2>/dev/null || true
 	@echo "Removing thread store..."
 	@rm -f data/hermit/threads.json
 	@echo "Cleaning build artifacts..."

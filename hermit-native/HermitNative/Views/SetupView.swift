@@ -126,20 +126,20 @@ struct SetupView: View {
         Task {
             do {
                 try await HermitServerValidator.validate(serverURL: url, pat: token)
-                let config = KeychainHelper.RepoConfig(
+                // Store non-secret config in UserDefaults, PAT in Keychain.
+                let repoConfig = ConfigStore.RepoConfig(
                     baseURL:  url,
-                    pat:      token,
                     owner:    ownerT,
                     repo:     repoT,
                     docsPath: docs.isEmpty ? "docs-cms/rfcs" : docs,
                     rfcLabel: "hermit:rfc-ready"
                 )
-                KeychainHelper.shared.apply(config)
-                // Store the server URL and mode
-                KeychainHelper.shared.serverBaseURL = url
-                KeychainHelper.shared.serverMode    = .embeddedLocal
+                ConfigStore.shared.apply(repoConfig)
+                ConfigStore.shared.serverBaseURL = url
+                ConfigStore.shared.serverMode    = .embeddedLocal
+                KeychainHelper.shared.pat = token
                 await MainActor.run {
-                    appState.applyKeychain()
+                    appState.applyConfig()
                 }
             } catch {
                 await MainActor.run {

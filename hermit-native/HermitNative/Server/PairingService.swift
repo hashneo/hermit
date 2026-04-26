@@ -263,11 +263,11 @@ extension PairingBrowser: MCNearbyServiceBrowserDelegate {
             AppState.shared.repoName      = repo
             AppState.shared.docsPath      = docsPath
             AppState.shared.rfcLabel      = rfcLabel
-            KeychainHelper.shared.serverMode    = .localNetwork
-            KeychainHelper.shared.repoOwner     = owner
-            KeychainHelper.shared.repoName      = repo
-            KeychainHelper.shared.docsPath      = docsPath
-            KeychainHelper.shared.rfcLabel      = rfcLabel
+            ConfigStore.shared.serverMode    = .localNetwork
+            ConfigStore.shared.repoOwner     = owner
+            ConfigStore.shared.repoName      = repo
+            ConfigStore.shared.docsPath      = docsPath
+            ConfigStore.shared.rfcLabel      = rfcLabel
         }
     }
 
@@ -299,7 +299,7 @@ extension PairingBrowser: MCSessionDelegate {
         guard let payload = try? JSONSerialization.jsonObject(with: data) as? [String: String],
               let token = payload["token"] else { return }
         Task { @MainActor in
-            KeychainHelper.shared.localNetworkToken = token
+            ConfigStore.shared.localNetworkToken = token
             AppState.shared.localNetworkToken = token
             self.isPaired = true
             self.pairingStatus = "Paired with \(peerID.displayName)"

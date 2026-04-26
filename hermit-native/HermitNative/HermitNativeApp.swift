@@ -44,8 +44,8 @@ struct HermitNativeApp: App {
                 }
         }
         .onChange(of: appState.serverMode) { _, _ in
-            KeychainHelper.shared.serverMode    = appState.serverMode
-            KeychainHelper.shared.serverBaseURL = appState.serverBaseURL
+            ConfigStore.shared.serverMode    = appState.serverMode
+            ConfigStore.shared.serverBaseURL = appState.serverBaseURL
         }
 #endif
     }
@@ -139,7 +139,7 @@ extension HermitNativeApp {
         }
         EmbeddedServerManager.shared.start(appState: appState)
         if let port = EmbeddedServerManager.shared.port {
-            KeychainHelper.shared.serverBaseURL = "http://127.0.0.1:\(port)"
+            ConfigStore.shared.serverBaseURL = "http://127.0.0.1:\(port)"
         }
         PairedTokenStore.shared.load()
     }

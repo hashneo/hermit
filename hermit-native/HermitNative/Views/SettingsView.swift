@@ -64,6 +64,7 @@ private struct AccountSettingsTab: View {
                             titleVisibility: .visible) {
             Button("Remove", role: .destructive) {
                 KeychainHelper.shared.pat = nil
+                appState.pat = ""
                 appState.isAuthenticated = false
             }
         } message: {
@@ -111,7 +112,7 @@ private struct ServerSettingsTab: View {
         }
         .pickerStyle(.segmented)
         .onChange(of: appState.serverMode) { _, new in
-            KeychainHelper.shared.serverMode = new
+            ConfigStore.shared.serverMode = new
             applyModeChange(new)
         }
     }
@@ -123,7 +124,7 @@ private struct ServerSettingsTab: View {
             if let port = EmbeddedServerManager.shared.port {
                 let url = "http://127.0.0.1:\(port)"
                 appState.serverBaseURL = url
-                KeychainHelper.shared.serverBaseURL = url
+                ConfigStore.shared.serverBaseURL = url
             }
 #endif
         case .localNetwork:
@@ -131,7 +132,7 @@ private struct ServerSettingsTab: View {
             break
         case .remote(let url):
             appState.serverBaseURL = url
-            KeychainHelper.shared.serverBaseURL = url
+            ConfigStore.shared.serverBaseURL = url
         default:
             break
         }
@@ -243,8 +244,8 @@ private struct LocalNetworkSection: View {
     private func selectServer(_ server: DiscoveredServer) {
         appState.serverBaseURL = server.baseURL
         appState.serverMode    = .localNetwork
-        KeychainHelper.shared.serverBaseURL = server.baseURL
-        KeychainHelper.shared.serverMode    = .localNetwork
+        ConfigStore.shared.serverBaseURL = server.baseURL
+        ConfigStore.shared.serverMode    = .localNetwork
     }
 }
 
@@ -320,8 +321,8 @@ private struct RemoteServerSection: View {
             // Success — persist
             appState.serverBaseURL = base
             appState.serverMode    = .remote(url: base)
-            KeychainHelper.shared.serverBaseURL = base
-            KeychainHelper.shared.serverMode    = .remote(url: base)
+            ConfigStore.shared.serverBaseURL = base
+            ConfigStore.shared.serverMode    = .remote(url: base)
             validationState = .ok
         } catch {
             validationState = .failed(error.localizedDescription)
@@ -471,7 +472,7 @@ private struct PairingBrowserSection: View {
 
 private struct AISettingsTab: View {
     @State private var openAIKey: String = KeychainHelper.shared.openAIKey ?? ""
-    @State private var provider: String = KeychainHelper.shared.aiProvider ?? "apple"
+    @State private var provider: String = ConfigStore.shared.aiProvider ?? "apple"
 
     var body: some View {
         Form {
@@ -481,7 +482,7 @@ private struct AISettingsTab: View {
                     Text("OpenAI (GPT-4o)").tag("openai")
                 }
                 .onChange(of: provider) { _, new in
-                    KeychainHelper.shared.aiProvider = new
+                    ConfigStore.shared.aiProvider = new
                 }
             }
             if provider == "openai" {

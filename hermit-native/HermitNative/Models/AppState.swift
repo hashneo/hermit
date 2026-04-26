@@ -102,8 +102,6 @@ final class AppState: ObservableObject {
     /// so it works in both DEBUG (no Keychain) and release builds.
     @Published var localNetworkToken: String = ""
 
-    private let keychain = KeychainHelper.shared
-
     init() {
 #if DEBUG && os(iOS)
         // iOS debug: load config directly from hermit.yaml + token file.
@@ -127,39 +125,46 @@ final class AppState: ObservableObject {
             debugLog("GiteaAutoConfig.detect() FAILED — \(error)")
         }
 #endif
-        // macOS (all builds) and iOS release/fallback: use Keychain.
-        // On macOS, make dev installs all values via scripts/install-keychain-pat.sh.
+        // macOS (all builds) and iOS release/fallback:
+        // Non-secret config lives in UserDefaults (ConfigStore); PAT in Keychain.
+        // On macOS, `make dev` bootstraps both via scripts/install-keychain-pat.sh.
+        let cs = ConfigStore.shared
         let kc = KeychainHelper.shared
-        isAuthenticated = kc.isConfigured
-        baseURL         = kc.baseURL   ?? ""
-        giteaBaseURL    = ""
-        repoOwner       = kc.repoOwner ?? ""
-        repoName        = kc.repoName  ?? ""
-        docsPath        = kc.docsPath  ?? "docs-cms/rfcs"
-        rfcLabel        = kc.rfcLabel  ?? "hermit:rfc-ready"
-        pat             = kc.pat       ?? ""
-        serverMode      = kc.serverMode ?? .embeddedLocal
-        localNetworkToken = kc.localNetworkToken ?? ""
+        pat               = kc.pat ?? ""
+        baseURL           = cs.baseURL   ?? ""
+        giteaBaseURL      = ""
+        repoOwner         = cs.repoOwner ?? ""
+        repoName          = cs.repoName  ?? ""
+        docsPath          = cs.docsPath  ?? "docs-cms/rfcs"
+        rfcLabel          = cs.rfcLabel  ?? "hermit:rfc-ready"
+        serverMode        = cs.serverMode ?? .embeddedLocal
+        localNetworkToken = cs.localNetworkToken ?? ""
+        isAuthenticated   = cs.isConfigured && !pat.isEmpty
 #if os(iOS)
         serverBaseURL = ""
 #else
-        serverBaseURL = kc.serverBaseURL ?? ""
+        serverBaseURL = cs.serverBaseURL ?? ""
 #endif
         pendingHandoffRFCID = UserDefaults.standard.string(forKey: RestoreKey.rfcID)
     }
 
-    /// Refreshes published state from the Keychain (used by SetupView after saving).
-    func applyKeychain() {
-        isAuthenticated = keychain.isConfigured
-        baseURL   = keychain.baseURL   ?? ""
-        repoOwner = keychain.repoOwner ?? ""
-        repoName  = keychain.repoName  ?? ""
-        docsPath  = keychain.docsPath  ?? "docs-cms/rfcs"
-        rfcLabel  = keychain.rfcLabel  ?? "hermit:rfc-ready"
-        pat       = keychain.pat       ?? ""
-        serverMode    = keychain.serverMode    ?? .embeddedLocal
-        serverBaseURL = keychain.serverBaseURL ?? ""
+    /// Refreshes published state from ConfigStore + Keychain (call after saving settings).
+    func applyConfig() {
+        let cs = ConfigStore.shared
+        let kc = KeychainHelper.shared
+        pat           = kc.pat ?? ""
+        baseURL       = cs.baseURL   ?? ""
+        repoOwner     = cs.repoOwner ?? ""
+        repoName      = cs.repoName  ?? ""
+        docsPath      = cs.docsPath  ?? "docs-cms/rfcs"
+        rfcLabel      = cs.rfcLabel  ?? "hermit:rfc-ready"
+        serverMode    = cs.serverMode ?? .embeddedLocal
+        serverBaseURL = cs.serverBaseURL ?? ""
+        isAuthenticated = cs.isConfigured && !pat.isEmpty
     }
+
+    // Keep old name as an alias so any missed call sites still compile.
+    func applyKeychain() { applyConfig() }
 
     // MARK: - API client factory
 

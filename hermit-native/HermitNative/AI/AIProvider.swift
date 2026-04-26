@@ -30,10 +30,9 @@ protocol AIProvider: AnyObject {
 enum AIProviderFactory {
 
     static func makeProvider() -> any AIProvider {
-        let keychain = KeychainHelper.shared
-        let pref = keychain.aiProvider ?? "apple"
+        let pref = ConfigStore.shared.aiProvider ?? "apple"
 
-        if pref == "openai", let key = keychain.openAIKey, !key.isEmpty {
+        if pref == "openai", let key = KeychainHelper.shared.openAIKey, !key.isEmpty {
             return OpenAIProvider(apiKey: key)
         }
 
@@ -42,7 +41,7 @@ enum AIProviderFactory {
         }
 
         // Graceful fallback: try OpenAI even if not explicitly preferred
-        if let key = keychain.openAIKey, !key.isEmpty {
+        if let key = KeychainHelper.shared.openAIKey, !key.isEmpty {
             return OpenAIProvider(apiKey: key)
         }
 
