@@ -195,7 +195,7 @@ native-open: build gomobile-build native-build-macos ## Build Go binary + xcfram
 
 dev: ## Zero-to-demo: start Gitea (idempotent), seed PRs, install PAT to Keychain, build + deploy app
 	@$(MAKE) gitea-up
-	@bash scripts/install-keychain-pat.sh
+	@bash scripts/install-keychain-pat.sh $(if $(NO_KEYCHAIN),--no-keychain)
 	@$(MAKE) build
 	@$(MAKE) native-build-macos
 	@pkill -x HermitNative 2>/dev/null || true
