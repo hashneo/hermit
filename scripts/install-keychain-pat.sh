@@ -3,14 +3,17 @@
 #
 # Bootstraps HermitNative for a local dev session:
 #
-#   Keychain  → PAT only (service=HermitNative account=hermit.pat)
+#   Keychain     → PAT only (service=HermitNative account=hermit.pat)
 #   UserDefaults → all non-secret config (bundle ID: com.hermit.HermitNative)
 #
 # This mirrors the KeychainHelper + ConfigStore split in the Swift app so the
 # app starts fully configured without Keychain prompts on every rebuild.
 #
 # Usage:
-#   scripts/install-keychain-pat.sh [PAT] [HERMIT_YAML_PATH]
+#   scripts/install-keychain-pat.sh [--no-keychain] [PAT] [HERMIT_YAML_PATH]
+#
+#   --no-keychain  Skip writing the PAT to Keychain (useful in CI or when the
+#                  PAT is managed separately). UserDefaults config is still written.
 #
 # When called with no arguments it reads the PAT from .tmp/gitea-token.env
 # and the config from config/hermit.yaml (both relative to the repo root).
@@ -20,11 +23,23 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# ── Parse flags ───────────────────────────────────────────────────────────────
+
+SKIP_KEYCHAIN=false
+POSITIONAL=()
+for arg in "$@"; do
+    case "${arg}" in
+        --no-keychain) SKIP_KEYCHAIN=true ;;
+        *) POSITIONAL+=("${arg}") ;;
+    esac
+done
+set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
+
 # ── Resolve PAT ───────────────────────────────────────────────────────────────
 
 PAT="${1:-}"
 
-if [ -z "${PAT}" ]; then
+if [ -z "${PAT}" ] && [ "${SKIP_KEYCHAIN}" = false ]; then
     TOKEN_ENV="${REPO_ROOT}/.tmp/gitea-token.env"
     if [ -f "${TOKEN_ENV}" ]; then
         # shellcheck disable=SC1090
@@ -33,9 +48,9 @@ if [ -z "${PAT}" ]; then
     fi
 fi
 
-if [ -z "${PAT}" ]; then
+if [ -z "${PAT}" ] && [ "${SKIP_KEYCHAIN}" = false ]; then
     printf 'ERROR: No PAT provided and .tmp/gitea-token.env not found or empty.\n' >&2
-    printf 'Run "make gitea-up" first, or pass the token as the first argument.\n' >&2
+    printf 'Run "make gitea-up" first, pass the token as the first argument, or use --no-keychain.\n' >&2
     exit 1
 fi
 
@@ -156,19 +171,23 @@ BUNDLE_ID="com.hermit.HermitNative"
 
 # ── 1. Write PAT to Keychain (service=HermitNative account=hermit.pat) ────────
 
-printf 'Installing PAT into Keychain...\n'
-security delete-generic-password \
-    -a "hermit.pat" \
-    -s "HermitNative" 2>/dev/null || true
+if [ "${SKIP_KEYCHAIN}" = true ]; then
+    printf 'Skipping Keychain (--no-keychain).\n'
+else
+    printf 'Installing PAT into Keychain...\n'
+    security delete-generic-password \
+        -a "hermit.pat" \
+        -s "HermitNative" 2>/dev/null || true
 
-security add-generic-password \
-    -a "hermit.pat" \
-    -s "HermitNative" \
-    -w "${PAT}" \
-    -T "" \
-    -U
+    security add-generic-password \
+        -a "hermit.pat" \
+        -s "HermitNative" \
+        -w "${PAT}" \
+        -T "" \
+        -U
 
-printf '  PAT → (set)\n'
+    printf '  PAT → (set)\n'
+fi
 
 # ── 2. Write non-secret config to UserDefaults ───────────────────────────────
 # ConfigStore.swift uses UserDefaults.standard with these exact keys.
