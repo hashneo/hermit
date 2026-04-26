@@ -61,9 +61,20 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let msg = "[\(Date())] [AppDelegate] applicationDidFinishLaunching\n"
         if let d = msg.data(using: .utf8), let fh = FileHandle(forWritingAtPath: "/tmp/hermit-native-debug.log") { fh.seekToEndOfFile(); fh.write(d); try? fh.close() }
+        killStaleServerProcesses()
         DispatchQueue.main.async {
             self.startServerIfNeeded()
         }
+    }
+
+    /// Kill any stale `bin/hermit` subprocess left over from a previous app run.
+    /// This ensures the new launch always starts a fresh server with the current PAT.
+    private func killStaleServerProcesses() {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        task.arguments = ["-f", "bin/hermit"]
+        try? task.run()
+        task.waitUntilExit()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -102,14 +113,13 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             let appState = AppState.shared
 
-            // Only prompt for the repo folder when there is genuinely no config
-            // at all — no bookmark and no ConfigStore values. If config is present
-            // but the PAT is missing (e.g. `make dev NO_KEYCHAIN=1`), skip the
-            // prompt and let SetupView handle PAT entry while the server starts.
+            // If ConfigStore already has config (e.g. from a previous run or
+            // install-keychain-pat.sh), skip detection entirely.
             let hasConfig = BookmarkStore.shared.hasBookmark || ConfigStore.shared.isConfigured
             if !hasConfig {
-                do {
-                    let detected = try GiteaAutoConfig.promptAndDetect()
+                // Try silent auto-detection first (reads DevConfig/ bundle or repo layout).
+                // Only show the folder picker if that also fails.
+                if let detected = try? GiteaAutoConfig.detect() {
                     appState.isAuthenticated = true
                     appState.baseURL         = detected.baseURL
                     appState.giteaBaseURL    = detected.giteaBaseURL
@@ -119,11 +129,34 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
                     appState.rfcLabel        = detected.rfcLabel
                     appState.pat             = detected.pat
                     appState.serverMode      = .embeddedLocal
-                } catch {
-                    // User cancelled or selected wrong folder — server won't start.
-                    // They can retry via Settings → Repository → Change…
-                    print("[startServerIfNeeded] repo setup cancelled or failed: \(error)")
-                    return
+                    // Persist so future launches skip detection
+                    ConfigStore.shared.apply(ConfigStore.RepoConfig(
+                        baseURL:   detected.giteaBaseURL.isEmpty ? detected.baseURL : detected.giteaBaseURL,
+                        owner:     detected.owner,
+                        repo:      detected.repo,
+                        docsPath:  detected.docsPath,
+                        rfcLabel:  detected.rfcLabel
+                    ))
+                    ConfigStore.shared.serverBaseURL = detected.baseURL
+                    if !detected.pat.isEmpty { KeychainHelper.shared.pat = detected.pat }
+                } else {
+                    do {
+                        let detected = try GiteaAutoConfig.promptAndDetect()
+                        appState.isAuthenticated = true
+                        appState.baseURL         = detected.baseURL
+                        appState.giteaBaseURL    = detected.giteaBaseURL
+                        appState.repoOwner       = detected.owner
+                        appState.repoName        = detected.repo
+                        appState.docsPath        = detected.docsPath
+                        appState.rfcLabel        = detected.rfcLabel
+                        appState.pat             = detected.pat
+                        appState.serverMode      = .embeddedLocal
+                    } catch {
+                        // User cancelled or selected wrong folder — server won't start.
+                        // They can retry via Settings → Repository → Change…
+                        print("[startServerIfNeeded] repo setup cancelled or failed: \(error)")
+                        return
+                    }
                 }
             }
             HermitNativeApp.startEmbeddedServer(appState: appState)
