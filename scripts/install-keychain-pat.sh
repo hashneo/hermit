@@ -181,7 +181,7 @@ defaults write "${BUNDLE_ID}" hermit.repoOwner      "${REPO_OWNER}"
 defaults write "${BUNDLE_ID}" hermit.repoName       "${REPO_NAME}"
 defaults write "${BUNDLE_ID}" hermit.docsPath       "${DOCS_PATH}"
 defaults write "${BUNDLE_ID}" hermit.rfcLabel       "${RFC_LABEL}"
-defaults write "${BUNDLE_ID}" hermit.serverMode     '{"type":"embeddedLocal"}'
+defaults write "${BUNDLE_ID}" hermit.serverMode     -string '{"type":"embeddedLocal"}'
 
 printf '  server-base-url → %s\n' "${HERMIT_SERVER_URL}"
 printf '  base-url        → %s\n' "${GITEA_BASE_URL}"
