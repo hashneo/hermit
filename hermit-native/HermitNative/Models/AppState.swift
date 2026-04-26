@@ -103,9 +103,11 @@ final class AppState: ObservableObject {
     @Published var localNetworkToken: String = ""
 
     init() {
-#if DEBUG && os(iOS)
-        // iOS debug: load config directly from hermit.yaml + token file.
-        // Avoids Keychain permission dialogs on simulator/device.
+#if DEBUG
+        // Debug builds: load config directly from bundled DevConfig/ (hermit.yaml +
+        // gitea-token-export.sh embedded by `make native-embed-config`).
+        // This works on both iOS and macOS and avoids relying on cfprefsd cache
+        // timing issues or Keychain prompts on first launch after a reset.
         do {
             let detected = try GiteaAutoConfig.detect()
             isAuthenticated = true
@@ -117,17 +119,30 @@ final class AppState: ObservableObject {
             rfcLabel        = detected.rfcLabel
             pat             = detected.pat
             serverMode      = .embeddedLocal
-            serverBaseURL   = ""   // set by mDNS discovery
-            debugLog("loaded from config — \(detected.owner)/\(detected.repo) @ \(detected.baseURL)")
+#if os(iOS)
+            serverBaseURL   = ""   // set by mDNS discovery on iPad
+#else
+            serverBaseURL   = ""   // set by EmbeddedServerManager after server starts
+#endif
+            localNetworkToken = ConfigStore.shared.localNetworkToken ?? ""
+            // Persist so ConfigStore is warm on next launch
+            ConfigStore.shared.apply(ConfigStore.RepoConfig(
+                baseURL:  detected.giteaBaseURL.isEmpty ? detected.baseURL : detected.giteaBaseURL,
+                owner:    detected.owner,
+                repo:     detected.repo,
+                docsPath: detected.docsPath,
+                rfcLabel: detected.rfcLabel
+            ))
+            if !detected.pat.isEmpty { KeychainHelper.shared.pat = detected.pat }
+            debugLog("loaded from bundled config — \(detected.owner)/\(detected.repo) @ \(detected.baseURL)")
             pendingHandoffRFCID = UserDefaults.standard.string(forKey: RestoreKey.rfcID)
             return
         } catch {
-            debugLog("GiteaAutoConfig.detect() FAILED — \(error)")
+            debugLog("GiteaAutoConfig.detect() failed — falling back to ConfigStore: \(error)")
         }
 #endif
-        // macOS (all builds) and iOS release/fallback:
+        // Release builds (and debug fallback when bundled config is absent):
         // Non-secret config lives in UserDefaults (ConfigStore); PAT in Keychain.
-        // On macOS, `make dev` bootstraps both via scripts/install-keychain-pat.sh.
         let cs = ConfigStore.shared
         let kc = KeychainHelper.shared
         let resolvedPAT   = kc.pat ?? ""
