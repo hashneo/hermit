@@ -88,6 +88,18 @@ final class CommentStore: ObservableObject {
         let slug = truncated.lowercased().replacingOccurrences(of: " ", with: "-")
         return slug.isEmpty ? "line" : slug
     }
+    /// Reply to an existing thread and refresh the local thread.
+    func replyToThread(threadId: String, body: String) async throws {
+        guard let client, let prNumber else {
+            throw CommentStoreError.notConfigured
+        }
+        let updated = try await client.replyToReviewComment(prNumber: prNumber, threadId: threadId, body: body)
+        if let idx = comments.firstIndex(where: { $0.id == threadId }) {
+            comments[idx] = updated
+        } else {
+            comments.append(updated)
+        }
+    }
 }
 
 enum CommentStoreError: LocalizedError {

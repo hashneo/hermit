@@ -113,6 +113,7 @@
 		B001B008 /* ServerDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDiscoveryService.swift; sourceTree = "<group>"; };
 		B001B00A /* PairingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingService.swift; sourceTree = "<group>"; };
 		B001C002 /* HermitServer.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = HermitServer.xcframework; sourceTree = "<group>"; };
+		HERMIT0001 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -129,6 +130,7 @@
 		B0010090 = {
 			isa = PBXGroup;
 			children = (
+				HERMIT0001 /* Local.xcconfig */,
 				B0010091 /* HermitNative */,
 				B0010092 /* Products */,
 			);
@@ -534,6 +536,7 @@
 		};
 		B0010063 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = HERMIT0001 /* Local.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -544,7 +547,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "";
-				DEVELOPMENT_TEAM = KCM5F3ZYT3;
+				DEVELOPMENT_TEAM = "$(HERMIT_TEAM_ID)";
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -569,7 +572,7 @@
 				MARKETING_VERSION = 0.1.0;
 				OTHER_SWIFT_FLAGS = "$(inherited)";
 				"OTHER_LDFLAGS[sdk=macosx*]" = "$(inherited)";
-				PRODUCT_BUNDLE_IDENTIFIER = "me.steven.hermit-native";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(HERMIT_BUNDLE_ID)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "macosx iphonesimulator iphoneos";
 				SUPPORTS_MACCATALYST = NO;
@@ -582,6 +585,7 @@
 		};
 		B0010064 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = HERMIT0001 /* Local.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -611,7 +615,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.2;
 				MARKETING_VERSION = 0.1.0;
 				OTHER_SWIFT_FLAGS = "$(inherited) -DHERMIT_EMBEDDED_SERVER";
-				PRODUCT_BUNDLE_IDENTIFIER = "com.hashicorp.hermit-native";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(HERMIT_BUNDLE_ID)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "macosx iphonesimulator iphoneos";
 				SUPPORTS_MACCATALYST = NO;

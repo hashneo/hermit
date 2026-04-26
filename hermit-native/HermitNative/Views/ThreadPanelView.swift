@@ -149,9 +149,7 @@ private struct CommentRow: View {
                 }
             }
 
-            Text(comment.body)
-                .font(.subheadline)
-                .fixedSize(horizontal: false, vertical: true)
+            CommentBodyView(text: comment.body)
                 .padding(.leading, 36)
         }
         .padding(.horizontal, 12).padding(.vertical, 10)

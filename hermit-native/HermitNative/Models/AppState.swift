@@ -105,9 +105,9 @@ final class AppState: ObservableObject {
     private let keychain = KeychainHelper.shared
 
     init() {
-#if DEBUG
-        // In debug builds, load config directly from hermit.yaml + token file.
-        // Keychain is fully bypassed — no permission dialogs.
+#if DEBUG && os(iOS)
+        // iOS debug: load config directly from hermit.yaml + token file.
+        // Avoids Keychain permission dialogs on simulator/device.
         do {
             let detected = try GiteaAutoConfig.detect()
             isAuthenticated = true
@@ -119,16 +119,16 @@ final class AppState: ObservableObject {
             rfcLabel        = detected.rfcLabel
             pat             = detected.pat
             serverMode      = .embeddedLocal
-            serverBaseURL   = ""   // populated by EmbeddedServerManager once the server binds a port
+            serverBaseURL   = ""   // set by mDNS discovery
             debugLog("loaded from config — \(detected.owner)/\(detected.repo) @ \(detected.baseURL)")
-            // hermit-iwq: restore last-viewed RFC even in debug builds
             pendingHandoffRFCID = UserDefaults.standard.string(forKey: RestoreKey.rfcID)
             return
         } catch {
             debugLog("GiteaAutoConfig.detect() FAILED — \(error)")
         }
 #endif
-        // Release path (or debug fallback if config not found): use Keychain.
+        // macOS (all builds) and iOS release/fallback: use Keychain.
+        // On macOS, make dev installs all values via scripts/install-keychain-pat.sh.
         let kc = KeychainHelper.shared
         isAuthenticated = kc.isConfigured
         baseURL         = kc.baseURL   ?? ""
@@ -140,15 +140,11 @@ final class AppState: ObservableObject {
         pat             = kc.pat       ?? ""
         serverMode      = kc.serverMode ?? .embeddedLocal
         localNetworkToken = kc.localNetworkToken ?? ""
-        // serverBaseURL is intentionally NOT restored from Keychain on iOS —
-        // the mDNS browser is the source of truth and will set it on discovery.
-        // Persisting it causes stale URLs to be used before mDNS fires.
 #if os(iOS)
         serverBaseURL = ""
 #else
         serverBaseURL = kc.serverBaseURL ?? ""
 #endif
-        // hermit-iwq: restore last-viewed RFC on next launch
         pendingHandoffRFCID = UserDefaults.standard.string(forKey: RestoreKey.rfcID)
     }
 

@@ -151,7 +151,7 @@ final class EmbeddedServerManager: ObservableObject {
         process.executableURL = binaryURL
         process.currentDirectoryURL = repoRoot
         process.environment = ProcessInfo.processInfo.environment.merging([
-            "GITEA_TOKEN": appState.pat,
+            "HERMIT_PAT": appState.pat,
         ]) { _, new in new }
 
         // Redirect stdout/stderr to a log file

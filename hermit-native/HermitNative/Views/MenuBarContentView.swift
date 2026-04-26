@@ -9,12 +9,105 @@ struct MenuBarContentView: View {
 #if os(macOS)
         if appState.isAuthenticated {
             MenuBarRFCListView()
+        } else if appState.needsPATOnly {
+            MenuBarPATPromptView()
         } else {
             SetupView()
         }
 #endif
     }
 }
+
+// MARK: - AppState convenience
+
+extension AppState {
+    /// True when server URL, owner, and repo are all configured but the PAT is absent.
+    /// Used by MenuBarContentView to show the focused PAT-only prompt instead of full SetupView.
+    var needsPATOnly: Bool {
+        !serverBaseURL.isEmpty && !repoOwner.isEmpty && !repoName.isEmpty && pat.isEmpty
+    }
+}
+
+// MARK: - PAT-only prompt
+
+#if os(macOS)
+struct MenuBarPATPromptView: View {
+    @EnvironmentObject private var appState: AppState
+
+    @State private var pat: String = ""
+    @State private var isValidating = false
+    @State private var errorMessage: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Enter your Gitea PAT")
+                    .font(.headline)
+                Text("Everything else is configured. Paste your Gitea personal access token to connect.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(appState.repoOwner)/\(appState.repoName)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(appState.serverBaseURL)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            SecureField("Personal access token", text: $pat)
+                .textFieldStyle(.roundedBorder)
+
+            if let err = errorMessage {
+                Text(err)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            Button(action: connect) {
+                if isValidating {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text("Connect")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(pat.isEmpty || isValidating)
+        }
+        .padding(16)
+        .frame(width: 300)
+    }
+
+    private func connect() {
+        isValidating = true
+        errorMessage = nil
+        let serverURL = appState.serverBaseURL
+        let enteredPAT = pat
+
+        Task {
+            do {
+                try await HermitServerValidator.validate(serverURL: serverURL, pat: enteredPAT)
+                // Write just the PAT into the Keychain — leave everything else intact.
+                KeychainHelper.shared.pat = enteredPAT
+                await MainActor.run {
+                    appState.pat = enteredPAT
+                    appState.isAuthenticated = true
+                    isValidating = false
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                    isValidating = false
+                }
+            }
+        }
+    }
+}
+#endif
 
 #if os(macOS)
 struct MenuBarRFCListView: View {

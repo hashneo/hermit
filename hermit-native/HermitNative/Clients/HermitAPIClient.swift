@@ -155,7 +155,7 @@ actor HermitAPIClient: HermitClientProtocol {
 
     func listPRChangedFiles(prNumber: Int, docsPath: String) async throws -> [String] {
         let repoID = try await repoID()
-        let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/rfc")
+        let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/rfc/render")
         let data = try await get(u)
         struct Doc: Decodable { let path: String }
         let doc = try JSONDecoder().decode(Doc.self, from: data)
@@ -168,7 +168,8 @@ actor HermitAPIClient: HermitClientProtocol {
         let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/threads")
         let data = try await get(u)
-        let threads = try Self.iso8601Decoder.decode([ServerThread].self, from: data)
+        struct Page: Decodable { let items: [ServerThread] }
+        let threads = try Self.iso8601Decoder.decode(Page.self, from: data).items
         return threads.map { $0.toReviewThread() }
     }
 

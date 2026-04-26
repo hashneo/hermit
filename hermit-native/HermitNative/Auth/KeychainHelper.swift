@@ -1,116 +1,199 @@
 import Foundation
 import Security
 
-/// Securely stores and retrieves credentials from the system Keychain.
+/// Securely stores and retrieves Hermit credentials from the system Keychain.
 ///
-/// Keys stored:
-/// - API base URL        (`hermit.base-url`)      e.g. http://localhost:3000/api/v1
-/// - PAT                 (`hermit.pat`)
-/// - Repo owner          (`hermit.repo-owner`)    e.g. gitea_admin
-/// - Repo name           (`hermit.repo-name`)     e.g. hermit-rfcs
-/// - Docs path           (`hermit.docs-path`)     e.g. docs-cms/rfcs
-/// - RFC label           (`hermit.rfc-label`)     e.g. hermit:rfc-ready
-/// - OpenAI API key      (`hermit.openai-key`)
-/// - AI provider pref    (`hermit.ai-provider`)
+/// All config is packed into a single JSON blob stored under one Keychain item:
+///   service = "HermitNative"
+///   account = "hermit.config"
+///
+/// This means macOS prompts for the password exactly once (on first write),
+/// rather than once per field.
+///
+/// Paired device tokens are stored separately under service "hermit.paired"
+/// because they are keyed by peer name and managed independently.
 final class KeychainHelper {
     static let shared = KeychainHelper()
     private init() {}
 
-    // MARK: - Service identifiers
+    // MARK: - Storage model
 
-    private enum Key: String {
-        case baseURL          = "hermit.base-url"
-        case pat              = "hermit.pat"
-        case repoOwner        = "hermit.repo-owner"
-        case repoName         = "hermit.repo-name"
-        case docsPath         = "hermit.docs-path"
-        case rfcLabel         = "hermit.rfc-label"
-        case openAIKey        = "hermit.openai-key"
-        case aiProvider       = "hermit.ai-provider"
-        case serverMode       = "hermit.server-mode"
-        case serverBaseURL    = "hermit.server-base-url"
-        case localNetworkToken = "hermit.local-token"
-        // Paired device tokens are stored with key "hermit.paired.<displayName>"
-        // handled by loadPairedTokens/savePairedToken/deletePairedToken helpers.
+    private let keychainService = "HermitNative"
+    private let keychainAccount = "hermit.config"
+
+    /// The JSON-serialisable struct that backs the single keychain item.
+    private struct Config: Codable {
+        var pat: String?
+        var baseURL: String?
+        var serverBaseURL: String?
+        var repoOwner: String?
+        var repoName: String?
+        var docsPath: String?
+        var rfcLabel: String?
+        var openAIKey: String?
+        var aiProvider: String?
+        var serverMode: String?      // JSON-encoded ServerMode
+        var localNetworkToken: String?
     }
 
-    // MARK: - Public API
+    // In-memory cache so repeated property reads don't hit the keychain each time.
+    private var _cache: Config? = nil
 
-    var baseURL: String? {
-        get { read(key: .baseURL) }
-        set { write(newValue, key: .baseURL) }
+    private func load() -> Config {
+        if let c = _cache { return c }
+        let query: [CFString: Any] = [
+            kSecClass:       kSecClassGenericPassword,
+            kSecAttrService: keychainService as CFString,
+            kSecAttrAccount: keychainAccount as CFString,
+            kSecReturnData:  true,
+            kSecMatchLimit:  kSecMatchLimitOne,
+        ]
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data,
+              let config = try? JSONDecoder().decode(Config.self, from: data)
+        else { return Config() }
+        _cache = config
+        return config
     }
+
+    private func save(_ config: Config) {
+        _cache = config
+        guard let data = try? JSONEncoder().encode(config) else { return }
+        let query: [CFString: Any] = [
+            kSecClass:       kSecClassGenericPassword,
+            kSecAttrService: keychainService as CFString,
+            kSecAttrAccount: keychainAccount as CFString,
+        ]
+        let attrs: [CFString: Any] = [kSecValueData: data]
+        if SecItemUpdate(query as CFDictionary, attrs as CFDictionary) == errSecItemNotFound {
+            var add = query
+            add[kSecValueData] = data
+            SecItemAdd(add as CFDictionary, nil)
+        }
+    }
+
+    private func mutate(_ block: (inout Config) -> Void) {
+        var c = load()
+        block(&c)
+        save(c)
+    }
+
+    // MARK: - Delete all
+
+    func deleteAll() {
+        _cache = nil
+        let query: [CFString: Any] = [
+            kSecClass:       kSecClassGenericPassword,
+            kSecAttrService: keychainService as CFString,
+            kSecAttrAccount: keychainAccount as CFString,
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
+    // MARK: - Public API (same surface as before)
 
     var pat: String? {
-        get { read(key: .pat) }
-        set { write(newValue, key: .pat) }
+        get { load().pat }
+        set { mutate { $0.pat = newValue } }
+    }
+
+    var baseURL: String? {
+        get { load().baseURL }
+        set { mutate { $0.baseURL = newValue } }
+    }
+
+    var serverBaseURL: String? {
+        get { load().serverBaseURL }
+        set { mutate { $0.serverBaseURL = newValue } }
     }
 
     var repoOwner: String? {
-        get { read(key: .repoOwner) }
-        set { write(newValue, key: .repoOwner) }
+        get { load().repoOwner }
+        set { mutate { $0.repoOwner = newValue } }
     }
 
     var repoName: String? {
-        get { read(key: .repoName) }
-        set { write(newValue, key: .repoName) }
+        get { load().repoName }
+        set { mutate { $0.repoName = newValue } }
     }
 
     var docsPath: String? {
-        get { read(key: .docsPath) }
-        set { write(newValue, key: .docsPath) }
+        get { load().docsPath }
+        set { mutate { $0.docsPath = newValue } }
     }
 
     var rfcLabel: String? {
-        get { read(key: .rfcLabel) }
-        set { write(newValue, key: .rfcLabel) }
+        get { load().rfcLabel }
+        set { mutate { $0.rfcLabel = newValue } }
     }
 
     var openAIKey: String? {
-        get { read(key: .openAIKey) }
-        set { write(newValue, key: .openAIKey) }
+        get { load().openAIKey }
+        set { mutate { $0.openAIKey = newValue } }
     }
 
     var aiProvider: String? {
-        get { read(key: .aiProvider) }
-        set { write(newValue, key: .aiProvider) }
+        get { load().aiProvider }
+        set { mutate { $0.aiProvider = newValue } }
     }
 
-    /// Persists the active ServerMode as JSON.
     var serverMode: ServerMode? {
         get {
-            guard let raw = read(key: .serverMode),
+            guard let raw = load().serverMode,
                   let data = raw.data(using: .utf8) else { return nil }
             return try? JSONDecoder().decode(ServerMode.self, from: data)
         }
         set {
-            if let mode = newValue,
-               let data = try? JSONEncoder().encode(mode),
-               let str  = String(data: data, encoding: .utf8) {
-                write(str, key: .serverMode)
-            } else {
-                write(nil, key: .serverMode)
+            mutate {
+                if let mode = newValue,
+                   let data = try? JSONEncoder().encode(mode),
+                   let str  = String(data: data, encoding: .utf8) {
+                    $0.serverMode = str
+                } else {
+                    $0.serverMode = nil
+                }
             }
         }
     }
 
-    var serverBaseURL: String? {
-        get { read(key: .serverBaseURL) }
-        set { write(newValue, key: .serverBaseURL) }
-    }
-
     var localNetworkToken: String? {
-        get { read(key: .localNetworkToken) }
-        set { write(newValue, key: .localNetworkToken) }
+        get { load().localNetworkToken }
+        set { mutate { $0.localNetworkToken = newValue } }
     }
 
-    // MARK: - Paired device token store (macOS — hermit-1ow)
+    // MARK: - Convenience: is fully configured?
 
-    /// Returns all (peerName → token) pairs persisted in the Keychain.
+    var isConfigured: Bool {
+        let c = load()
+        return c.pat != nil && c.serverBaseURL != nil && c.repoOwner != nil && c.repoName != nil
+    }
+
+    // MARK: - Bulk write
+
+    struct RepoConfig {
+        let baseURL: String
+        let pat: String
+        let owner: String
+        let repo: String
+        let docsPath: String
+        let rfcLabel: String
+    }
+
+    func apply(_ config: RepoConfig) {
+        mutate {
+            $0.baseURL      = config.baseURL
+            $0.pat          = config.pat
+            $0.repoOwner    = config.owner
+            $0.repoName     = config.repo
+            $0.docsPath     = config.docsPath
+            $0.rfcLabel     = config.rfcLabel
+        }
+    }
+
+    // MARK: - Paired device token store
+
     func loadPairedTokens() -> [String: String] {
-#if DEBUG && os(macOS)
-        return [:]
-#else
         let query: [CFString: Any] = [
             kSecClass:            kSecClassGenericPassword,
             kSecAttrService:      "hermit.paired" as CFString,
@@ -130,118 +213,29 @@ final class KeychainHelper {
             }
         }
         return map
-#endif
     }
 
     func savePairedToken(peerName: String, token: String) {
-#if DEBUG && os(macOS)
-        return
-#else
         guard let data = token.data(using: .utf8) else { return }
         let query: [CFString: Any] = [
-            kSecClass:        kSecClassGenericPassword,
-            kSecAttrService:  "hermit.paired" as CFString,
-            kSecAttrAccount:  peerName,
-            kSecValueData:    data,
+            kSecClass:       kSecClassGenericPassword,
+            kSecAttrService: "hermit.paired" as CFString,
+            kSecAttrAccount: peerName,
         ]
-        SecItemDelete(query as CFDictionary)
-        SecItemAdd(query as CFDictionary, nil)
-#endif
+        let attrs: [CFString: Any] = [kSecValueData: data]
+        if SecItemUpdate(query as CFDictionary, attrs as CFDictionary) == errSecItemNotFound {
+            var add = query
+            add[kSecValueData] = data
+            SecItemAdd(add as CFDictionary, nil)
+        }
     }
 
     func deletePairedToken(peerName: String) {
-#if DEBUG && os(macOS)
-        return
-#else
         let query: [CFString: Any] = [
             kSecClass:       kSecClassGenericPassword,
             kSecAttrService: "hermit.paired" as CFString,
             kSecAttrAccount: peerName,
         ]
         SecItemDelete(query as CFDictionary)
-#endif
-    }
-
-    // MARK: - Convenience: is fully configured?
-
-    /// True when the app has enough config to connect: a Hermit server URL,
-    /// a GitHub PAT, and repo owner/name. The legacy baseURL field is also
-    /// written for backward compat but serverBaseURL is the authoritative check.
-    var isConfigured: Bool {
-        return pat != nil && serverBaseURL != nil && repoOwner != nil && repoName != nil
-    }
-
-    // MARK: - Bulk write (used by auto-config)
-
-    struct RepoConfig {
-        let baseURL: String
-        let pat: String
-        let owner: String
-        let repo: String
-        let docsPath: String
-        let rfcLabel: String
-    }
-
-    func apply(_ config: RepoConfig) {
-        baseURL   = config.baseURL
-        pat       = config.pat
-        repoOwner = config.owner
-        repoName  = config.repo
-        docsPath  = config.docsPath
-        rfcLabel  = config.rfcLabel
-    }
-
-    // MARK: - Private helpers
-
-    private func write(_ value: String?, key: Key) {
-#if DEBUG && os(macOS)
-        return  // Keychain no-op on macOS debug to avoid permission dialogs
-#else
-        if let value { save(value, key: key) } else { delete(key: key) }
-#endif
-    }
-
-    private func save(_ value: String, key: Key) {
-        guard let data = value.data(using: .utf8) else { return }
-        let query: [CFString: Any] = [
-            kSecClass:       kSecClassGenericPassword,
-            kSecAttrAccount: key.rawValue,
-            kSecValueData:   data,
-        ]
-        SecItemDelete(query as CFDictionary)
-        SecItemAdd(query as CFDictionary, nil)
-    }
-
-    private func read(key: Key) -> String? {
-#if DEBUG && os(macOS)
-        return nil   // macOS debug: never read from Keychain
-#else
-        let query: [CFString: Any] = [
-            kSecClass:       kSecClassGenericPassword,
-            kSecAttrAccount: key.rawValue,
-            kSecReturnData:  true,
-            kSecMatchLimit:  kSecMatchLimitOne,
-        ]
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let string = String(data: data, encoding: .utf8)
-        else { return nil }
-        return string
-#endif
-    }
-
-    @discardableResult
-    private func delete(key: Key) -> Bool {
-#if DEBUG && os(macOS)
-        return true   // macOS debug: no-op
-#else
-        let query: [CFString: Any] = [
-            kSecClass:       kSecClassGenericPassword,
-            kSecAttrAccount: key.rawValue,
-        ]
-        return SecItemDelete(query as CFDictionary) == errSecSuccess
-#endif
     }
 }

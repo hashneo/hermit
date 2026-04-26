@@ -16,8 +16,9 @@ struct GutterMarkdownView: View {
     @State private var isSubmitting: Bool = false
     @State private var submitError: String? = nil
 
-    // Popover state — which line's thread popover is currently showing
+    // Hover-popover state — which line's thread popover is currently showing (hover-driven)
     @State private var popoverLine: Int? = nil
+    @State private var hoverDismissTask: Task<Void, Never>? = nil
 
     // Floating + bubble state — tracks which block has an active text selection
     @State private var bubbleLine: Int? = nil
@@ -71,9 +72,26 @@ struct GutterMarkdownView: View {
                     },
                     onSelectionChanged: { text, rect in
                         if let text {
-                            bubbleLine = line
-                            bubbleText = text
-                            bubbleRect = rect
+                            // If the selection covers ≥ 90% of the block's text, treat it
+                            // as a whole-block selection: clear the text selection and just
+                            // open the inline composer for the block instead.
+                            let blockText = Self.plainText(from: block)
+                            let ratio = blockText.isEmpty ? 1.0
+                                : Double(text.count) / Double(blockText.count)
+                            if ratio >= 0.9 {
+                                bubbleLine = nil
+                                bubbleText = ""
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    selectedLine = line
+                                    composeText = ""
+                                    submitError = nil
+                                }
+                                onLineTapped?(line)
+                            } else {
+                                bubbleLine = line
+                                bubbleText = text
+                                bubbleRect = rect
+                            }
                         } else if bubbleLine == line {
                             bubbleLine = nil
                             bubbleText = ""
@@ -153,24 +171,41 @@ struct GutterMarkdownView: View {
                 .fill(isSelected ? Color.accentColor.opacity(0.08) : Color.clear)
 
             if count > 0 {
-                Button {
-                    popoverLine = (popoverLine == line) ? nil : line
-                } label: {
-                    Text("\(count)")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(Color.accentColor))
-                }
-                .buttonStyle(.plain)
-                .popover(isPresented: Binding(
-                    get: { popoverLine == line },
-                    set: { if !$0 { popoverLine = nil } }
-                ), arrowEdge: .trailing) {
-                    ThreadPopoverView(line: line)
-                        .environmentObject(commentStore)
-                }
+                Text("\(count)")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.accentColor))
+                    .onHover { hovering in
+                        hoverDismissTask?.cancel()
+                        if hovering {
+                            popoverLine = line
+                        } else {
+                            // Short delay — lets the cursor travel into the popover
+                            hoverDismissTask = Task {
+                                try? await Task.sleep(for: .milliseconds(300))
+                                if !Task.isCancelled { popoverLine = nil }
+                            }
+                        }
+                    }
+                    .popover(isPresented: Binding(
+                        get: { popoverLine == line },
+                        set: { if !$0 { popoverLine = nil } }
+                    ), arrowEdge: .trailing) {
+                        ThreadPopoverView(line: line)
+                            .environmentObject(commentStore)
+                            .onHover { hovering in
+                                if hovering {
+                                    hoverDismissTask?.cancel()
+                                } else {
+                                    hoverDismissTask = Task {
+                                        try? await Task.sleep(for: .milliseconds(200))
+                                        if !Task.isCancelled { popoverLine = nil }
+                                    }
+                                }
+                            }
+                    }
             } else if isSelected {
                 Image(systemName: "plus.bubble.fill")
                     .font(.system(size: 11))
@@ -447,12 +482,32 @@ struct MarkdownBlockView: View {
 
     // MARK: Blockquote
     private func blockquoteView(inlines: [MarkdownInline]) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Rectangle().fill(Color.accentColor.opacity(0.6)).frame(width: 3).cornerRadius(2)
-            selectable(inlines.nsAttributedString())
+#if os(macOS)
+        let quoteFont = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        let quoteColor = NSColor.secondaryLabelColor
+#else
+        let quoteFont = UIFont.preferredFont(forTextStyle: .body)
+        let quoteColor = UIColor.secondaryLabel
+#endif
+        let attr = inlines.nsAttributedString(font: quoteFont)
+        let mutable = NSMutableAttributedString(attributedString: attr)
+        // Apply italic + muted colour across the whole string — Slack-style quote look
+        mutable.addAttributes([
+            .foregroundColor: quoteColor,
+            .obliqueness: 0.15,
+        ], range: NSRange(location: 0, length: mutable.length))
+
+        return HStack(alignment: .top, spacing: 10) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color.accentColor.opacity(0.7))
+                .frame(width: 3)
+            selectable(mutable)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 4)
+        .padding(.horizontal, 2)
+        .background(Color.accentColor.opacity(0.04))
+        .cornerRadius(4)
     }
 
     // MARK: Table — each cell is selectable

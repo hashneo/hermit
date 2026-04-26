@@ -97,11 +97,19 @@ struct RFCDetailView: View {
 
         // Configure and load comments if this is a PR RFC
         if case .pullRequest(let pr) = rfc.source, let store = commentStore {
+            // rfc.path holds the branch name (headRef) for PR RFCs, not the file path.
+            // Resolve the actual changed file path from the server before configuring.
+            let resolvedPath: String
+            if let changed = try? await client.listPRChangedFiles(prNumber: pr.number, docsPath: ""),
+               let first = changed.first, !first.isEmpty {
+                resolvedPath = first
+            } else {
+                resolvedPath = rfc.path   // fallback (won't work for inline comments, but safe)
+            }
             store.configure(
                 client: client,
                 prNumber: pr.number,
-                commitSHA: pr.headSHA,
-                filePath: rfc.path
+                filePath: resolvedPath
             )
             await store.load()
         } else {
