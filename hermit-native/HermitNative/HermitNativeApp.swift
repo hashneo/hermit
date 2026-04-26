@@ -16,26 +16,13 @@ struct HermitNativeApp: App {
     @StateObject private var pairingBrowser = PairingBrowser()
 #endif
 
-    init() {
-#if os(macOS)
-        // Start server and advertiser at launch — don't wait for delegate.
-        Task { @MainActor in
-            HermitNativeApp.startEmbeddedServer(appState: AppState.shared)
-        }
-#endif
-    }
+    init() {}
 
     var body: some Scene {
 #if os(macOS)
         MenuBarExtra("Hermit", systemImage: advertiser.pendingInvitation != nil ? "person.crop.circle.badge.exclamationmark" : "doc.text.magnifyingglass") {
             MenuBarContentView()
                 .environmentObject(appState)
-                .task {
-                    // Start server then advertise. Runs once when the menu bar item is created.
-                    await MainActor.run {
-                        HermitNativeApp.startEmbeddedServer(appState: appState)
-                    }
-                }
         }
         .menuBarExtraStyle(.window)
 
