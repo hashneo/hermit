@@ -23,16 +23,35 @@ struct RFCPullRequest: Identifiable {
     let labels: [String]
 }
 
-struct PRReviewComment: Identifiable, Hashable {
-    let id: Int
+struct ThreadMessage: Identifiable, Hashable {
+    let id: String
+    let author: String
     let body: String
-    let path: String
-    let line: Int?
-    let inReplyToId: Int?
-    let user: String
     let createdAt: Date
-    let resolved: Bool
 }
+
+struct ReviewThread: Identifiable, Hashable {
+    let id: String
+    let prNumber: Int
+    let status: String       // "open", "resolved"
+    let filePath: String
+    let lineStart: Int
+    let lineEnd: Int
+    let messages: [ThreadMessage]
+
+    /// Convenience: first message body (the top-level comment).
+    var body: String { messages.first?.body ?? "" }
+    /// Convenience: author of the first message.
+    var user: String { messages.first?.author ?? "" }
+    /// Convenience: creation date of the first message.
+    var createdAt: Date { messages.first?.createdAt ?? Date() }
+    /// The source line this thread is anchored to (line_start).
+    var line: Int { lineStart }
+    var resolved: Bool { status == "resolved" }
+}
+
+// Legacy alias kept temporarily so callers can migrate incrementally.
+typealias PRReviewComment = ReviewThread
 
 struct ReviewState: Equatable {
     let approved: Bool

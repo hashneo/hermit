@@ -243,13 +243,40 @@ struct GutterMarkdownView: View {
         guard !body.isEmpty else { return }
         isSubmitting = true
         submitError = nil
+        let lineText = blocks.first(where: { $0.sourceLine == line }).map { Self.plainText(from: $0) } ?? ""
         do {
-            try await commentStore.postComment(body: body, line: line)
+            try await commentStore.postComment(body: body, line: line, lineText: lineText)
             withAnimation { selectedLine = nil; composeText = "" }
         } catch {
             submitError = error.localizedDescription
         }
         isSubmitting = false
+    }
+
+    /// Extract plain text from a MarkdownBlock for use as a comment anchor fingerprint.
+    private static func plainText(from block: MarkdownBlock) -> String {
+        switch block {
+        case .heading(_, let inlines, _), .paragraph(let inlines, _), .blockquote(let inlines, _):
+            return inlines.map { inlineText($0) }.joined()
+        case .codeBlock(_, let code, _), .mermaidBlock(let code, _):
+            return code
+        case .bulletList(let items, _), .orderedList(let items, _):
+            return items.flatMap { $0 }.map { inlineText($0) }.joined(separator: " ")
+        case .table(let headers, _, _):
+            return headers.flatMap { $0 }.map { inlineText($0) }.joined(separator: " ")
+        case .horizontalRule:
+            return "---"
+        }
+    }
+
+    private static func inlineText(_ inline: MarkdownInline) -> String {
+        switch inline {
+        case .text(let s): return s
+        case .bold(let i), .italic(let i): return i.map { inlineText($0) }.joined()
+        case .code(let s): return s
+        case .link(let t, _): return t
+        case .image(let a, _): return a
+        }
     }
 }
 

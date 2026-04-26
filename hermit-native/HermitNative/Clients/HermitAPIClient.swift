@@ -18,11 +18,12 @@ protocol HermitClientProtocol: Actor {
     func listFilesOnRef(docsPath: String, ref: String) async throws -> [String]
     func listPRChangedFiles(prNumber: Int, docsPath: String) async throws -> [String]
 
-    // Review comments
-    func listReviewComments(prNumber: Int) async throws -> [PRReviewComment]
-    func createReviewComment(prNumber: Int, body: String, commitSHA: String,
-                              path: String, line: Int) async throws -> PRReviewComment
-    func replyToReviewComment(prNumber: Int, commentId: Int, body: String) async throws -> PRReviewComment
+    // Review threads
+    func listReviewComments(prNumber: Int) async throws -> [ReviewThread]
+    func createReviewComment(prNumber: Int, body: String, filePath: String,
+                              lineStart: Int, lineEnd: Int,
+                              textFingerprint: String) async throws -> ReviewThread
+    func replyToReviewComment(prNumber: Int, threadId: String, body: String) async throws -> ReviewThread
     func getReviewState(prNumber: Int) async throws -> ReviewState
     func approve(prNumber: Int) async throws
 
@@ -163,73 +164,50 @@ actor HermitAPIClient: HermitClientProtocol {
 
     // MARK: - listReviewComments
 
-    func listReviewComments(prNumber: Int) async throws -> [PRReviewComment] {
+    func listReviewComments(prNumber: Int) async throws -> [ReviewThread] {
         let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/threads")
         let data = try await get(u)
-
-        struct ThreadItem: Decodable {
-            let id: Int
-            let body: String
-            let path: String
-            let line: Int?
-            let inReplyToId: Int?
-            let user: String
-            let createdAt: String
-            let resolved: Bool
-        }
-
-        let items = try JSONDecoder().decode([ThreadItem].self, from: data)
-        let fmt = ISO8601DateFormatter()
-        return items.map { t in
-            PRReviewComment(id: t.id, body: t.body, path: t.path, line: t.line,
-                            inReplyToId: t.inReplyToId, user: t.user,
-                            createdAt: fmt.date(from: t.createdAt) ?? Date(),
-                            resolved: t.resolved)
-        }
+        let threads = try Self.iso8601Decoder.decode([ServerThread].self, from: data)
+        return threads.map { $0.toReviewThread() }
     }
 
     // MARK: - createReviewComment
 
-    func createReviewComment(prNumber: Int, body: String, commitSHA: String,
-                              path: String, line: Int) async throws -> PRReviewComment {
+    func createReviewComment(prNumber: Int, body: String, filePath: String,
+                              lineStart: Int, lineEnd: Int,
+                              textFingerprint: String) async throws -> ReviewThread {
         let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/threads")
         let payload: [String: Any] = [
-            "body": body, "path": path, "line": line, "commit_sha": commitSHA,
+            "body": body,
+            "anchor": [
+                "line_start": lineStart,
+                "line_end": lineEnd,
+                "file_path": filePath,
+                "text_fingerprint": textFingerprint,
+            ] as [String: Any],
         ]
         let data = try await post(u, body: payload)
-
-        struct Created: Decodable {
-            let id: Int; let body: String; let path: String; let line: Int?
-            let inReplyToId: Int?; let user: String; let createdAt: String; let resolved: Bool
-        }
-        let c = try JSONDecoder().decode(Created.self, from: data)
-        let fmt = ISO8601DateFormatter()
-        return PRReviewComment(id: c.id, body: c.body, path: c.path, line: c.line,
-                               inReplyToId: c.inReplyToId, user: c.user,
-                               createdAt: fmt.date(from: c.createdAt) ?? Date(),
-                               resolved: c.resolved)
+        let thread = try Self.iso8601Decoder.decode(ServerThread.self, from: data)
+        return thread.toReviewThread()
     }
 
     // MARK: - replyToReviewComment
 
-    func replyToReviewComment(prNumber: Int, commentId: Int, body: String) async throws -> PRReviewComment {
+    func replyToReviewComment(prNumber: Int, threadId: String, body: String) async throws -> ReviewThread {
         let repoID = try await repoID()
-        let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/threads/\(commentId)/replies")
+        let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/threads/\(threadId)/replies")
         let data = try await post(u, body: ["body": body])
-
-        struct Reply: Decodable {
-            let id: Int; let body: String; let path: String; let line: Int?
-            let inReplyToId: Int?; let user: String; let createdAt: String; let resolved: Bool
-        }
-        let r = try JSONDecoder().decode(Reply.self, from: data)
-        let fmt = ISO8601DateFormatter()
-        return PRReviewComment(id: r.id, body: r.body, path: r.path, line: r.line,
-                               inReplyToId: r.inReplyToId, user: r.user,
-                               createdAt: fmt.date(from: r.createdAt) ?? Date(),
-                               resolved: r.resolved)
+        let thread = try Self.iso8601Decoder.decode(ServerThread.self, from: data)
+        return thread.toReviewThread()
     }
+
+    private static let iso8601Decoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .iso8601
+        return d
+    }()
 
     // MARK: - getReviewState
 
@@ -379,5 +357,54 @@ enum HermitAPIError: LocalizedError {
         switch self {
         case .httpError(let code, let msg): return "HTTP \(code): \(msg)"
         }
+    }
+}
+
+// MARK: - Server thread decoding
+
+/// Mirrors the Go `Thread` type returned by the Hermit server.
+private struct ServerThread: Decodable {
+    struct ServerAnchor: Decodable {
+        let lineStart: Int
+        let lineEnd: Int
+        let filePath: String?
+        let textFingerprint: String
+        enum CodingKeys: String, CodingKey {
+            case lineStart = "line_start"
+            case lineEnd = "line_end"
+            case filePath = "file_path"
+            case textFingerprint = "text_fingerprint"
+        }
+    }
+    struct ServerMessage: Decodable {
+        let id: String
+        let author: String
+        let body: String
+        let createdAt: Date
+        enum CodingKeys: String, CodingKey {
+            case id, author, body
+            case createdAt = "created_at"
+        }
+    }
+    let id: String
+    let prNumber: Int
+    let status: String
+    let anchor: ServerAnchor
+    let messages: [ServerMessage]
+    enum CodingKeys: String, CodingKey {
+        case id, status, anchor, messages
+        case prNumber = "pr_number"
+    }
+
+    func toReviewThread() -> ReviewThread {
+        ReviewThread(
+            id: id,
+            prNumber: prNumber,
+            status: status,
+            filePath: anchor.filePath ?? "",
+            lineStart: anchor.lineStart,
+            lineEnd: anchor.lineEnd,
+            messages: messages.map { ThreadMessage(id: $0.id, author: $0.author, body: $0.body, createdAt: $0.createdAt) }
+        )
     }
 }

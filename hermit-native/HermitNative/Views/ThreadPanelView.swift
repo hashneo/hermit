@@ -17,7 +17,7 @@ struct ThreadPanelView: View {
     @State private var staleSHADetected = false  // hermit-2ni
 
     // Comments for the currently selected line (or all if no line selected)
-    private var visibleComments: [PRReviewComment] {
+    private var visibleComments: [ReviewThread] {
         if let line = selectedLine {
             return commentStore.comments(for: line)
         }
@@ -118,7 +118,7 @@ struct ThreadPanelView: View {
 // MARK: - Comment row
 
 private struct CommentRow: View {
-    let comment: PRReviewComment
+    let comment: ReviewThread
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -143,11 +143,9 @@ private struct CommentRow: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
-                    if let line = comment.line {
-                        Text("Line \(line)")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
+                    Text("Line \(comment.line)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
             }
 
