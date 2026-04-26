@@ -61,10 +61,38 @@ enum GiteaAutoConfig {
 
     /// Detects the local Gitea config without any user input.
     /// On a sandboxed build the bookmark must already be stored; call
-    /// `promptAndSaveBookmark()` first if `BookmarkStore.shared.hasBookmark` is false.
+    /// `promptAndDetect()` first if `BookmarkStore.shared.hasBookmark` is false.
     static func detect() throws -> DetectedConfig {
+        // Try reading config embedded in the app bundle first (sandboxed debug builds).
+        if let bundled = try? loadFromBundle() { return bundled }
         let repoRoot = try findRepoRoot()
         return try load(from: repoRoot)
+    }
+
+    /// Reads hermit.yaml and the token file from the DevConfig/ folder
+    /// embedded in the app bundle by `make native-embed-config`.
+    private static func loadFromBundle() throws -> DetectedConfig {
+        guard
+            let configURL = Bundle.main.url(forResource: "hermit", withExtension: "yaml", subdirectory: "DevConfig"),
+            let tokenURL  = Bundle.main.url(forResource: "gitea-token-export", withExtension: "sh", subdirectory: "DevConfig")
+        else {
+            throw AutoConfigError.repoNotFound  // not bundled — fall through
+        }
+        let configText = try String(contentsOf: configURL, encoding: .utf8)
+        let tokenText  = try String(contentsOf: tokenURL,  encoding: .utf8)
+        let token = try parseToken(from: tokenText)
+        let (giteaBaseURL, owner, repo, docsPath) = try parseConfig(configText, token: token)
+        let hermitServerURL = parseListenAddress(configText) ?? "http://localhost:8080"
+        return DetectedConfig(
+            baseURL:       hermitServerURL,
+            giteaBaseURL:  giteaBaseURL,
+            pat:           token,
+            owner:         owner,
+            repo:          repo,
+            docsPath:      docsPath,
+            rfcLabel:      "hermit:rfc-ready",
+            resolvedFrom:  configURL.path
+        )
     }
 
 #if os(macOS)

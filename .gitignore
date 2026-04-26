@@ -19,6 +19,10 @@ bin/hermit
 /data/hermit/
 /.tmp/gitea-token.env
 
+# Embedded dev config (copied by make native-embed-config, contains secrets)
+/hermit-native/HermitNative/DevConfig/hermit.yaml
+/hermit-native/HermitNative/DevConfig/gitea-token-export.sh
+
 # Native app build output
 HermitNative.app/
 hermit-native/build/

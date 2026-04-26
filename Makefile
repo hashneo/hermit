@@ -114,7 +114,22 @@ XCODE             := DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xc
 
 native-build: native-build-macos native-build-ipad ## Build the native app for macOS and iPad simulator
 
-native-build-macos: ## Build the native app for macOS
+native-embed-config: ## Copy config/hermit.yaml + .tmp/gitea-token-export.sh into the app bundle resources (debug only)
+	@mkdir -p hermit-native/HermitNative/DevConfig
+	@if [ -f config/hermit.yaml ]; then \
+		cp config/hermit.yaml hermit-native/HermitNative/DevConfig/hermit.yaml; \
+		echo "Embedded config/hermit.yaml into DevConfig/"; \
+	else \
+		echo "Warning: config/hermit.yaml not found — DevConfig will be empty"; \
+	fi
+	@if [ -f .tmp/gitea-token-export.sh ]; then \
+		cp .tmp/gitea-token-export.sh hermit-native/HermitNative/DevConfig/gitea-token-export.sh; \
+		echo "Embedded .tmp/gitea-token-export.sh into DevConfig/"; \
+	else \
+		echo "Warning: .tmp/gitea-token-export.sh not found — token will not be embedded"; \
+	fi
+
+native-build-macos: native-embed-config ## Build the native app for macOS
 	@echo "Building HermitNative for macOS..."
 	$(XCODE) \
 		-project $(NATIVE_PROJECT) \

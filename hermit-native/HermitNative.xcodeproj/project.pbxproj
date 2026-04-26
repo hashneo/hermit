@@ -16,6 +16,7 @@
 		B001000E /* RFC.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000F /* RFC.swift */; };
 		B0010010 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010011 /* KeychainHelper.swift */; };
 		B001D005 /* BookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D006 /* BookmarkStore.swift */; };
+		B001D007 /* DevConfig in Resources */ = {isa = PBXBuildFile; fileRef = B001D008 /* DevConfig */; };
 		B0010012 /* GitHubAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010013 /* GitHubAPIClient.swift */; };
 		B0010014 /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010015 /* AIProvider.swift */; };
 		B0010016 /* AppleIntelligenceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010017 /* AppleIntelligenceProvider.swift */; };
@@ -69,6 +70,7 @@
 		B001000F /* RFC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFC.swift; sourceTree = "<group>"; };
 		B0010011 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		B001D006 /* BookmarkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkStore.swift; sourceTree = "<group>"; };
+		B001D008 /* DevConfig */ = {isa = PBXFileReference; lastKnownFileType = folder; path = DevConfig; sourceTree = "<group>"; };
 		B0010013 /* GitHubAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubAPIClient.swift; sourceTree = "<group>"; };
 		B0010015 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
 		B0010017 /* AppleIntelligenceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleIntelligenceProvider.swift; sourceTree = "<group>"; };
@@ -144,6 +146,7 @@
 				B0010099 /* WebView */,
 				B001009A /* Views */,
 				B001009B /* Resources */,
+				B001D008 /* DevConfig */,
 				B001C003 /* Frameworks */,
 			);
 			path = HermitNative;
@@ -340,6 +343,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B001D007 /* DevConfig in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
