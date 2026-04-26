@@ -200,17 +200,36 @@ else
 fi
 
 # ── 2. Write non-secret config to UserDefaults ───────────────────────────────
-# ConfigStore.swift uses UserDefaults.standard with these exact keys.
+# Write to both:
+#   a) The global domain (picked up by non-sandboxed runs / `defaults read`)
+#   b) The sandboxed container plist directly (what a sandboxed app actually reads)
+#
+# macOS does NOT reliably sync `defaults write <bundleID>` into the sandbox
+# container before app launch, so we write the plist file directly to be safe.
 
-printf 'Writing config to UserDefaults (%s)...\n' "${BUNDLE_ID}"
+SANDBOX_PLIST="${HOME}/Library/Containers/${BUNDLE_ID}/Data/Library/Preferences/${BUNDLE_ID}.plist"
 
-defaults write "${BUNDLE_ID}" hermit.baseURL        "${GITEA_BASE_URL}"
-defaults write "${BUNDLE_ID}" hermit.serverBaseURL  "${HERMIT_SERVER_URL}"
-defaults write "${BUNDLE_ID}" hermit.repoOwner      "${REPO_OWNER}"
-defaults write "${BUNDLE_ID}" hermit.repoName       "${REPO_NAME}"
-defaults write "${BUNDLE_ID}" hermit.docsPath       "${DOCS_PATH}"
-defaults write "${BUNDLE_ID}" hermit.rfcLabel       "${RFC_LABEL}"
-defaults write "${BUNDLE_ID}" hermit.serverMode     -string '{"type":"embeddedLocal"}'
+write_defaults() {
+    local domain="$1"
+    defaults write "${domain}" hermit.baseURL       "${GITEA_BASE_URL}"
+    defaults write "${domain}" hermit.serverBaseURL "${HERMIT_SERVER_URL}"
+    defaults write "${domain}" hermit.repoOwner     "${REPO_OWNER}"
+    defaults write "${domain}" hermit.repoName      "${REPO_NAME}"
+    defaults write "${domain}" hermit.docsPath      "${DOCS_PATH}"
+    defaults write "${domain}" hermit.rfcLabel      "${RFC_LABEL}"
+    defaults write "${domain}" hermit.serverMode    -string '{"type":"embeddedLocal"}'
+}
+
+printf 'Writing config to UserDefaults (global: %s)...\n' "${BUNDLE_ID}"
+write_defaults "${BUNDLE_ID}"
+
+if [ -f "${SANDBOX_PLIST}" ]; then
+    printf 'Writing config to sandboxed plist: %s\n' "${SANDBOX_PLIST}"
+    write_defaults "${SANDBOX_PLIST}"
+else
+    printf 'Sandbox container not found yet (%s) — global write only.\n' "${SANDBOX_PLIST}"
+    printf 'The app will pick up values on first launch.\n'
+fi
 
 printf '  server-base-url → %s\n' "${HERMIT_SERVER_URL}"
 printf '  base-url        → %s\n' "${GITEA_BASE_URL}"

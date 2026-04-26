@@ -223,7 +223,11 @@ reset: ## Full reset: kill app, destroy Gitea container + data, remove keychain 
 	@security delete-generic-password -a "hermit.pat" -s "HermitNative" 2>/dev/null || true
 	@echo "Removing UserDefaults config..."
 	@BUNDLE_ID=$$(grep -E '^HERMIT_BUNDLE_ID\s*=' hermit-native/Local.xcconfig 2>/dev/null | head -1 | sed 's/.*=[ \t]*//;s/[[:space:]]*//g'); \
-		if [ -n "$$BUNDLE_ID" ]; then defaults delete "$$BUNDLE_ID" 2>/dev/null || true; fi
+		if [ -n "$$BUNDLE_ID" ]; then \
+			defaults delete "$$BUNDLE_ID" 2>/dev/null || true; \
+			SANDBOX_PLIST="$(HOME)/Library/Containers/$$BUNDLE_ID/Data/Library/Preferences/$$BUNDLE_ID.plist"; \
+			if [ -f "$$SANDBOX_PLIST" ]; then defaults delete "$$SANDBOX_PLIST" 2>/dev/null || true; fi; \
+		fi
 	@echo "Removing thread store..."
 	@rm -f data/hermit/threads.json
 	@echo "Cleaning build artifacts..."
