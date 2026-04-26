@@ -136,7 +136,38 @@ extension HermitNativeApp {
     }
 }
 
-// MARK: - RFC Viewer Window
+// MARK: - Settings Window Manager (macOS)
+// Opens the Settings window imperatively so it works from the MenuBarExtra
+// panel without needing @Environment(\.openSettings).
+
+#if os(macOS)
+@MainActor
+final class SettingsWindowManager {
+    static let shared = SettingsWindowManager()
+    private var controller: NSWindowController?
+
+    func open() {
+        if let existing = controller?.window, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let view = SettingsView().environmentObject(AppState.shared)
+        let hosting = NSHostingController(rootView: view)
+        let window = NSWindow(contentViewController: hosting)
+        window.title = "Settings"
+        window.styleMask = [.titled, .closable, .resizable]
+        window.setContentSize(NSSize(width: 540, height: 480))
+        window.center()
+        window.isReleasedWhenClosed = false
+        let wc = NSWindowController(window: window)
+        controller = wc
+        wc.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+#endif
+
 
 @MainActor
 final class RFCViewerWindowManager {

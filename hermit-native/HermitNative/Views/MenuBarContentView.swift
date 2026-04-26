@@ -22,7 +22,6 @@ struct MenuBarRFCListView: View {
     @ObservedObject private var advertiser = PairingAdvertiser.shared
     @StateObject private var store = RFCStore()
     @State private var searchText = ""
-    @Environment(\.openSettings) private var openSettings
 
     var filtered: [RFC] {
         guard !searchText.isEmpty else { return store.rfcs }
@@ -72,7 +71,7 @@ struct MenuBarRFCListView: View {
                     .help("Refresh")
                 }
                 Button {
-                    openSettings()
+                    SettingsWindowManager.shared.open()
                 } label: {
                     Image(systemName: "gear")
                 }
