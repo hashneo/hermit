@@ -113,7 +113,29 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
         guard !serverStarted else { return }
         serverStarted = true
         Task { @MainActor in
-            HermitNativeApp.startEmbeddedServer(appState: AppState.shared)
+            // If the app has no config (e.g. first launch after enabling sandbox),
+            // prompt the user to locate the repo before starting the server.
+            let appState = AppState.shared
+            if !appState.isAuthenticated {
+                do {
+                    let detected = try GiteaAutoConfig.promptAndDetect()
+                    appState.isAuthenticated = true
+                    appState.baseURL         = detected.baseURL
+                    appState.giteaBaseURL    = detected.giteaBaseURL
+                    appState.repoOwner       = detected.owner
+                    appState.repoName        = detected.repo
+                    appState.docsPath        = detected.docsPath
+                    appState.rfcLabel        = detected.rfcLabel
+                    appState.pat             = detected.pat
+                    appState.serverMode      = .embeddedLocal
+                } catch {
+                    // User cancelled or selected wrong folder — server won't start.
+                    // They can retry via Settings → Repository → Change…
+                    print("[startServerIfNeeded] repo setup cancelled or failed: \(error)")
+                    return
+                }
+            }
+            HermitNativeApp.startEmbeddedServer(appState: appState)
         }
     }
 }
