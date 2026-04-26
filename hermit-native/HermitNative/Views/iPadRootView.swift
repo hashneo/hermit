@@ -123,6 +123,13 @@ struct iPadRootView: View {
                 Task { await store.load() }
             }
         }
+        .onChange(of: appState.localNetworkToken) { _, _ in
+            // Token arrives after URL in some flows (e.g. re-pair after reinstall)
+            if let client = appState.makeAPIClient() {
+                store.configure(client: client, docsPath: appState.docsPath)
+                Task { await store.load() }
+            }
+        }
         .safeAreaInset(edge: .bottom) {
 #if os(iOS)
             ConnectionStatusBar(appState: appState, pairingBrowser: pairingBrowser)

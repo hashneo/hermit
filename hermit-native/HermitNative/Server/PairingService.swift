@@ -253,14 +253,16 @@ extension PairingBrowser: MCNearbyServiceBrowserDelegate {
             if !self.discoveredMacs.contains(peerID) {
                 self.discoveredMacs.append(peerID)
             }
-            // Update AppState — always current with the live mDNS record.
+            // Update AppState from mDNS — this is always the source of truth.
+            // serverBaseURL is intentionally NOT persisted to Keychain; it must
+            // always come from live mDNS discovery so stale URLs never survive
+            // across installs or network changes.
             AppState.shared.serverBaseURL = serverURL
             AppState.shared.serverMode    = .localNetwork
             AppState.shared.repoOwner     = owner
             AppState.shared.repoName      = repo
             AppState.shared.docsPath      = docsPath
             AppState.shared.rfcLabel      = rfcLabel
-            KeychainHelper.shared.serverBaseURL = serverURL
             KeychainHelper.shared.serverMode    = .localNetwork
             KeychainHelper.shared.repoOwner     = owner
             KeychainHelper.shared.repoName      = repo

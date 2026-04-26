@@ -139,8 +139,15 @@ final class AppState: ObservableObject {
         rfcLabel        = kc.rfcLabel  ?? "hermit:rfc-ready"
         pat             = kc.pat       ?? ""
         serverMode      = kc.serverMode ?? .embeddedLocal
-        serverBaseURL   = kc.serverBaseURL ?? ""
         localNetworkToken = kc.localNetworkToken ?? ""
+        // serverBaseURL is intentionally NOT restored from Keychain on iOS —
+        // the mDNS browser is the source of truth and will set it on discovery.
+        // Persisting it causes stale URLs to be used before mDNS fires.
+#if os(iOS)
+        serverBaseURL = ""
+#else
+        serverBaseURL = kc.serverBaseURL ?? ""
+#endif
         // hermit-iwq: restore last-viewed RFC on next launch
         pendingHandoffRFCID = UserDefaults.standard.string(forKey: RestoreKey.rfcID)
     }
