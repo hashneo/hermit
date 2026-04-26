@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type RepositoryAccessResolver interface {
@@ -23,6 +25,122 @@ type HTTPGitHubClient struct {
 
 func NewHTTPGitHubClient(resolver RepositoryAccessResolver, registryBase map[string]string) *HTTPGitHubClient {
 	return &HTTPGitHubClient{client: &http.Client{}, repoResolver: resolver, registryBase: registryBase}
+}
+
+// anchorRE parses <!-- hermit-anchor lines:S-E fp:FP --> embedded in comment bodies.
+var anchorRE = regexp.MustCompile(`<!--\s*hermit-anchor\s+lines:(\d+)-(\d+)\s+fp:(\S+)\s*-->`)
+
+func (c *HTTPGitHubClient) ListThreads(ctx context.Context, repositoryID string, prNumber int) ([]Thread, error) {
+	owner, repo, baseURL, token, err := c.resolve(repositoryID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Fetch all reviews for the PR.
+	reviewsURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews", strings.TrimRight(baseURL, "/"), owner, repo, prNumber)
+	reviewsData, err := c.getJSON(ctx, reviewsURL, token)
+	if err != nil {
+		return nil, fmt.Errorf("list reviews: %w", err)
+	}
+
+	var reviews []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(reviewsData, &reviews); err != nil {
+		return nil, fmt.Errorf("decode reviews: %w", err)
+	}
+
+	var threads []Thread
+	for _, review := range reviews {
+		commentsURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews/%d/comments",
+			strings.TrimRight(baseURL, "/"), owner, repo, prNumber, review.ID)
+		commentsData, err := c.getJSON(ctx, commentsURL, token)
+		if err != nil {
+			continue
+		}
+
+		var comments []struct {
+			ID        int64     `json:"id"`
+			Body      string    `json:"body"`
+			User      struct{ Login string `json:"login"` } `json:"user"`
+			Path      string    `json:"path"`
+			Line      int       `json:"line"`
+			CreatedAt time.Time `json:"created_at"`
+			UpdatedAt time.Time `json:"updated_at"`
+		}
+		if err := json.Unmarshal(commentsData, &comments); err != nil {
+			continue
+		}
+
+		for _, c := range comments {
+			commentID := strconv.FormatInt(c.ID, 10)
+			threadHandle := makeThreadHandle(repositoryID, prNumber, commentID)
+
+			// Strip the hermit-anchor metadata from the visible body.
+			visibleBody := strings.TrimSpace(anchorRE.ReplaceAllString(c.Body, ""))
+
+			// Parse anchor metadata if present.
+			anchor := Anchor{FilePath: c.Path}
+			if m := anchorRE.FindStringSubmatch(c.Body); m != nil {
+				if ls, err := strconv.Atoi(m[1]); err == nil {
+					anchor.LineStart = ls
+				}
+				if le, err := strconv.Atoi(m[2]); err == nil {
+					anchor.LineEnd = le
+				}
+				anchor.TextFingerprint = m[3]
+			} else {
+				// No hermit metadata — use the raw comment line from the diff.
+				anchor.LineStart = c.Line
+				anchor.LineEnd = c.Line
+			}
+
+			thread := Thread{
+				ID:             threadHandle,
+				RepositoryID:   repositoryID,
+				PRNumber:       prNumber,
+				Status:         ThreadStatusOpen,
+				Anchor:         anchor,
+				GitHubThreadID: threadHandle,
+				Messages: []Message{{
+					ID:              fmt.Sprintf("ghc-%s", commentID),
+					Author:          c.User.Login,
+					Body:            visibleBody,
+					SourceSystem:    "github",
+					GitHubCommentID: commentID,
+					CreatedAt:       c.CreatedAt,
+				}},
+				Sync:      Sync{State: SyncStateSynced},
+				CreatedAt: c.CreatedAt,
+				UpdatedAt: c.UpdatedAt,
+			}
+			threads = append(threads, thread)
+		}
+	}
+
+	return threads, nil
+}
+
+func (c *HTTPGitHubClient) getJSON(ctx context.Context, url, token string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	return io.ReadAll(resp.Body)
 }
 
 func (c *HTTPGitHubClient) CreateThread(ctx context.Context, thread Thread) (string, string, error) {
@@ -127,15 +245,21 @@ func (c *HTTPGitHubClient) postIssueComment(ctx context.Context, baseURL, owner,
 }
 
 func (c *HTTPGitHubClient) postPullRequestInlineComment(ctx context.Context, baseURL, owner, repo string, prNumber int, token, filePath string, bodyLine int, body string) (string, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews", strings.TrimRight(baseURL, "/"), owner, repo, prNumber)
+	// Fetch the PR head SHA — required by the single-comment endpoint.
+	headSHA, err := c.getPRHeadSHA(ctx, baseURL, owner, repo, prNumber, token)
+	if err != nil {
+		return "", fmt.Errorf("could not fetch PR head SHA: %w", err)
+	}
+
+	// POST /repos/{owner}/{repo}/pulls/{pull_number}/comments
+	// Uses "line" (not "new_position") and requires "commit_id".
+	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/comments", strings.TrimRight(baseURL, "/"), owner, repo, prNumber)
 	payload, err := json.Marshal(map[string]any{
-		"event": "COMMENT",
-		"comments": []map[string]any{{
-			"path":         strings.TrimPrefix(filePath, "/"),
-			"body":         body,
-			"new_position": bodyLine,
-			"old_position": 0,
-		}},
+		"body":      body,
+		"commit_id": headSHA,
+		"path":      strings.TrimPrefix(filePath, "/"),
+		"line":      bodyLine,
+		"side":      "RIGHT",
 	})
 	if err != nil {
 		return "", err
@@ -158,7 +282,7 @@ func (c *HTTPGitHubClient) postPullRequestInlineComment(ctx context.Context, bas
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", fmt.Errorf("github inline review comment create failed: %d %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+		return "", fmt.Errorf("github inline comment create failed: %d %s", resp.StatusCode, strings.TrimSpace(string(msg)))
 	}
 
 	var result struct {
@@ -168,10 +292,45 @@ func (c *HTTPGitHubClient) postPullRequestInlineComment(ctx context.Context, bas
 		return "", err
 	}
 	if result.ID == 0 {
-		return "", fmt.Errorf("github inline review response returned no id")
+		return "", fmt.Errorf("github inline comment response returned no id")
 	}
 
 	return strconv.FormatInt(result.ID, 10), nil
+}
+
+func (c *HTTPGitHubClient) getPRHeadSHA(ctx context.Context, baseURL, owner, repo string, prNumber int, token string) (string, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d", strings.TrimRight(baseURL, "/"), owner, repo, prNumber)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return "", fmt.Errorf("github PR fetch failed: %d %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+
+	var pr struct {
+		Head struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
+		return "", err
+	}
+	if pr.Head.SHA == "" {
+		return "", fmt.Errorf("github PR response missing head SHA")
+	}
+	return pr.Head.SHA, nil
 }
 
 func (c *HTTPGitHubClient) resolve(repositoryID string) (owner, repo, baseURL, token string, err error) {

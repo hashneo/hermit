@@ -9,13 +9,13 @@ import (
 )
 
 type resolverStub struct {
-	owner   string
-	name    string
-	reg     string
-	token   string
-	found   bool
-	branch  string
-	docs    string
+	owner  string
+	name   string
+	reg    string
+	token  string
+	found  bool
+	branch string
+	docs   string
 }
 
 func (r resolverStub) ResolveRepositoryAccess(id string) (owner, name, registry, defaultBranch, docsPathPolicy, token string, ok bool) {
@@ -23,37 +23,46 @@ func (r resolverStub) ResolveRepositoryAccess(id string) (owner, name, registry,
 	return r.owner, r.name, r.reg, r.branch, r.docs, r.token, r.found
 }
 
-func TestHTTPGitHubClient_CreateThreadPostsIssueComment(t *testing.T) {
-	called := false
+func TestHTTPGitHubClient_CreateThreadPostsInlineComment(t *testing.T) {
+	commentCalled := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/repos/owner/repo/pulls/42/reviews" {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/pulls/42":
+			// Head SHA prefetch
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"head": map[string]any{"sha": "abc123sha"},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/owner/repo/pulls/42/comments":
+			commentCalled = true
+			if r.Header.Get("Authorization") != "Bearer test-token" {
+				t.Fatalf("expected bearer auth header")
+			}
+			var payload struct {
+				Body      string `json:"body"`
+				CommitID  string `json:"commit_id"`
+				Path      string `json:"path"`
+				Line      int    `json:"line"`
+				Side      string `json:"side"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode payload: %v", err)
+			}
+			if payload.Path != "docs-cms/rfcs/rfc-001.md" {
+				t.Fatalf("expected path docs-cms/rfcs/rfc-001.md, got %q", payload.Path)
+			}
+			if payload.Line != 13 {
+				t.Fatalf("expected line 13, got %d", payload.Line)
+			}
+			if payload.CommitID != "abc123sha" {
+				t.Fatalf("expected commit_id abc123sha, got %q", payload.CommitID)
+			}
+			if payload.Side != "RIGHT" {
+				t.Fatalf("expected side RIGHT, got %q", payload.Side)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": int64(9001)})
+		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-		called = true
-		if r.Header.Get("Authorization") != "Bearer test-token" {
-			t.Fatalf("expected bearer auth header")
-		}
-		var payload struct {
-			Event    string `json:"event"`
-			Comments []struct {
-				Path        string `json:"path"`
-				Body        string `json:"body"`
-				NewPosition int    `json:"new_position"`
-			} `json:"comments"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Fatalf("decode payload: %v", err)
-		}
-		if payload.Event != "COMMENT" {
-			t.Fatalf("expected event COMMENT, got %q", payload.Event)
-		}
-		if len(payload.Comments) != 1 || payload.Comments[0].Path != "docs-cms/rfcs/rfc-001.md" {
-			t.Fatalf("expected inline comment payload path, got %+v", payload.Comments)
-		}
-		if payload.Comments[0].NewPosition != 13 {
-			t.Fatalf("expected new_position 13, got %d", payload.Comments[0].NewPosition)
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"id": int64(9001)})
 	}))
 	defer server.Close()
 
@@ -76,8 +85,8 @@ func TestHTTPGitHubClient_CreateThreadPostsIssueComment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateThread error: %v", err)
 	}
-	if !called {
-		t.Fatalf("expected github issue comment API to be called")
+	if !commentCalled {
+		t.Fatalf("expected github inline comment API to be called")
 	}
 	if commentID != "9001" {
 		t.Fatalf("expected comment id 9001, got %q", commentID)

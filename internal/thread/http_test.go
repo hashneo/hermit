@@ -6,11 +6,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 )
 
+// TestThreadLifecycleCreateReplyResolve exercises the full create → reply →
+// resolve lifecycle through the HTTP handler layer. Because the service is now
+// a synchronous pass-through to the GitHub client, every response should
+// already be in state "synced" — there is no pending / async phase.
 func TestThreadLifecycleCreateReplyResolve(t *testing.T) {
-	service := NewService(nil)
+	service := NewService(nil) // nil → InMemoryGitHubClient
 	handler := NewHandler(service)
 
 	mux := http.NewServeMux()
@@ -19,6 +22,7 @@ func TestThreadLifecycleCreateReplyResolve(t *testing.T) {
 	mux.HandleFunc("POST "+ThreadReplyPath(), handler.ReplyThread)
 	mux.HandleFunc("POST "+ThreadResolvePath(), handler.ResolveThread)
 
+	// --- Create ---
 	createBody := bytes.NewBufferString(`{"anchor":{"line_start":10,"line_end":12,"text_fingerprint":"abc123"},"body":"first"}`)
 	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/repositories/repo-1/pull-requests/7/threads", createBody)
 	createReq.Header.Set("X-Hermit-User", "alice")
@@ -26,17 +30,22 @@ func TestThreadLifecycleCreateReplyResolve(t *testing.T) {
 	mux.ServeHTTP(createResp, createReq)
 
 	if createResp.Code != http.StatusCreated {
-		t.Fatalf("create status = %d, want %d", createResp.Code, http.StatusCreated)
+		t.Fatalf("create status = %d, want %d\nbody: %s", createResp.Code, http.StatusCreated, createResp.Body)
 	}
 
 	var created Thread
 	if err := json.Unmarshal(createResp.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode create response: %v", err)
 	}
-	if created.Sync.State != SyncStatePending {
-		t.Fatalf("create sync state = %q, want %q", created.Sync.State, SyncStatePending)
+	if created.ID == "" {
+		t.Fatal("created thread has empty ID")
+	}
+	// Synchronous path: should be synced immediately, not pending.
+	if created.Sync.State != SyncStateSynced {
+		t.Fatalf("create sync state = %q, want %q", created.Sync.State, SyncStateSynced)
 	}
 
+	// --- Reply ---
 	replyBody := bytes.NewBufferString(`{"body":"follow-up"}`)
 	replyReq := httptest.NewRequest(http.MethodPost, "/api/v1/repositories/repo-1/pull-requests/7/threads/"+created.ID+"/reply", replyBody)
 	replyReq.Header.Set("X-Hermit-User", "bob")
@@ -44,15 +53,24 @@ func TestThreadLifecycleCreateReplyResolve(t *testing.T) {
 	mux.ServeHTTP(replyResp, replyReq)
 
 	if replyResp.Code != http.StatusOK {
-		t.Fatalf("reply status = %d, want %d", replyResp.Code, http.StatusOK)
+		t.Fatalf("reply status = %d, want %d\nbody: %s", replyResp.Code, http.StatusOK, replyResp.Body)
 	}
 
+	var replied Thread
+	if err := json.Unmarshal(replyResp.Body.Bytes(), &replied); err != nil {
+		t.Fatalf("decode reply response: %v", err)
+	}
+	if len(replied.Messages) != 2 {
+		t.Fatalf("message count after reply = %d, want 2", len(replied.Messages))
+	}
+
+	// --- Resolve ---
 	resolveReq := httptest.NewRequest(http.MethodPost, "/api/v1/repositories/repo-1/pull-requests/7/threads/"+created.ID+"/resolve", nil)
 	resolveResp := httptest.NewRecorder()
 	mux.ServeHTTP(resolveResp, resolveReq)
 
 	if resolveResp.Code != http.StatusOK {
-		t.Fatalf("resolve status = %d, want %d", resolveResp.Code, http.StatusOK)
+		t.Fatalf("resolve status = %d, want %d\nbody: %s", resolveResp.Code, http.StatusOK, resolveResp.Body)
 	}
 
 	var resolved Thread
@@ -62,14 +80,11 @@ func TestThreadLifecycleCreateReplyResolve(t *testing.T) {
 	if resolved.Status != ThreadStatusResolved {
 		t.Fatalf("resolved status = %q, want %q", resolved.Status, ThreadStatusResolved)
 	}
-	if len(resolved.Messages) != 2 {
-		t.Fatalf("message count = %d, want %d", len(resolved.Messages), 2)
+	if resolved.Sync.State != SyncStateSynced {
+		t.Fatalf("resolve sync state = %q, want %q", resolved.Sync.State, SyncStateSynced)
 	}
 
-	if resolved.Sync.State != SyncStatePending {
-		t.Fatalf("resolve sync state = %q, want %q", resolved.Sync.State, SyncStatePending)
-	}
-
+	// --- List ---
 	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/repositories/repo-1/pull-requests/7/threads", nil)
 	listResp := httptest.NewRecorder()
 	mux.ServeHTTP(listResp, listReq)
@@ -87,26 +102,7 @@ func TestThreadLifecycleCreateReplyResolve(t *testing.T) {
 	if listed.Total != 1 {
 		t.Fatalf("listed total = %d, want %d", listed.Total, 1)
 	}
-
-	eventually(t, time.Second, 10*time.Millisecond, func() bool {
-		latest := service.List("repo-1", 7)
-		if len(latest) != 1 {
-			return false
-		}
-		return latest[0].Sync.State == SyncStateSynced && latest[0].GitHubThreadID != ""
-	})
-}
-
-func eventually(t *testing.T, timeout, interval time.Duration, predicate func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for {
-		if predicate() {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("condition not satisfied before timeout")
-		}
-		time.Sleep(interval)
+	if listed.Items[0].Status != ThreadStatusResolved {
+		t.Fatalf("listed thread status = %q, want %q", listed.Items[0].Status, ThreadStatusResolved)
 	}
 }

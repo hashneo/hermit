@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"path/filepath"
 	"time"
 
 	"hermit/internal/config"
@@ -99,10 +98,8 @@ func newMux(cfg config.Config) *http.ServeMux {
 	mux.HandleFunc("GET "+review.ReviewStatePath(), reviewHandler.GetReviewState)
 	mux.HandleFunc("POST "+review.ReviewApprovePath(), reviewHandler.Approve)
 
-	threadStorePath := filepath.Join(cfg.DataDir, "hermit", "threads.json")
-	threadService := thread.NewServiceWithStore(
+	threadService := thread.NewService(
 		thread.NewHTTPGitHubClient(repositoryService, registryBaseURLs),
-		thread.NewFileStore(threadStorePath),
 	)
 	threadHandler := thread.NewHandler(threadService)
 	mux.HandleFunc("GET "+thread.ThreadsPath(), threadHandler.ListThreads)

@@ -3,17 +3,32 @@ package thread
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 )
 
 type InMemoryGitHubClient struct {
-	nextID atomic.Int64
+	mu      sync.RWMutex
+	threads map[string]Thread // keyed by GitHubThreadID
+	nextID  atomic.Int64
 }
 
 func NewInMemoryGitHubClient() *InMemoryGitHubClient {
-	c := &InMemoryGitHubClient{}
+	c := &InMemoryGitHubClient{threads: map[string]Thread{}}
 	c.nextID.Store(5000)
 	return c
+}
+
+func (c *InMemoryGitHubClient) ListThreads(_ context.Context, repositoryID string, prNumber int) ([]Thread, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var out []Thread
+	for _, t := range c.threads {
+		if t.RepositoryID == repositoryID && t.PRNumber == prNumber {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 func (c *InMemoryGitHubClient) CreateThread(_ context.Context, thread Thread) (string, string, error) {
@@ -22,16 +37,38 @@ func (c *InMemoryGitHubClient) CreateThread(_ context.Context, thread Thread) (s
 	}
 
 	threadID := fmt.Sprintf("ght_%d", c.nextID.Add(1))
-	messageID := fmt.Sprintf("ghc_%d", c.nextID.Add(1))
-	return threadID, messageID, nil
+	commentID := fmt.Sprintf("ghc_%d", c.nextID.Add(1))
+
+	thread.ID = threadID
+	thread.GitHubThreadID = threadID
+	if len(thread.Messages) > 0 {
+		thread.Messages[0].ID = commentID
+		thread.Messages[0].GitHubCommentID = commentID
+	}
+
+	c.mu.Lock()
+	c.threads[threadID] = thread
+	c.mu.Unlock()
+
+	return threadID, commentID, nil
 }
 
-func (c *InMemoryGitHubClient) ReplyThread(_ context.Context, githubThreadID string, _ Message) (string, error) {
+func (c *InMemoryGitHubClient) ReplyThread(_ context.Context, githubThreadID string, msg Message) (string, error) {
 	if githubThreadID == "" {
 		return "", fmt.Errorf("github thread id is required")
 	}
 
 	commentID := fmt.Sprintf("ghc_%d", c.nextID.Add(1))
+	msg.ID = commentID
+	msg.GitHubCommentID = commentID
+
+	c.mu.Lock()
+	if t, ok := c.threads[githubThreadID]; ok {
+		t.Messages = append(t.Messages, msg)
+		c.threads[githubThreadID] = t
+	}
+	c.mu.Unlock()
+
 	return commentID, nil
 }
 
@@ -39,5 +76,13 @@ func (c *InMemoryGitHubClient) ResolveThread(_ context.Context, githubThreadID s
 	if githubThreadID == "" {
 		return fmt.Errorf("github thread id is required")
 	}
+
+	c.mu.Lock()
+	if t, ok := c.threads[githubThreadID]; ok {
+		t.Status = ThreadStatusResolved
+		c.threads[githubThreadID] = t
+	}
+	c.mu.Unlock()
+
 	return nil
 }
