@@ -28,7 +28,9 @@ func NewHTTPGitHubClient(resolver RepositoryAccessResolver, registryBase map[str
 }
 
 // anchorRE parses <!-- hermit-anchor lines:S-E fp:FP --> embedded in comment bodies.
-var anchorRE = regexp.MustCompile(`<!--\s*hermit-anchor\s+lines:(\d+)-(\d+)\s+fp:(\S+)\s*-->`)
+// The fingerprint field is matched lazily up to --> so it tolerates embedded newlines
+// (which can occur when the fingerprinted block text itself contains line breaks).
+var anchorRE = regexp.MustCompile(`(?s)<!--\s*hermit-anchor\s+lines:(\d+)-(\d+)\s+fp:(.+?)\s*-->`)
 
 func (c *HTTPGitHubClient) ListThreads(ctx context.Context, repositoryID string, prNumber int) ([]Thread, error) {
 	owner, repo, baseURL, token, err := c.resolve(repositoryID)
@@ -60,13 +62,14 @@ func (c *HTTPGitHubClient) ListThreads(ctx context.Context, repositoryID string,
 		}
 
 		var comments []struct {
-			ID        int64     `json:"id"`
-			Body      string    `json:"body"`
-			User      struct{ Login string `json:"login"` } `json:"user"`
-			Path      string    `json:"path"`
-			Line      int       `json:"line"`
-			CreatedAt time.Time `json:"created_at"`
-			UpdatedAt time.Time `json:"updated_at"`
+			ID               int64     `json:"id"`
+			Body             string    `json:"body"`
+			User             struct{ Login string `json:"login"` } `json:"user"`
+			Path             string    `json:"path"`
+			Position         int       `json:"position"`
+			OriginalPosition int       `json:"original_position"`
+			CreatedAt        time.Time `json:"created_at"`
+			UpdatedAt        time.Time `json:"updated_at"`
 		}
 		if err := json.Unmarshal(commentsData, &comments); err != nil {
 			continue
@@ -90,9 +93,16 @@ func (c *HTTPGitHubClient) ListThreads(ctx context.Context, repositoryID string,
 				}
 				anchor.TextFingerprint = m[3]
 			} else {
-				// No hermit metadata — use the raw comment line from the diff.
-				anchor.LineStart = c.Line
-				anchor.LineEnd = c.Line
+				// No hermit metadata — use the diff position from Gitea.
+				// Gitea returns `position` (diff hunk position) for all inline
+				// comments. Fall back to original_position if position is zero
+				// (e.g. outdated comments on stale diffs).
+				pos := c.Position
+				if pos == 0 {
+					pos = c.OriginalPosition
+				}
+				anchor.LineStart = pos
+				anchor.LineEnd = pos
 			}
 
 			thread := Thread{
@@ -168,8 +178,8 @@ func (c *HTTPGitHubClient) CreateThread(ctx context.Context, thread Thread) (str
 	return threadHandle, commentID, nil
 }
 
-func (c *HTTPGitHubClient) ReplyThread(ctx context.Context, githubThreadID string, message Message) (string, error) {
-	repositoryID, prNumber, _, ok := parseThreadHandle(githubThreadID)
+func (c *HTTPGitHubClient) ReplyThread(ctx context.Context, githubThreadID string, anchor Anchor, message Message) (string, error) {
+	repositoryID, prNumber, commentID, ok := parseThreadHandle(githubThreadID)
 	if !ok {
 		return "", fmt.Errorf("invalid github thread handle")
 	}
@@ -179,8 +189,59 @@ func (c *HTTPGitHubClient) ReplyThread(ctx context.Context, githubThreadID strin
 		return "", err
 	}
 
-	return c.postIssueComment(ctx, baseURL, owner, repo, prNumber, token, message.Body)
+	// GitHub has a native reply-to-comment endpoint; Gitea does not.
+	// For GitHub: POST /repos/{owner}/{repo}/pulls/{pr}/comments/{id}/replies
+	// For Gitea:  POST a new inline review at the same path+position (mirrors UI behaviour).
+	if strings.Contains(baseURL, "api.github.com") {
+		return c.postGitHubCommentReply(ctx, baseURL, owner, repo, prNumber, commentID, token, message.Body)
+	}
+
+	filePath := strings.TrimPrefix(anchor.FilePath, "/")
+	position := anchor.LineEnd
+	if position <= 0 {
+		position = anchor.LineStart
+	}
+	return c.postPullRequestInlineComment(ctx, baseURL, owner, repo, prNumber, token, filePath, position, message.Body)
 }
+
+func (c *HTTPGitHubClient) postGitHubCommentReply(ctx context.Context, baseURL, owner, repo string, prNumber int, commentID, token, body string) (string, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/comments/%s/replies", strings.TrimRight(baseURL, "/"), owner, repo, prNumber, commentID)
+	payload, err := json.Marshal(map[string]string{"body": body})
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return "", fmt.Errorf("github comment reply failed: %d %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+
+	var result struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	if result.ID == 0 {
+		return "", fmt.Errorf("github comment reply returned no id")
+	}
+
+	return strconv.FormatInt(result.ID, 10), nil
+}
+
 
 func (c *HTTPGitHubClient) ResolveThread(ctx context.Context, githubThreadID string) error {
 	repositoryID, prNumber, originalCommentID, ok := parseThreadHandle(githubThreadID)

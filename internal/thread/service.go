@@ -81,7 +81,7 @@ type ResolveRequest struct {
 type GitHubClient interface {
 	ListThreads(ctx context.Context, repositoryID string, prNumber int) ([]Thread, error)
 	CreateThread(ctx context.Context, thread Thread) (threadID string, messageID string, err error)
-	ReplyThread(ctx context.Context, githubThreadID string, message Message) (commentID string, err error)
+	ReplyThread(ctx context.Context, githubThreadID string, anchor Anchor, message Message) (commentID string, err error)
 	ResolveThread(ctx context.Context, githubThreadID string) error
 }
 
@@ -167,7 +167,20 @@ func (s *Service) Reply(ctx context.Context, req ReplyRequest) (Thread, error) {
 		CreatedAt:    now,
 	}
 
-	commentID, err := s.client.ReplyThread(ctx, req.ThreadID, msg)
+	// Look up the existing thread to get its anchor (file path + line) so that
+	// platform clients (e.g. Gitea) can post the reply at the correct location.
+	var anchor Anchor
+	threads, err := s.client.ListThreads(ctx, req.RepositoryID, req.PRNumber)
+	if err == nil {
+		for _, t := range threads {
+			if t.GitHubThreadID == req.ThreadID {
+				anchor = t.Anchor
+				break
+			}
+		}
+	}
+
+	commentID, err := s.client.ReplyThread(ctx, req.ThreadID, anchor, msg)
 	if err != nil {
 		return Thread{}, fmt.Errorf("reply github comment: %w", err)
 	}
@@ -175,8 +188,8 @@ func (s *Service) Reply(ctx context.Context, req ReplyRequest) (Thread, error) {
 	msg.ID = commentID
 	msg.GitHubCommentID = commentID
 
-	// Return the full updated thread by re-fetching from GitHub.
-	threads, err := s.client.ListThreads(ctx, req.RepositoryID, req.PRNumber)
+	// Re-fetch to return the full updated thread.
+	threads, err = s.client.ListThreads(ctx, req.RepositoryID, req.PRNumber)
 	if err != nil {
 		// Can't re-fetch — return a minimal thread with the new message.
 		return Thread{

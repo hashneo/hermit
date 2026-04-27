@@ -53,7 +53,7 @@ func (c *InMemoryGitHubClient) CreateThread(_ context.Context, thread Thread) (s
 	return threadID, commentID, nil
 }
 
-func (c *InMemoryGitHubClient) ReplyThread(_ context.Context, githubThreadID string, msg Message) (string, error) {
+func (c *InMemoryGitHubClient) ReplyThread(_ context.Context, githubThreadID string, anchor Anchor, msg Message) (string, error) {
 	if githubThreadID == "" {
 		return "", fmt.Errorf("github thread id is required")
 	}
