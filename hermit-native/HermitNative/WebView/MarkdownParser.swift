@@ -12,21 +12,34 @@ indirect enum MarkdownInline: Equatable {
 }
 
 enum MarkdownBlock {
-    case heading(level: Int, inlines: [MarkdownInline], sourceLine: Int)
-    case paragraph(inlines: [MarkdownInline], sourceLine: Int)
-    case codeBlock(language: String, code: String, sourceLine: Int)
-    case mermaidBlock(source: String, sourceLine: Int)
-    case bulletList(items: [[MarkdownInline]], sourceLine: Int)
-    case orderedList(items: [[MarkdownInline]], sourceLine: Int)
-    case blockquote(inlines: [MarkdownInline], sourceLine: Int)
+    case heading(level: Int, inlines: [MarkdownInline], sourceLine: Int, sourceLineEnd: Int)
+    case paragraph(inlines: [MarkdownInline], sourceLine: Int, sourceLineEnd: Int)
+    case codeBlock(language: String, code: String, sourceLine: Int, sourceLineEnd: Int)
+    case mermaidBlock(source: String, sourceLine: Int, sourceLineEnd: Int)
+    case bulletList(items: [[MarkdownInline]], sourceLine: Int, sourceLineEnd: Int)
+    case orderedList(items: [[MarkdownInline]], sourceLine: Int, sourceLineEnd: Int)
+    case blockquote(inlines: [MarkdownInline], sourceLine: Int, sourceLineEnd: Int)
     case horizontalRule(sourceLine: Int)
-    case table(headers: [[MarkdownInline]], rows: [[[MarkdownInline]]], sourceLine: Int)
+    case table(headers: [[MarkdownInline]], rows: [[[MarkdownInline]]], sourceLine: Int, sourceLineEnd: Int)
 
     var sourceLine: Int {
         switch self {
-        case .heading(_, _, let l), .paragraph(_, let l), .codeBlock(_, _, let l),
-             .mermaidBlock(_, let l), .bulletList(_, let l), .orderedList(_, let l),
-             .blockquote(_, let l), .horizontalRule(let l), .table(_, _, let l):
+        case .heading(_, _, let l, _), .paragraph(_, let l, _), .codeBlock(_, _, let l, _),
+             .mermaidBlock(_, let l, _), .bulletList(_, let l, _), .orderedList(_, let l, _),
+             .blockquote(_, let l, _), .horizontalRule(let l), .table(_, _, let l, _):
+            return l
+        }
+    }
+
+    /// The last raw file line number covered by this block (inclusive).
+    /// For single-line blocks this equals `sourceLine`.
+    var sourceLineEnd: Int {
+        switch self {
+        case .heading(_, _, _, let e), .paragraph(_, _, let e), .codeBlock(_, _, _, let e),
+             .mermaidBlock(_, _, let e), .bulletList(_, _, let e), .orderedList(_, _, let e),
+             .blockquote(_, _, let e), .table(_, _, _, let e):
+            return e
+        case .horizontalRule(let l):
             return l
         }
     }
@@ -74,11 +87,13 @@ enum MarkdownParser {
                     codeLines.append(cl)
                     i += 1
                 }
+                // i now points one past the closing fence; the fence itself was at i-1.
+                let blockEnd = i - 1
                 let source = codeLines.joined(separator: "\n")
                 if lang == "mermaid" {
-                    blocks.append(.mermaidBlock(source: source, sourceLine: rawLine(blockStart)))
+                    blocks.append(.mermaidBlock(source: source, sourceLine: rawLine(blockStart), sourceLineEnd: rawLine(blockEnd)))
                 } else {
-                    blocks.append(.codeBlock(language: lang, code: source, sourceLine: rawLine(blockStart)))
+                    blocks.append(.codeBlock(language: lang, code: source, sourceLine: rawLine(blockStart), sourceLineEnd: rawLine(blockEnd)))
                 }
                 continue
             }
@@ -93,7 +108,7 @@ enum MarkdownParser {
             if trimmed.hasPrefix("#") {
                 let level = min(trimmed.prefix(while: { $0 == "#" }).count, 6)
                 let text = String(trimmed.dropFirst(level)).trimmingCharacters(in: .whitespaces)
-                blocks.append(.heading(level: level, inlines: parseInline(text), sourceLine: rawLine(i)))
+                blocks.append(.heading(level: level, inlines: parseInline(text), sourceLine: rawLine(i), sourceLineEnd: rawLine(i)))
                 i += 1; continue
             }
 
@@ -108,7 +123,7 @@ enum MarkdownParser {
                     i += 1
                 }
                 let text = bqLines.joined(separator: " ")
-                blocks.append(.blockquote(inlines: parseInline(text), sourceLine: rawLine(blockStart)))
+                blocks.append(.blockquote(inlines: parseInline(text), sourceLine: rawLine(blockStart), sourceLineEnd: rawLine(i - 1)))
                 continue
             }
 
@@ -127,7 +142,7 @@ enum MarkdownParser {
                         break
                     }
                 }
-                blocks.append(.bulletList(items: items, sourceLine: rawLine(blockStart)))
+                blocks.append(.bulletList(items: items, sourceLine: rawLine(blockStart), sourceLineEnd: rawLine(i - 1)))
                 continue
             }
 
@@ -148,7 +163,7 @@ enum MarkdownParser {
                         break
                     }
                 }
-                blocks.append(.orderedList(items: items, sourceLine: rawLine(blockStart)))
+                blocks.append(.orderedList(items: items, sourceLine: rawLine(blockStart), sourceLineEnd: rawLine(i - 1)))
                 continue
             }
 
@@ -173,7 +188,7 @@ enum MarkdownParser {
                         rows.append(parseTableRow(rl))
                         i += 1
                     }
-                    blocks.append(.table(headers: headers, rows: rows, sourceLine: rawLine(blockStart)))
+                    blocks.append(.table(headers: headers, rows: rows, sourceLine: rawLine(blockStart), sourceLineEnd: rawLine(i - 1)))
                     continue
                 }
             }
@@ -194,7 +209,7 @@ enum MarkdownParser {
             }
             if !paraLines.isEmpty {
                 let text = paraLines.joined(separator: " ")
-                blocks.append(.paragraph(inlines: parseInline(text), sourceLine: rawLine(paraStart)))
+                blocks.append(.paragraph(inlines: parseInline(text), sourceLine: rawLine(paraStart), sourceLineEnd: rawLine(i - 1)))
             }
         }
 

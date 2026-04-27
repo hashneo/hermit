@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 56;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -11,14 +11,8 @@
 		AB7C0F2701C62D56AC09227C /* SelectableTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41AFAD009AFAE5101431EBE5 /* SelectableTextView.swift */; };
 		B001000A /* HermitNativeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000B /* HermitNativeApp.swift */; };
 		B001000C /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000D /* AppState.swift */; };
-		B001D004 /* HermitActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D001 /* HermitActivity.swift */; };
-		B001D002 /* SpotlightDonor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D003 /* SpotlightDonor.swift */; };
 		B001000E /* RFC.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000F /* RFC.swift */; };
 		B0010010 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010011 /* KeychainHelper.swift */; };
-		B001D010 /* ConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D011 /* ConfigStore.swift */; };
-		B001D005 /* BookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D006 /* BookmarkStore.swift */; };
-		B001D007 /* DevConfig in Resources */ = {isa = PBXBuildFile; fileRef = B001D008 /* DevConfig */; };
-		B001D009 /* ThreadPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D00A /* ThreadPopoverView.swift */; };
 		B0010012 /* GitHubAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010013 /* GitHubAPIClient.swift */; };
 		B0010014 /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010015 /* AIProvider.swift */; };
 		B0010016 /* AppleIntelligenceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010017 /* AppleIntelligenceProvider.swift */; };
@@ -57,7 +51,12 @@
 		B001B005 /* EmbeddedServerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B006 /* EmbeddedServerManager.swift */; };
 		B001B007 /* ServerDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B008 /* ServerDiscoveryService.swift */; };
 		B001B009 /* PairingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B00A /* PairingService.swift */; };
-		B001C001 /* HermitServer.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B001C002 /* HermitServer.xcframework */; };
+		B001D002 /* SpotlightDonor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D003 /* SpotlightDonor.swift */; };
+		B001D004 /* HermitActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D001 /* HermitActivity.swift */; };
+		B001D005 /* BookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D006 /* BookmarkStore.swift */; };
+		B001D007 /* DevConfig in Resources */ = {isa = PBXBuildFile; fileRef = B001D008 /* DevConfig */; };
+		B001D009 /* ThreadPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D00A /* ThreadPopoverView.swift */; };
+		B001D010 /* ConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D011 /* ConfigStore.swift */; };
 		F51CA0CA0595C036D8E2D00B /* CommentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 702547F1AF611276712EA42C /* CommentStore.swift */; };
 /* End PBXBuildFile section */
 
@@ -67,14 +66,8 @@
 		7DEF0D01EB6E30FF8CF74D70 /* GutterMarkdownView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GutterMarkdownView.swift; sourceTree = "<group>"; };
 		B001000B /* HermitNativeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitNativeApp.swift; sourceTree = "<group>"; };
 		B001000D /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
-		B001D001 /* HermitActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitActivity.swift; sourceTree = "<group>"; };
-		B001D003 /* SpotlightDonor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightDonor.swift; sourceTree = "<group>"; };
 		B001000F /* RFC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFC.swift; sourceTree = "<group>"; };
 		B0010011 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
-		B001D011 /* ConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigStore.swift; sourceTree = "<group>"; };
-		B001D006 /* BookmarkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkStore.swift; sourceTree = "<group>"; };
-		B001D008 /* DevConfig */ = {isa = PBXFileReference; lastKnownFileType = folder; path = DevConfig; sourceTree = "<group>"; };
-		B001D00A /* ThreadPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadPopoverView.swift; sourceTree = "<group>"; };
 		B0010013 /* GitHubAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubAPIClient.swift; sourceTree = "<group>"; };
 		B0010015 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
 		B0010017 /* AppleIntelligenceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleIntelligenceProvider.swift; sourceTree = "<group>"; };
@@ -115,6 +108,12 @@
 		B001B008 /* ServerDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDiscoveryService.swift; sourceTree = "<group>"; };
 		B001B00A /* PairingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingService.swift; sourceTree = "<group>"; };
 		B001C002 /* HermitServer.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = HermitServer.xcframework; sourceTree = "<group>"; };
+		B001D001 /* HermitActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitActivity.swift; sourceTree = "<group>"; };
+		B001D003 /* SpotlightDonor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightDonor.swift; sourceTree = "<group>"; };
+		B001D006 /* BookmarkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkStore.swift; sourceTree = "<group>"; };
+		B001D008 /* DevConfig */ = {isa = PBXFileReference; lastKnownFileType = folder; path = DevConfig; sourceTree = "<group>"; };
+		B001D00A /* ThreadPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadPopoverView.swift; sourceTree = "<group>"; };
+		B001D011 /* ConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigStore.swift; sourceTree = "<group>"; };
 		HERMIT0001 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -574,8 +573,8 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.2;
 				MARKETING_VERSION = 0.1.0;
-				OTHER_SWIFT_FLAGS = "$(inherited)";
 				"OTHER_LDFLAGS[sdk=macosx*]" = "$(inherited)";
+				OTHER_SWIFT_FLAGS = "$(inherited)";
 				PRODUCT_BUNDLE_IDENTIFIER = "$(HERMIT_BUNDLE_ID)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "macosx iphonesimulator iphoneos";

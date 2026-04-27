@@ -198,7 +198,7 @@ actor HermitAPIClient: HermitClientProtocol {
 
     func replyToReviewComment(prNumber: Int, threadId: String, body: String) async throws -> ReviewThread {
         let repoID = try await repoID()
-        let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/threads/\(threadId)/replies")
+        let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/threads/\(threadId)/reply")
         let data = try await post(u, body: ["body": body])
         let thread = try Self.iso8601Decoder.decode(ServerThread.self, from: data)
         return thread.toReviewThread()
@@ -405,7 +405,23 @@ private struct ServerThread: Decodable {
             filePath: anchor.filePath ?? "",
             lineStart: anchor.lineStart,
             lineEnd: anchor.lineEnd,
-            messages: messages.map { ThreadMessage(id: $0.id, author: $0.author, body: $0.body, createdAt: $0.createdAt) }
+            messages: messages.map {
+                ThreadMessage(id: $0.id, author: $0.author, body: Self.stripAnchor($0.body), createdAt: $0.createdAt)
+            }
         )
+    }
+
+    /// Strip any embedded <!-- hermit-anchor ... --> metadata from a comment body.
+    /// The Go backend strips this when fetching, but comments posted directly to
+    /// Gitea (or with a newline in the fingerprint) may slip through.
+    private static func stripAnchor(_ body: String) -> String {
+        // Match <!-- hermit-anchor ... --> lazily, tolerating embedded newlines.
+        guard let regex = try? NSRegularExpression(
+            pattern: #"<!--\s*hermit-anchor\s+lines:\d+-\d+\s+fp:.+?\s*-->"#,
+            options: [.dotMatchesLineSeparators]
+        ) else { return body }
+        let range = NSRange(body.startIndex..., in: body)
+        return regex.stringByReplacingMatches(in: body, range: range, withTemplate: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

@@ -6,7 +6,7 @@ import SwiftUI
 struct RFCDetailView: View {
     let rfc: RFC
     var commentStore: CommentStore? = nil
-    var onLineTapped: ((Int) -> Void)? = nil
+    var onLineTapped: ((Int, Int) -> Void)? = nil
 
     @EnvironmentObject private var appState: AppState
 
@@ -49,12 +49,14 @@ struct RFCDetailView: View {
         )
     }
 
+    @State private var viewportHeight: CGFloat = 800
+
     private var rfcContentView: some View {
-        // Always inject a CommentStore — use the provided one or a default no-op instance
         let store = commentStore ?? CommentStore()
         let gutterView = GutterMarkdownView(
             blocks: MarkdownParser.parse(markdown),
-            onLineTapped: onLineTapped
+            onLineTapped: onLineTapped,
+            viewportHeight: viewportHeight
         )
         return ScrollView(.vertical, showsIndicators: true) {
             gutterView
@@ -64,6 +66,11 @@ struct RFCDetailView: View {
                 .frame(maxWidth: 940, alignment: .leading)
                 .frame(maxWidth: .infinity)
         }
+        .background(GeometryReader { proxy in
+            Color.clear
+                .onAppear { viewportHeight = proxy.size.height }
+                .onChange(of: proxy.size.height) { _, h in viewportHeight = h }
+        })
     }
 
     private func loadContent() async {

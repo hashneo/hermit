@@ -30,35 +30,35 @@ struct MarkdownRendererView: View {
     @ViewBuilder
     private func blockView(_ block: MarkdownBlock) -> some View {
         switch block {
-        case .heading(let level, let inlines, _):
+        case .heading(let level, let inlines, _, _):
             headingView(level: level, inlines: inlines)
 
-        case .paragraph(let inlines, _):
+        case .paragraph(let inlines, _, _):
             Text(attributedString(inlines))
                 .fixedSize(horizontal: false, vertical: true)
 
-        case .codeBlock(let lang, let code, _):
+        case .codeBlock(let lang, let code, _, _):
             codeBlockView(language: lang, code: code)
 
-        case .mermaidBlock(let source, _):
+        case .mermaidBlock(let source, _, _):
             MermaidView(source: source)
                 .frame(minHeight: 200)
                 .frame(maxWidth: .infinity)
 
-        case .bulletList(let items, _):
+        case .bulletList(let items, _, _):
             bulletListView(items: items)
 
-        case .orderedList(let items, _):
+        case .orderedList(let items, _, _):
             orderedListView(items: items)
 
-        case .blockquote(let inlines, _):
+        case .blockquote(let inlines, _, _):
             blockquoteView(inlines: inlines)
 
         case .horizontalRule(_):
             Divider()
                 .padding(.vertical, 4)
 
-        case .table(let headers, let rows, _):
+        case .table(let headers, let rows, _, _):
             tableView(headers: headers, rows: rows)
         }
     }

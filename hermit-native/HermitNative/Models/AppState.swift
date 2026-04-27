@@ -64,6 +64,10 @@ final class AppState: ObservableObject {
     @Published var selectedRFC: RFC? = nil
     /// The comment-thread line currently selected, coordinated across devices.
     @Published var selectedLine: Int? = nil
+    /// The last raw file line of the selected block (inclusive). Used alongside
+    /// selectedLine to match threads anchored anywhere within a multi-line block
+    /// (e.g. a comment placed on a line inside a fenced code block).
+    @Published var selectedLineEnd: Int? = nil
 
     // hermit-z9j: pending Handoff navigation (set on continuation, consumed once store loads)
     @Published var pendingHandoffRFCID: String? = nil

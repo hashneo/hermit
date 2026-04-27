@@ -50,35 +50,39 @@ final class CommentStore: ObservableObject {
         isLoading = false
     }
 
-    /// Returns the number of threads anchored to a given source line.
-    func count(for line: Int) -> Int {
-        comments.filter { $0.lineStart <= line && $0.lineEnd >= line }.count
+    /// Returns the number of threads that overlap the given block line range [blockStart, blockEnd].
+    /// A thread overlaps when its anchor intersects the block: thread.lineStart <= blockEnd && thread.lineEnd >= blockStart.
+    func count(for line: Int, lineEnd: Int? = nil) -> Int {
+        let end = lineEnd ?? line
+        return comments.filter { $0.lineStart <= end && $0.lineEnd >= line }.count
     }
 
-    /// All threads for a given source line, oldest first.
-    func comments(for line: Int) -> [ReviewThread] {
-        comments
-            .filter { $0.lineStart <= line && $0.lineEnd >= line }
+    /// All threads overlapping the given block line range, oldest first.
+    func comments(for line: Int, lineEnd: Int? = nil) -> [ReviewThread] {
+        let end = lineEnd ?? line
+        return comments
+            .filter { $0.lineStart <= end && $0.lineEnd >= line }
             .sorted { $0.createdAt < $1.createdAt }
     }
 
-    /// Post a new thread anchored to a line and refresh.
-    /// `lineText` is the raw markdown text of that line, used to compute the fingerprint.
-    func postComment(body: String, line: Int, lineText: String = "") async throws {
+    /// Post a new thread anchored to a block line range and refresh.
+    /// `lineEnd` is the last raw file line of the block (e.g. closing fence of a code block).
+    /// `lineText` is the raw markdown text of the block's opening line, used to compute the fingerprint.
+    func postComment(body: String, line: Int, lineEnd: Int? = nil, lineText: String = "") async throws {
         guard let client, let prNumber, let filePath else {
             throw CommentStoreError.notConfigured
         }
+        let end = lineEnd ?? line
         let fingerprint = Self.makeFingerprint(lineText)
-        let new = try await client.createReviewComment(
+        _ = try await client.createReviewComment(
             prNumber: prNumber,
             body: body,
             filePath: filePath,
             lineStart: line,
-            lineEnd: line,
+            lineEnd: end,
             textFingerprint: fingerprint
         )
-        comments.append(new)
-        comments.sort { $0.createdAt < $1.createdAt }
+        await load()
     }
 
     /// Slugify up to 40 chars of text — mirrors the Go `fingerprint()` function.
@@ -93,12 +97,8 @@ final class CommentStore: ObservableObject {
         guard let client, let prNumber else {
             throw CommentStoreError.notConfigured
         }
-        let updated = try await client.replyToReviewComment(prNumber: prNumber, threadId: threadId, body: body)
-        if let idx = comments.firstIndex(where: { $0.id == threadId }) {
-            comments[idx] = updated
-        } else {
-            comments.append(updated)
-        }
+        _ = try await client.replyToReviewComment(prNumber: prNumber, threadId: threadId, body: body)
+        await load()
     }
 }
 

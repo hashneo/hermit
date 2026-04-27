@@ -9,6 +9,7 @@ struct ThreadPanelView: View {
     let prNumber: Int
     /// The 1-based raw markdown source line the user tapped, if any.
     var selectedLine: Int? = nil
+    var selectedLineEnd: Int? = nil
 
     @EnvironmentObject private var commentStore: CommentStore
 
@@ -16,10 +17,10 @@ struct ThreadPanelView: View {
     @State private var reviewState: ReviewState? = nil
     @State private var staleSHADetected = false  // hermit-2ni
 
-    // Comments for the currently selected line (or all if no line selected)
+    // Comments for the currently selected block line range (or all if no line selected)
     private var visibleComments: [ReviewThread] {
         if let line = selectedLine {
-            return commentStore.comments(for: line)
+            return commentStore.comments(for: line, lineEnd: selectedLineEnd)
         }
         return commentStore.comments.sorted { $0.createdAt < $1.createdAt }
     }
@@ -31,8 +32,8 @@ struct ThreadPanelView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("PR #\(prNumber)")
                         .font(.headline)
-                    if let line = selectedLine {
-                        Text("Line \(line)")
+                    if selectedLine != nil {
+                        Text("Showing comments for selected block")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -143,9 +144,13 @@ private struct CommentRow: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
-                    Text("Line \(comment.line)")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                    if let quote = comment.quotedAnchorText {
+                        Text(quote)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                 }
             }
 

@@ -8,7 +8,8 @@ import SwiftUI
 
 struct GutterMarkdownView: View {
     let blocks: [MarkdownBlock]
-    var onLineTapped: ((Int) -> Void)? = nil
+    var onLineTapped: ((Int, Int) -> Void)? = nil
+    var viewportHeight: CGFloat = 800
 
     @EnvironmentObject private var commentStore: CommentStore
     @State private var selectedLine: Int? = nil
@@ -18,7 +19,9 @@ struct GutterMarkdownView: View {
 
     // Hover-popover state — which line's thread popover is currently showing (hover-driven)
     @State private var popoverLine: Int? = nil
-    @State private var hoverDismissTask: Task<Void, Never>? = nil
+    @State private var popoverIsEditing: Bool = false
+    @State private var contentWidth: CGFloat = 600
+    @State private var contentHeight: CGFloat = 800
 
     // Floating + bubble state — tracks which block has an active text selection
     @State private var bubbleLine: Int? = nil
@@ -34,12 +37,22 @@ struct GutterMarkdownView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(GeometryReader { proxy in
+            Color.clear.onAppear {
+                contentWidth = proxy.size.width
+                contentHeight = proxy.size.height
+            }
+            .onChange(of: proxy.size) { _, s in
+                contentWidth = s.width
+                contentHeight = s.height
+            }
+        })
     }
 
     // MARK: - Quote handler
     // Called from SelectableTextView when "Quote & Comment" is chosen.
     // Selects the block, pre-fills compose with a GitHub blockquote, scrolls compose into view.
-    private func handleQuote(text: String, line: Int) {
+    private func handleQuote(text: String, line: Int, lineEnd: Int) {
         let quoted = text
             .components(separatedBy: "\n")
             .map { "> \($0)" }
@@ -49,7 +62,7 @@ struct GutterMarkdownView: View {
             composeText = quoted + "\n\n"
             submitError = nil
         }
-        onLineTapped?(line)
+        onLineTapped?(line, lineEnd)
     }
 
     // MARK: - Per-block row
@@ -58,17 +71,17 @@ struct GutterMarkdownView: View {
     private func blockRow(_ block: MarkdownBlock) -> some View {
         let line = block.sourceLine
         let isSelected = selectedLine == line
-        let count = commentStore.count(for: line)
+        let count = commentStore.count(for: line, lineEnd: block.sourceLineEnd)
         let hasBubble = bubbleLine == line && !bubbleText.isEmpty
 
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 0) {
-                gutterCell(line: line, count: count, isSelected: isSelected)
+                gutterCell(line: line, lineEnd: block.sourceLineEnd, count: count, isSelected: isSelected)
 
                 MarkdownBlockView(
                     block: block,
                     onQuoteSelected: { text in
-                        handleQuote(text: text, line: line)
+                        handleQuote(text: text, line: line, lineEnd: block.sourceLineEnd)
                     },
                     onSelectionChanged: { text, rect in
                         if let text {
@@ -86,7 +99,7 @@ struct GutterMarkdownView: View {
                                     composeText = ""
                                     submitError = nil
                                 }
-                                onLineTapped?(line)
+                                onLineTapped?(line, block.sourceLineEnd)
                             } else {
                                 bubbleLine = line
                                 bubbleText = text
@@ -105,7 +118,7 @@ struct GutterMarkdownView: View {
                                 selectedLine = line; composeText = ""; submitError = nil
                             }
                         }
-                        onLineTapped?(line)
+                        onLineTapped?(line, block.sourceLineEnd)
                     }
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -119,13 +132,13 @@ struct GutterMarkdownView: View {
                             selectedLine = line; composeText = ""; submitError = nil
                         }
                     }
-                    onLineTapped?(line)
+                    onLineTapped?(line, block.sourceLineEnd)
                 }
                 .background(isSelected ? Color.accentColor.opacity(0.05) : Color.clear)
                 // + bubble overlay — anchored to bottom-right of selection rect
                 .overlay(alignment: .topLeading) {
                     if hasBubble {
-                        commentBubble(line: line)
+                        commentBubble(line: line, lineEnd: block.sourceLineEnd)
                             // Offset to sit just below-right of the selection end
                             .offset(x: bubbleRect.maxX + 4, y: bubbleRect.maxY - 4)
                     }
@@ -143,9 +156,9 @@ struct GutterMarkdownView: View {
 
     // MARK: - Floating + bubble
 
-    private func commentBubble(line: Int) -> some View {
+    private func commentBubble(line: Int, lineEnd: Int) -> some View {
         Button {
-            handleQuote(text: bubbleText, line: line)
+            handleQuote(text: bubbleText, line: line, lineEnd: lineEnd)
             bubbleLine = nil; bubbleText = ""
         } label: {
             Image(systemName: "plus.bubble.fill")
@@ -165,7 +178,7 @@ struct GutterMarkdownView: View {
 
     // MARK: - Gutter cell
 
-    private func gutterCell(line: Int, count: Int, isSelected: Bool) -> some View {
+    private func gutterCell(line: Int, lineEnd: Int, count: Int, isSelected: Bool) -> some View {
         ZStack {
             Rectangle()
                 .fill(isSelected ? Color.accentColor.opacity(0.08) : Color.clear)
@@ -177,35 +190,32 @@ struct GutterMarkdownView: View {
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
                     .background(Capsule().fill(Color.accentColor))
-                    .onHover { hovering in
-                        hoverDismissTask?.cancel()
-                        if hovering {
-                            popoverLine = line
+                    .onTapGesture {
+                        if popoverLine == line {
+                            if !popoverIsEditing { popoverLine = nil }
                         } else {
-                            // Short delay — lets the cursor travel into the popover
-                            hoverDismissTask = Task {
-                                try? await Task.sleep(for: .milliseconds(300))
-                                if !Task.isCancelled { popoverLine = nil }
-                            }
+                            popoverLine = line
                         }
                     }
+#if os(macOS)
                     .popover(isPresented: Binding(
                         get: { popoverLine == line },
-                        set: { if !$0 { popoverLine = nil } }
+                        set: { if !$0 && !popoverIsEditing { popoverLine = nil } }
                     ), arrowEdge: .trailing) {
-                        ThreadPopoverView(line: line)
+                        ThreadPopoverView(line: line, lineEnd: lineEnd, isEditing: $popoverIsEditing, containerWidth: contentWidth, containerHeight: viewportHeight)
                             .environmentObject(commentStore)
-                            .onHover { hovering in
-                                if hovering {
-                                    hoverDismissTask?.cancel()
-                                } else {
-                                    hoverDismissTask = Task {
-                                        try? await Task.sleep(for: .milliseconds(200))
-                                        if !Task.isCancelled { popoverLine = nil }
-                                    }
-                                }
-                            }
                     }
+#else
+                    .sheet(isPresented: Binding(
+                        get: { popoverLine == line },
+                        set: { if !$0 { popoverLine = nil } }
+                    )) {
+                        ThreadPopoverView(line: line, lineEnd: lineEnd, isEditing: $popoverIsEditing, containerWidth: contentWidth, containerHeight: viewportHeight)
+                            .environmentObject(commentStore)
+                            .presentationDetents([.medium, .large])
+                            .presentationDragIndicator(.visible)
+                    }
+#endif
             } else if isSelected {
                 Image(systemName: "plus.bubble.fill")
                     .font(.system(size: 11))
@@ -283,9 +293,11 @@ struct GutterMarkdownView: View {
         guard !body.isEmpty else { return }
         isSubmitting = true
         submitError = nil
-        let lineText = blocks.first(where: { $0.sourceLine == line }).map { Self.plainText(from: $0) } ?? ""
+        let block = blocks.first(where: { $0.sourceLine == line })
+        let lineText = block.map { Self.plainText(from: $0) } ?? ""
+        let lineEnd = block?.sourceLineEnd ?? line
         do {
-            try await commentStore.postComment(body: body, line: line, lineText: lineText)
+            try await commentStore.postComment(body: body, line: line, lineEnd: lineEnd, lineText: lineText)
             withAnimation { selectedLine = nil; composeText = "" }
         } catch {
             submitError = error.localizedDescription
@@ -296,13 +308,13 @@ struct GutterMarkdownView: View {
     /// Extract plain text from a MarkdownBlock for use as a comment anchor fingerprint.
     private static func plainText(from block: MarkdownBlock) -> String {
         switch block {
-        case .heading(_, let inlines, _), .paragraph(let inlines, _), .blockquote(let inlines, _):
+        case .heading(_, let inlines, _, _), .paragraph(let inlines, _, _), .blockquote(let inlines, _, _):
             return inlines.map { inlineText($0) }.joined()
-        case .codeBlock(_, let code, _), .mermaidBlock(let code, _):
+        case .codeBlock(_, let code, _, _), .mermaidBlock(let code, _, _):
             return code
-        case .bulletList(let items, _), .orderedList(let items, _):
+        case .bulletList(let items, _, _), .orderedList(let items, _, _):
             return items.flatMap { $0 }.map { inlineText($0) }.joined(separator: " ")
-        case .table(let headers, _, _):
+        case .table(let headers, _, _, _):
             return headers.flatMap { $0 }.map { inlineText($0) }.joined(separator: " ")
         case .horizontalRule:
             return "---"
@@ -347,26 +359,26 @@ struct MarkdownBlockView: View {
 
     var body: some View {
         switch block {
-        case .heading(let level, let inlines, _):
+        case .heading(let level, let inlines, _, _):
             headingView(level: level, inlines: inlines)
-        case .paragraph(let inlines, _):
+        case .paragraph(let inlines, _, _):
             selectable(inlines.nsAttributedString())
                 .fixedSize(horizontal: false, vertical: true)
-        case .codeBlock(let lang, let code, _):
+        case .codeBlock(let lang, let code, _, _):
             codeBlockView(language: lang, code: code)
-        case .mermaidBlock(let source, _):
+        case .mermaidBlock(let source, _, _):
             MermaidView(source: source)
                 .frame(minHeight: 200)
                 .frame(maxWidth: .infinity)
-        case .bulletList(let items, _):
+        case .bulletList(let items, _, _):
             bulletListView(items: items)
-        case .orderedList(let items, _):
+        case .orderedList(let items, _, _):
             orderedListView(items: items)
-        case .blockquote(let inlines, _):
+        case .blockquote(let inlines, _, _):
             blockquoteView(inlines: inlines)
         case .horizontalRule(_):
             Divider().padding(.vertical, 4)
-        case .table(let headers, let rows, _):
+        case .table(let headers, let rows, _, _):
             tableView(headers: headers, rows: rows)
         }
     }

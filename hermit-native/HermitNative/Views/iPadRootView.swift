@@ -231,6 +231,7 @@ struct iPadRootView: View {
                                     Button {
                                         appState.selectedRFC = rfc
                                         appState.selectedLine = nil
+                                        appState.selectedLineEnd = nil
                                     } label: {
                                         Label(rfc.title, systemImage: rfcIcon(rfc))
                                     }
@@ -256,7 +257,7 @@ struct iPadRootView: View {
                             }
                             .sheet(isPresented: $showThread) {
                                 NavigationStack {
-                                    ThreadPanelView(prNumber: pr.number, selectedLine: appState.selectedLine)
+                                    ThreadPanelView(prNumber: pr.number, selectedLine: appState.selectedLine, selectedLineEnd: appState.selectedLineEnd)
                                         .environmentObject(commentStore)
                                         .navigationTitle("Comments")
                                         .navigationBarTitleDisplayMode(.inline)
@@ -312,12 +313,13 @@ struct iPadRootView: View {
     private func detailView(showInlineThread: Bool) -> some View {
         if let rfc = appState.selectedRFC {
             VStack(spacing: 0) {
-                RFCDetailView(rfc: rfc, commentStore: commentStore, onLineTapped: { line in
+                RFCDetailView(rfc: rfc, commentStore: commentStore, onLineTapped: { line, lineEnd in
                     appState.selectedLine = line
+                    appState.selectedLineEnd = lineEnd
                 })
                 if showInlineThread, case .pullRequest(let pr) = rfc.source {
                     Divider()
-                    ThreadPanelView(prNumber: pr.number, selectedLine: appState.selectedLine)
+                    ThreadPanelView(prNumber: pr.number, selectedLine: appState.selectedLine, selectedLineEnd: appState.selectedLineEnd)
                         .environmentObject(commentStore)
                         .frame(maxHeight: 280)
                 }

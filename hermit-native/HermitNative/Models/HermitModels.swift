@@ -48,6 +48,15 @@ struct ReviewThread: Identifiable, Hashable {
     /// The source line this thread is anchored to (line_start).
     var line: Int { lineStart }
     var resolved: Bool { status == "resolved" }
+
+    /// The first blockquoted line from the first message body, if any.
+    /// Hermit embeds the anchored text as a GitHub-style blockquote ("> text")
+    /// when posting via Quote & Comment. Returns nil if no quote is present.
+    var quotedAnchorText: String? {
+        let firstLine = body.components(separatedBy: "\n").first(where: { !$0.isEmpty }) ?? ""
+        guard firstLine.hasPrefix("> ") else { return nil }
+        return String(firstLine.dropFirst(2))
+    }
 }
 
 // Legacy alias kept temporarily so callers can migrate incrementally.

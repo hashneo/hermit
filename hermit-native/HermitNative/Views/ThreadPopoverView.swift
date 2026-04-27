@@ -1,5 +1,20 @@
 import SwiftUI
 
+// MARK: - PopoverSizeModifier
+// Reads the screen size via a background GeometryReader anchored to the root
+// and sizes the popover to half the screen width, 85% of screen height.
+
+private struct PopoverSizeModifier: ViewModifier {
+    let containerWidth: CGFloat
+    let containerHeight: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .frame(width: max(480, containerWidth * 0.8))
+            .frame(maxHeight: containerHeight * 0.9)
+    }
+}
+
 // MARK: - CommentBodyView
 // Renders a GitHub-style comment body.
 // Lines starting with "> " are shown as Slack-style block quotes
@@ -83,23 +98,48 @@ struct CommentBodyView: View {
 
 struct ThreadPopoverView: View {
     let line: Int
+    var lineEnd: Int? = nil
+    @Binding var isEditing: Bool
+    var containerWidth: CGFloat = 600
+    var containerHeight: CGFloat = 800
     @EnvironmentObject private var commentStore: CommentStore
 
-    @State private var replyText: [String: String] = [:]   // threadId → draft
-    @State private var submitting: [String: Bool]  = [:]   // threadId → isSubmitting
-    @State private var errors:     [String: String] = [:]  // threadId → error
+    @State private var replyText: [String: String] = [:]
+    @State private var submitting: [String: Bool]  = [:]
+    @State private var errors:     [String: String] = [:]
+    @FocusState private var replyFocused: Bool
+
+    private let lineHeight: CGFloat = 20   // approx .subheadline line height
+    private let maxEditorLines: Int = 5
+
+    private var hasUnsavedText: Bool {
+        replyText.values.contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    }
 
     private var threads: [ReviewThread] {
-        commentStore.comments(for: line)
+        commentStore.comments(for: line, lineEnd: lineEnd)
+    }
+
+    private var rootThread: ReviewThread? { threads.first }
+
+    private var allMessages: [(message: ThreadMessage, resolved: Bool)] {
+        threads.flatMap { thread in thread.messages.map { ($0, thread.resolved) } }
     }
 
     var body: some View {
+        threadContent
+            .modifier(PopoverSizeModifier(containerWidth: containerWidth, containerHeight: containerHeight))
+            .task { await commentStore.load() }
+            .onChange(of: replyText) { _, _ in isEditing = hasUnsavedText }
+    }
+
+    private var threadContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
             HStack {
                 Image(systemName: "bubble.left.and.bubble.right")
                     .foregroundStyle(Color.accentColor)
-                Text("Line \(line)")
+                Text("Comment")
                     .font(.subheadline).fontWeight(.semibold)
                 Spacer()
             }
@@ -114,48 +154,42 @@ struct ThreadPopoverView: View {
                     .foregroundStyle(.secondary)
                     .padding(14)
             } else {
+                // Messages scroll — uses remaining space after editor takes its share
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(threads) { thread in
-                            threadSection(thread)
-                            Divider()
+                        ForEach(allMessages, id: \.message.id) { item in
+                            messageRow(item.message, resolved: item.resolved)
+                            if item.message.id != allMessages.last?.message.id {
+                                Divider().padding(.horizontal, 14)
+                            }
                         }
                     }
+                    .padding(.vertical, 4)
+                }
+                .layoutPriority(1)
+
+                Divider()
+
+                if let root = rootThread, !root.resolved {
+                    replyField(for: root)
                 }
             }
         }
-        .frame(width: 340)
-        .frame(maxHeight: 480)
     }
 
-    // MARK: - Thread section
+    // MARK: - Date formatting
 
-    @ViewBuilder
-    private func threadSection(_ thread: ReviewThread) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Messages
-            ForEach(thread.messages) { message in
-                messageRow(message, resolved: thread.resolved)
-            }
-
-            // Status badge
-            if thread.resolved {
-                HStack(spacing: 4) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .font(.caption)
-                    Text("Resolved")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
-            } else {
-                // Reply field
-                replyField(for: thread)
-            }
+    private func formatMessageDate(_ date: Date) -> String {
+        let age = Date.now.timeIntervalSince(date)
+        if age < 3600 {
+            let mins = max(1, Int(age / 60))
+            return "\(mins)m ago"
+        } else if age < 86400 {
+            let hours = Int(age / 3600)
+            return "\(hours)h ago"
+        } else {
+            return date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
         }
-        .padding(.top, 4)
     }
 
     // MARK: - Message row
@@ -176,7 +210,7 @@ struct ThreadPopoverView: View {
                     Text(message.author)
                         .font(.caption).fontWeight(.semibold)
                     Spacer()
-                    Text(message.createdAt, style: .relative)
+                    Text(formatMessageDate(message.createdAt))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -194,10 +228,13 @@ struct ThreadPopoverView: View {
     private func replyField(for thread: ReviewThread) -> some View {
         let threadId = thread.id
         let isSubmitting = submitting[threadId] == true
-        let errorMsg = errors[threadId]
+        let text = replyText[threadId] ?? ""
+        // Count lines, clamp between 1 and maxEditorLines
+        let lineCount = max(1, min(maxEditorLines, text.components(separatedBy: "\n").count))
+        let editorHeight = CGFloat(lineCount) * lineHeight + 16  // +16 for top/bottom padding
 
         VStack(alignment: .leading, spacing: 4) {
-            if let err = errorMsg {
+            if let err = errors[threadId] {
                 Text(err)
                     .font(.caption)
                     .foregroundStyle(.red)
@@ -205,30 +242,67 @@ struct ThreadPopoverView: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                TextField("Reply…", text: Binding(
-                    get: { replyText[threadId] ?? "" },
-                    set: { replyText[threadId] = $0 }
-                ), axis: .vertical)
-                .lineLimit(1...4)
-                .textFieldStyle(.roundedBorder)
-                .font(.subheadline)
-                .disabled(isSubmitting)
-
-                Button {
-                    Task { await submitReply(to: thread) }
-                } label: {
-                    if isSubmitting {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "paperplane.fill")
-                            .foregroundStyle(Color.accentColor)
+                ZStack(alignment: .topLeading) {
+                    if text.isEmpty {
+                        Text("Reply…")
+                            .font(.subheadline)
+                            .foregroundStyle(.tertiary)
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 5)
+                            .allowsHitTesting(false)
                     }
+                    TextEditor(text: Binding(
+                        get: { replyText[threadId] ?? "" },
+                        set: { replyText[threadId] = $0 }
+                    ))
+                    .font(.subheadline)
+                    .frame(height: editorHeight)
+                    .scrollContentBackground(.hidden)
+                    .focused($replyFocused)
+                    .disabled(isSubmitting)
                 }
-                .buttonStyle(.plain)
-                .disabled(isSubmitting || (replyText[threadId] ?? "").trimmingCharacters(in: .whitespaces).isEmpty)
+                .padding(.horizontal, 6)
+                .background(Color.secondary.opacity(0.07))
+                .cornerRadius(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(replyFocused ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.25))
+                )
+                .onTapGesture { replyFocused = true }
+
+                VStack(spacing: 6) {
+                    // Clear button
+                    if !text.isEmpty {
+                        Button {
+                            replyText[threadId] = ""
+                            isEditing = false
+                            replyFocused = false
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                                .font(.title3)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    // Send button
+                    Button {
+                        Task { await submitReply(to: thread) }
+                    } label: {
+                        if isSubmitting {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "paperplane.fill")
+                                .foregroundStyle(text.trimmingCharacters(in: .whitespaces).isEmpty ? Color.secondary : Color.accentColor)
+                                .font(.title3)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isSubmitting || text.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
             }
             .padding(.horizontal, 14)
-            .padding(.bottom, 10)
+            .padding(.vertical, 10)
         }
     }
 
@@ -242,6 +316,7 @@ struct ThreadPopoverView: View {
         do {
             try await commentStore.replyToThread(threadId: thread.id, body: body)
             replyText[thread.id] = ""
+            isEditing = false
         } catch {
             errors[thread.id] = error.localizedDescription
         }
