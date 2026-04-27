@@ -4,6 +4,282 @@ Hermit is a document-first RFC collaboration application built for GitHub workfl
 
 It lets teams submit a single RFC markdown file in a pull request, review it in a rich reading experience, and collaborate with inline comments and approvals from the Hermit UI while preserving GitHub as the source of truth.
 
+## Getting Started
+
+### Prerequisites
+
+| Tool | Version | Notes |
+|------|---------|-------|
+| Go | 1.22+ | `brew install go` |
+| Xcode | 16+ | Required for native app builds |
+| Docker | any | Required for local Gitea |
+| Node.js | 18+ | Required for web UI |
+| Air | latest | `go install github.com/air-verse/air@latest` |
+
+### Zero-to-demo (recommended)
+
+The `make dev` target does everything in one command — starts Gitea, seeds test data, installs the PAT to Keychain, builds the Go server, builds and launches the macOS app, and deploys to a connected iPad if configured.
+
+```bash
+make dev
+```
+
+After it completes:
+
+- Gitea runs at `http://localhost:3000`
+- Hermit server runs at `http://localhost:8080`
+- HermitNative.app is open on macOS
+
+---
+
+### Manual Setup
+
+#### 1. Start local Gitea
+
+```bash
+make gitea-up
+```
+
+Seed a test repo and review-ready PR:
+
+```bash
+make gitea-seed-pr
+```
+
+Load the generated token into your shell:
+
+```bash
+eval "$(cat .tmp/gitea-token-export.sh)"
+```
+
+#### 2. Build and run the Go server
+
+```bash
+make build
+HERMIT_PAT=$(cat .tmp/gitea-token.env | cut -d= -f2) bin/hermit serve
+```
+
+For live-reload development (Go + React hot reload):
+
+```bash
+make debug
+```
+
+#### 3. Build the macOS native app
+
+```bash
+make native-build-macos
+```
+
+Seed config into UserDefaults so the app starts pre-configured:
+
+```bash
+make native-seed-prefs
+```
+
+Open the app:
+
+```bash
+open HermitNative.app
+```
+
+Or build and launch in one step:
+
+```bash
+make native-open
+```
+
+---
+
+### Xcode
+
+If you prefer to build and run from Xcode rather than the command line:
+
+#### Open the project
+
+```bash
+open hermit-native/HermitNative.xcodeproj
+```
+
+Or in Xcode: **File → Open** and select `hermit-native/HermitNative.xcodeproj`.
+
+#### Configure signing (one time)
+
+1. In the Project Navigator select **HermitNative** (top of the tree)
+2. Select the **HermitNative** target → **Signing & Capabilities** tab
+3. Under **Signing**, check **Automatically manage signing**
+4. Set **Team** to your Apple ID or developer team
+5. Change the **Bundle Identifier** to something unique e.g. `com.yourname.hermit-native`
+
+> For simulator-only builds no paid developer account is needed — a free personal team works.
+
+#### Create a local config file (one time)
+
+Xcode needs a `Local.xcconfig` to know your bundle ID:
+
+```bash
+cp hermit-native/Local.xcconfig.example hermit-native/Local.xcconfig
+```
+
+Edit `Local.xcconfig` and set `HERMIT_BUNDLE_ID` to match what you set in signing above.
+
+#### Select a destination and run
+
+1. In the toolbar, click the destination picker (next to the scheme name)
+2. Under **iOS Simulators** pick **iPad Pro 13-inch (M4)** (or any iPad simulator)
+3. Press **⌘R** to build and run
+
+To run on a physical iPad:
+
+1. Connect the iPad via USB
+2. Accept the **Trust This Computer** prompt on the device
+3. Enable **Developer Mode**: Settings → Privacy & Security → Developer Mode
+4. Select the device in the Xcode destination picker
+5. Press **⌘R** — Xcode will sign, install and launch automatically
+
+#### Seed config into the running simulator
+
+After the first launch, the app needs server config. Run this once after `make gitea-up`:
+
+```bash
+make native-seed-prefs
+```
+
+Then relaunch the app from Xcode (**⌘R**) or the simulator home screen.
+
+---
+
+### iPad Simulator
+
+#### Create a simulator (one time)
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl create \
+  "iPad Pro 13-inch (M4)" \
+  "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M4-8GB" \
+  "com.apple.CoreSimulator.SimRuntime.iOS-26-4"
+```
+
+List available runtimes and device types if you need a different model:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl list runtimes
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl list devicetypes | grep iPad
+```
+
+#### Boot the simulator
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl boot <UDID>
+open -a Simulator
+```
+
+#### Build and deploy to simulator
+
+```bash
+# Build for simulator
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
+  -project hermit-native/HermitNative.xcodeproj \
+  -scheme HermitNative \
+  -destination "platform=iOS Simulator,id=<UDID>" \
+  -configuration Debug \
+  -derivedDataPath hermit-native/build \
+  EXCLUDED_SOURCE_FILE_NAMES="HermitServer.xcframework" \
+  OTHER_SWIFT_FLAGS="-DDEBUG" \
+  build
+
+# Install on simulator
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl install \
+  <UDID> \
+  hermit-native/build/Build/Products/Debug-iphonesimulator/HermitNative.app
+
+# Launch
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl launch \
+  <UDID> \
+  me.steven.hermit-native
+```
+
+Or use the Makefile shortcut (builds and deploys by simulator name):
+
+```bash
+make native-build-ipad
+```
+
+#### Re-deploy after code changes
+
+```bash
+# Rebuild
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
+  -project hermit-native/HermitNative.xcodeproj \
+  -scheme HermitNative \
+  -destination "platform=iOS Simulator,id=<UDID>" \
+  -configuration Debug \
+  -derivedDataPath hermit-native/build \
+  EXCLUDED_SOURCE_FILE_NAMES="HermitServer.xcframework" \
+  OTHER_SWIFT_FLAGS="-DDEBUG" \
+  build
+
+# Reinstall and relaunch
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl install <UDID> \
+  hermit-native/build/Build/Products/Debug-iphonesimulator/HermitNative.app
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl launch <UDID> me.steven.hermit-native
+```
+
+---
+
+### Physical iPad
+
+Requires an Apple Developer account and a provisioned device.
+
+#### One-time setup
+
+1. Enable **Developer Mode** on the iPad: Settings → Privacy & Security → Developer Mode
+2. Trust this Mac when prompted on the device
+3. Copy the local config template:
+
+```bash
+cp .local.mk.example .local.mk
+```
+
+4. Edit `.local.mk` and set:
+
+```makefile
+IPAD_UDID      = <device UDID from Xcode → Devices and Simulators>
+IPAD_DEVICE_ID = <same UDID>
+```
+
+#### Deploy
+
+```bash
+make ipad-deploy
+```
+
+This builds a signed Debug IPA and installs it via `devicectl`.
+
+---
+
+### Useful Make targets
+
+| Target | Description |
+|--------|-------------|
+| `make dev` | Full zero-to-demo: Gitea + server + macOS app + iPad deploy |
+| `make debug` | Live-reload: Air (Go) + Vite (React) |
+| `make native-build` | Build for macOS and iPad simulator |
+| `make native-build-macos` | Build macOS app only |
+| `make native-build-ipad` | Build iPad simulator app only |
+| `make native-open` | Build everything and launch macOS app |
+| `make native-test` | Run Swift test suite |
+| `make native-clean` | Remove build artifacts |
+| `make ipad-deploy` | Build and deploy to physical iPad |
+| `make gitea-up` | Start local Gitea container |
+| `make gitea-seed-pr` | Seed test repo and PR |
+| `make gitea-down` | Stop Gitea container |
+| `make gitea-reset` | Destroy Gitea container and data |
+| `make validate-config` | Validate hermit.yaml (structure + token + API access) |
+| `make reset` | Full reset: kills app, destroys Gitea, wipes build artifacts |
+
+---
+
 ## Vision
 
 Hermit is designed to make RFC review feel like Google Docs-style collaboration with GitHub-native governance.
