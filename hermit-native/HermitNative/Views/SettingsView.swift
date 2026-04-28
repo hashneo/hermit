@@ -13,6 +13,8 @@ struct SettingsView: View {
         TabView {
             AccountSettingsTab()
                 .tabItem { Label("Account", systemImage: "person.circle") }
+            RepositorySettingsTab()
+                .tabItem { Label("Repository", systemImage: "arrow.triangle.branch") }
             ServerSettingsTab()
                 .tabItem { Label("Server", systemImage: "server.rack") }
             AISettingsTab()
@@ -27,49 +29,380 @@ struct SettingsView: View {
 // MARK: - Account tab
 
 private struct AccountSettingsTab: View {
-    @EnvironmentObject private var appState: AppState
-    @State private var showResetConfirm = false
+    @StateObject private var store = AccountStore.shared
+    @State private var showAddSheet  = false
+    @State private var editTarget: Connection? = nil
+    @State private var revokeTarget: Connection? = nil
+    @State private var selection: Set<UUID> = []
 
     var body: some View {
-        Form {
-            Section("GitHub") {
-                LabeledContent("Authentication") {
+        VStack(spacing: 0) {
+            // ── Toolbar ──────────────────────────────────────────────────
+            HStack {
+                Spacer()
+                Button {
+                    showAddSheet = true
+                } label: {
+                    Label("Add Account", systemImage: "plus")
+                }
+                .buttonStyle(.borderless)
+                .padding([.top, .trailing, .bottom], 8)
+            }
+            Divider()
+
+            // ── Table ─────────────────────────────────────────────────────
+            Table(store.connections, selection: $selection) {
+                TableColumn("Name") { conn in
                     HStack(spacing: 6) {
-                        if appState.isAuthenticated {
-                            Label("Connected", systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                        } else {
-                            Label("Not connected", systemImage: "xmark.circle.fill")
-                                .foregroundStyle(.red)
+                        if store.activeID == conn.id {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(Color.accentColor)
+                                .help("Active connection")
                         }
-                        // Server connection dot (hermit-3wh)
-                        if !appState.serverBaseURL.isEmpty {
-                            Circle()
-                                .fill(.green)
-                                .frame(width: 8, height: 8)
-                                .help("Server connected: \(appState.serverBaseURL)")
-                        }
+                        Text(conn.name)
+                            .fontWeight(store.activeID == conn.id ? .semibold : .regular)
                     }
                 }
-                if appState.isAuthenticated {
-                    Button("Remove Token…", role: .destructive) {
-                        showResetConfirm = true
+                .width(min: 120, ideal: 160)
+
+                TableColumn("Endpoint") { conn in
+                    Text(conn.endpoint)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                TableColumn("State") { conn in
+                    ConnectionStateView(connection: conn)
+                }
+                .width(110)
+
+                TableColumn("Actions") { conn in
+                    HStack(spacing: 4) {
+                        Menu {
+                            Button("Set Active") { store.setActive(conn) }
+                            Divider()
+                            Button("Edit…") { editTarget = conn }
+                            Button("Revoke", role: .destructive) { revokeTarget = conn }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .foregroundStyle(.secondary)
+                        }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
                     }
                 }
+                .width(60)
             }
         }
-        .formStyle(.grouped)
-        .confirmationDialog("Remove GitHub token?",
-                            isPresented: $showResetConfirm,
-                            titleVisibility: .visible) {
-            Button("Remove", role: .destructive) {
-                KeychainHelper.shared.pat = nil
-                appState.pat = ""
-                appState.isAuthenticated = false
+        .sheet(isPresented: $showAddSheet) {
+            AddAccountSheet(isPresented: $showAddSheet)
+        }
+        .sheet(item: $editTarget) { conn in
+            EditAccountSheet(connection: conn, isPresented: Binding(
+                get: { editTarget != nil },
+                set: { if !$0 { editTarget = nil } }
+            ))
+        }
+        .confirmationDialog(
+            "Revoke \"\(revokeTarget?.name ?? "")\"?",
+            isPresented: Binding(get: { revokeTarget != nil }, set: { if !$0 { revokeTarget = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Revoke", role: .destructive) {
+                if let c = revokeTarget { store.remove(c) }
+                revokeTarget = nil
             }
         } message: {
-            Text("You will need to enter a new token to use Hermit.")
+            Text("The token will be deleted from the Keychain.")
         }
+        .task {
+            for conn in store.connections { await store.probe(conn) }
+        }
+    }
+}
+
+// MARK: - Connection state indicator
+
+private struct ConnectionStateView: View {
+    @StateObject private var store = AccountStore.shared
+    let connection: Connection
+
+    var body: some View {
+        let connected = store.isConnected(connection)
+        Label(
+            connected ? "Connected" : "Disconnected",
+            systemImage: connected ? "checkmark.circle.fill" : "xmark.circle.fill"
+        )
+        .foregroundStyle(connected ? .green : .secondary)
+        .font(.subheadline)
+    }
+}
+
+// MARK: - Add account sheet
+
+private struct AddAccountSheet: View {
+    @StateObject private var store = AccountStore.shared
+    @Binding var isPresented: Bool
+
+    @State private var name     = ""
+    @State private var endpoint = ""
+    @State private var token    = ""
+
+    var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespaces).isEmpty &&
+        !endpoint.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Name", text: $name, prompt: Text("e.g. HashiCorp Gitea"))
+                    TextField("Endpoint", text: $endpoint, prompt: Text("https://gitea.example.com"))
+                        .autocorrectionDisabled()
+#if os(iOS)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+#endif
+                } header: {
+                    Text("Connection")
+                }
+                Section("Authentication") {
+                    SecureField("Personal Access Token", text: $token)
+                        .textContentType(.password)
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("Add Account")
+#if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+#endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { isPresented = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        store.add(
+                            name: name.trimmingCharacters(in: .whitespaces),
+                            endpoint: endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+                                .trimmingCharacters(in: CharacterSet(charactersIn: "/")),
+                            token: token
+                        )
+                        isPresented = false
+                    }
+                    .disabled(!canSave)
+                }
+            }
+        }
+#if os(macOS)
+        .frame(width: 420, height: 280)
+#endif
+    }
+}
+
+// MARK: - Edit account sheet
+
+private struct EditAccountSheet: View {
+    @StateObject private var store = AccountStore.shared
+    let connection: Connection
+    @Binding var isPresented: Bool
+
+    @State private var name: String
+    @State private var endpoint: String
+    @State private var token: String = ""
+
+    init(connection: Connection, isPresented: Binding<Bool>) {
+        self.connection = connection
+        _isPresented = isPresented
+        _name     = State(initialValue: connection.name)
+        _endpoint = State(initialValue: connection.endpoint)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Connection") {
+                    TextField("Name", text: $name)
+                    TextField("Endpoint", text: $endpoint)
+                        .autocorrectionDisabled()
+#if os(iOS)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+#endif
+                }
+                Section {
+                    SecureField("New token (leave blank to keep existing)", text: $token)
+                        .textContentType(.password)
+                } header: {
+                    Text("Authentication")
+                } footer: {
+                    Text("Leave blank to keep the existing token.")
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("Edit Account")
+#if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+#endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { isPresented = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        var updated = connection
+                        updated.name     = name.trimmingCharacters(in: .whitespaces)
+                        updated.endpoint = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+                            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                        store.update(updated, token: token.isEmpty ? nil : token)
+                        isPresented = false
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+#if os(macOS)
+        .frame(width: 420, height: 300)
+#endif
+    }
+}
+
+// MARK: - Repository tab
+
+private struct RepositorySettingsTab: View {
+    @EnvironmentObject private var appState: AppState
+    @StateObject private var store = AccountStore.shared
+
+    var body: some View {
+        Table([repoRow]) {
+            TableColumn("Account") { _ in
+                Text(store.active?.name ?? "—")
+                    .foregroundStyle(store.active == nil ? .secondary : .primary)
+            }
+            TableColumn("Owner") { _ in
+                Text(appState.repoOwner.isEmpty ? "—" : appState.repoOwner)
+                    .foregroundStyle(appState.repoOwner.isEmpty ? .secondary : .primary)
+            }
+            TableColumn("Repository") { _ in
+                Text(appState.repoName.isEmpty ? "—" : appState.repoName)
+                    .foregroundStyle(appState.repoName.isEmpty ? .secondary : .primary)
+            }
+            TableColumn("Actions") { _ in
+                Button("Edit…") { /* handled by sheet below */ }
+                    .buttonStyle(.borderless)
+            }
+            .width(60)
+        }
+        .overlay {
+            // Tap anywhere on the single row opens the edit sheet — simpler than
+            // threading a binding through the TableColumn closure.
+            RepoEditOverlay()
+                .environmentObject(appState)
+        }
+    }
+
+    // The Table API requires Identifiable rows; use a trivial wrapper.
+    private var repoRow: RepoRow { RepoRow() }
+}
+
+private struct RepoRow: Identifiable { let id = UUID() }
+
+// MARK: - Repo edit overlay (sits over the table, opens sheet on row tap)
+
+private struct RepoEditOverlay: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var showSheet = false
+
+    var body: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .onTapGesture { showSheet = true }
+            .toolbar {
+                ToolbarItem(placement: .automatic) {
+                    Button { showSheet = true } label: {
+                        Label("Edit Repository", systemImage: "pencil")
+                    }
+                }
+            }
+            .sheet(isPresented: $showSheet) {
+                EditRepoSheet(isPresented: $showSheet)
+                    .environmentObject(appState)
+            }
+    }
+}
+
+// MARK: - Edit repo sheet
+
+private struct EditRepoSheet: View {
+    @EnvironmentObject private var appState: AppState
+    @Binding var isPresented: Bool
+
+    @State private var ownerDraft = ""
+    @State private var repoDraft  = ""
+    @State private var docsDraft  = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Repository") {
+                    TextField("Owner", text: $ownerDraft, prompt: Text("org-or-user"))
+                        .autocorrectionDisabled()
+#if os(iOS)
+                        .textInputAutocapitalization(.never)
+#endif
+                    TextField("Name", text: $repoDraft, prompt: Text("repository-name"))
+                        .autocorrectionDisabled()
+#if os(iOS)
+                        .textInputAutocapitalization(.never)
+#endif
+                }
+                Section("Docs Path (optional)") {
+                    TextField("Path", text: $docsDraft, prompt: Text("docs-cms/rfcs"))
+                        .autocorrectionDisabled()
+#if os(iOS)
+                        .textInputAutocapitalization(.never)
+#endif
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("Edit Repository")
+#if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+#endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { isPresented = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        let o = ownerDraft.trimmingCharacters(in: .whitespaces)
+                        let r = repoDraft.trimmingCharacters(in: .whitespaces)
+                        let d = docsDraft.trimmingCharacters(in: .whitespaces)
+                        guard !o.isEmpty, !r.isEmpty else { return }
+                        appState.repoOwner = o
+                        appState.repoName  = r
+                        ConfigStore.shared.repoOwner = o
+                        ConfigStore.shared.repoName  = r
+                        if !d.isEmpty { ConfigStore.shared.docsPath = d }
+                        isPresented = false
+                    }
+                    .disabled(
+                        ownerDraft.trimmingCharacters(in: .whitespaces).isEmpty ||
+                        repoDraft.trimmingCharacters(in: .whitespaces).isEmpty
+                    )
+                }
+            }
+            .onAppear {
+                ownerDraft = appState.repoOwner
+                repoDraft  = appState.repoName
+                docsDraft  = ConfigStore.shared.docsPath ?? ""
+            }
+        }
+#if os(macOS)
+        .frame(width: 420, height: 280)
+#endif
     }
 }
 

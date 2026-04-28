@@ -71,6 +71,20 @@ final class KeychainHelper {
         writeString(nil, account: "hermit.openai-key")
     }
 
+    // MARK: - Per-account token store (AccountStore)
+
+    func readAccountToken(key: String) -> String? {
+        readString(account: key)
+    }
+
+    func writeAccountToken(_ token: String, key: String) {
+        writeString(token.isEmpty ? nil : token, account: key)
+    }
+
+    func deleteAccountToken(key: String) {
+        writeString(nil, account: key)
+    }
+
     // MARK: - Paired device token store
 
     func loadPairedTokens() -> [String: String] {

@@ -16,7 +16,10 @@ struct HermitNativeApp: App {
     @StateObject private var pairingBrowser = PairingBrowser()
 #endif
 
-    init() {}
+    init() {
+        // Migrate legacy single-account config into AccountStore on first launch.
+        AccountStore.shared.migrateIfNeeded()
+    }
 
     var body: some Scene {
 #if os(macOS)

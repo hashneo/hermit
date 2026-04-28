@@ -13,6 +13,7 @@
 		B001000C /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000D /* AppState.swift */; };
 		B001000E /* RFC.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000F /* RFC.swift */; };
 		B0010010 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010011 /* KeychainHelper.swift */; };
+		B001AC01 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001AC00 /* AccountStore.swift */; };
 		B0010012 /* GitHubAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010013 /* GitHubAPIClient.swift */; };
 		B0010014 /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010015 /* AIProvider.swift */; };
 		B0010016 /* AppleIntelligenceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010017 /* AppleIntelligenceProvider.swift */; };
@@ -68,6 +69,7 @@
 		B001000D /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		B001000F /* RFC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFC.swift; sourceTree = "<group>"; };
 		B0010011 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		B001AC00 /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
 		B0010013 /* GitHubAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubAPIClient.swift; sourceTree = "<group>"; };
 		B0010015 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
 		B0010017 /* AppleIntelligenceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleIntelligenceProvider.swift; sourceTree = "<group>"; };
@@ -181,6 +183,7 @@
 			isa = PBXGroup;
 			children = (
 				B0010011 /* KeychainHelper.swift */,
+				B001AC00 /* AccountStore.swift */,
 				B001D011 /* ConfigStore.swift */,
 				B001D006 /* BookmarkStore.swift */,
 				B001004C /* GiteaAutoConfig.swift */,
@@ -367,6 +370,7 @@
 				B001D002 /* SpotlightDonor.swift in Sources */,
 				B001000E /* RFC.swift in Sources */,
 				B0010010 /* KeychainHelper.swift in Sources */,
+				B001AC01 /* AccountStore.swift in Sources */,
 				B001D010 /* ConfigStore.swift in Sources */,
 				B001D005 /* BookmarkStore.swift in Sources */,
 				B001004B /* GiteaAutoConfig.swift in Sources */,
