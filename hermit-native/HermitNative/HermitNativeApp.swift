@@ -142,7 +142,11 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
                         rfcLabel:  detected.rfcLabel
                     ))
                     ConfigStore.shared.serverBaseURL = detected.baseURL
-                    if !detected.pat.isEmpty { KeychainHelper.shared.pat = detected.pat }
+                    if !detected.pat.isEmpty {
+                        if let active = AccountStore.shared.active {
+                            AccountStore.shared.update(active, token: detected.pat)
+                        }
+                    }
                 } else {
                     do {
                         let detected = try GiteaAutoConfig.promptAndDetect()

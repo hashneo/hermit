@@ -275,7 +275,7 @@ final class EmbeddedServerManager: ObservableObject {
         let pat: String
         if let conn = accountStore.active {
             endpoint = conn.endpoint
-            pat      = KeychainHelper.shared.readAccountToken(key: conn.keychainKey) ?? ""
+            pat      = AccountStore.shared.token(for: conn) ?? ""
         } else {
             // Fall back to legacy AppState values during first-launch migration.
             endpoint = appState.giteaBaseURL.isEmpty ? appState.baseURL : appState.giteaBaseURL

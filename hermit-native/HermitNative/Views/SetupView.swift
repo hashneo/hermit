@@ -192,7 +192,9 @@ struct SetupView: View {
                 ConfigStore.shared.apply(repoConfig)
                 ConfigStore.shared.serverBaseURL = url
                 ConfigStore.shared.serverMode    = .embeddedLocal
-                KeychainHelper.shared.pat = token
+                if let active = AccountStore.shared.active {
+                    AccountStore.shared.update(active, token: token)
+                }
                 await MainActor.run {
                     appState.applyConfig()
                 }

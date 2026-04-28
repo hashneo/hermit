@@ -137,7 +137,11 @@ final class AppState: ObservableObject {
                 docsPath: detected.docsPath,
                 rfcLabel: detected.rfcLabel
             ))
-            if !detected.pat.isEmpty { KeychainHelper.shared.pat = detected.pat }
+            if !detected.pat.isEmpty {
+                if let active = AccountStore.shared.active {
+                    AccountStore.shared.update(active, token: detected.pat)
+                }
+            }
             debugLog("loaded from bundled config — \(detected.owner)/\(detected.repo) @ \(detected.baseURL)")
             pendingHandoffRFCID = UserDefaults.standard.string(forKey: RestoreKey.rfcID)
             return
@@ -146,10 +150,12 @@ final class AppState: ObservableObject {
         }
 #endif
         // Release builds (and debug fallback when bundled config is absent):
-        // Non-secret config lives in UserDefaults (ConfigStore); PAT in Keychain.
+        // Non-secret config lives in UserDefaults (ConfigStore); PAT in Keychain (release)
+        // or UserDefaults via the Connection struct (debug).
         let cs = ConfigStore.shared
-        let kc = KeychainHelper.shared
-        let resolvedPAT   = kc.pat ?? ""
+        let resolvedPAT   = AccountStore.shared.active.flatMap {
+            AccountStore.shared.token(for: $0)
+        } ?? ""
         pat               = resolvedPAT
         baseURL           = cs.baseURL   ?? ""
         giteaBaseURL      = ""
@@ -168,11 +174,12 @@ final class AppState: ObservableObject {
         pendingHandoffRFCID = UserDefaults.standard.string(forKey: RestoreKey.rfcID)
     }
 
-    /// Refreshes published state from ConfigStore + Keychain (call after saving settings).
+    /// Refreshes published state from ConfigStore + Keychain/UserDefaults (call after saving settings).
     func applyConfig() {
         let cs = ConfigStore.shared
-        let kc = KeychainHelper.shared
-        pat           = kc.pat ?? ""
+        pat           = AccountStore.shared.active.flatMap {
+            AccountStore.shared.token(for: $0)
+        } ?? ""
         baseURL       = cs.baseURL   ?? ""
         repoOwner     = cs.repoOwner ?? ""
         repoName      = cs.repoName  ?? ""

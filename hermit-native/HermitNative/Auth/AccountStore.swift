@@ -4,13 +4,51 @@ import Combine
 // MARK: - Connection
 
 /// A named server connection with its own endpoint and PAT.
-struct Connection: Identifiable, Codable, Equatable {
+///
+/// In DEBUG builds the PAT is stored directly on this struct so it persists
+/// in UserDefaults alongside the other connection fields — no Keychain prompts
+/// during development. In Release builds `token` is excluded from Codable and
+/// the PAT lives exclusively in the Keychain.
+struct Connection: Identifiable, Equatable {
     var id:       UUID   = UUID()
     var name:     String          // e.g. "HashiCorp Gitea"
     var endpoint: String          // e.g. "https://gitea.example.com"
+#if DEBUG
+    var token:    String? = nil   // stored in UserDefaults in debug builds only
+#endif
 
-    // token lives in Keychain — not in this struct
     var keychainKey: String { "hermit.account.\(id.uuidString)" }
+}
+
+// MARK: Connection + Codable
+
+extension Connection: Codable {
+    enum CodingKeys: String, CodingKey {
+        case id, name, endpoint
+#if DEBUG
+        case token
+#endif
+    }
+
+    init(from decoder: Decoder) throws {
+        let c    = try decoder.container(keyedBy: CodingKeys.self)
+        id       = try c.decode(UUID.self,   forKey: .id)
+        name     = try c.decode(String.self, forKey: .name)
+        endpoint = try c.decode(String.self, forKey: .endpoint)
+#if DEBUG
+        token    = try c.decodeIfPresent(String.self, forKey: .token)
+#endif
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id,       forKey: .id)
+        try c.encode(name,     forKey: .name)
+        try c.encode(endpoint, forKey: .endpoint)
+#if DEBUG
+        try c.encodeIfPresent(token, forKey: .token)
+#endif
+    }
 }
 
 // MARK: - Repository
@@ -60,10 +98,14 @@ final class AccountStore: ObservableObject {
         if conns.isEmpty {
             if let endpoint = UserDefaults.standard.string(forKey: "hermit.serverBaseURL"),
                !endpoint.isEmpty {
-                let conn = Connection(name: "Default", endpoint: endpoint)
+                var conn = Connection(name: "Default", endpoint: endpoint)
                 // Migrate token from legacy hermit.pat key if present
                 let legacyToken = KeychainHelper.shared.readAccountToken(key: "hermit.pat") ?? ""
+#if DEBUG
+                conn.token = legacyToken.isEmpty ? nil : legacyToken
+#else
                 KeychainHelper.shared.writeAccountToken(legacyToken, key: conn.keychainKey)
+#endif
                 conns = [conn]
                 AccountStore.saveToDefaults(connections: conns, activeID: conn.id)
             }
@@ -76,12 +118,15 @@ final class AccountStore: ObservableObject {
     // MARK: - Public API
 
     func add(name: String, endpoint: String, token: String) {
-        let conn = Connection(name: name, endpoint: endpoint)
+        var conn = Connection(name: name, endpoint: endpoint)
+#if DEBUG
+        conn.token = token.isEmpty ? nil : token
+#else
         KeychainHelper.shared.writeAccountToken(token, key: conn.keychainKey)
+#endif
         connections.append(conn)
         if connections.count == 1 {
             activeID = conn.id
-            // First account — restart so the server picks it up.
             restartEmbeddedServer()
         }
         save()
@@ -89,21 +134,28 @@ final class AccountStore: ObservableObject {
 
     func update(_ connection: Connection, token: String? = nil) {
         guard let idx = connections.firstIndex(where: { $0.id == connection.id }) else { return }
-        connections[idx] = connection
-        if let token { KeychainHelper.shared.writeAccountToken(token, key: connection.keychainKey) }
+        var updated = connection
+        if let token {
+#if DEBUG
+            updated.token = token.isEmpty ? nil : token
+#else
+            KeychainHelper.shared.writeAccountToken(token, key: connection.keychainKey)
+#endif
+        }
+        connections[idx] = updated
         save()
-        // Restart if the updated connection is the active one.
         if activeID == connection.id {
             restartEmbeddedServer()
         }
     }
 
     func remove(_ connection: Connection) {
+#if !DEBUG
         KeychainHelper.shared.deleteAccountToken(key: connection.keychainKey)
+#endif
         connections.removeAll { $0.id == connection.id }
         if activeID == connection.id {
             activeID = connections.first?.id
-            // Active account removed — server must restart with new active (or no) account.
             restartEmbeddedServer()
         }
         save()
@@ -116,7 +168,11 @@ final class AccountStore: ObservableObject {
     }
 
     func token(for connection: Connection) -> String? {
-        KeychainHelper.shared.readAccountToken(key: connection.keychainKey)
+#if DEBUG
+        return connection.token
+#else
+        return KeychainHelper.shared.readAccountToken(key: connection.keychainKey)
+#endif
     }
 
     // MARK: - Connectivity probe

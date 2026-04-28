@@ -91,8 +91,10 @@ struct MenuBarPATPromptView: View {
         Task {
             do {
                 try await HermitServerValidator.validate(serverURL: serverURL, pat: enteredPAT)
-                // Write just the PAT into the Keychain — leave everything else intact.
-                KeychainHelper.shared.pat = enteredPAT
+                // Write the PAT into the active account (Keychain in release, UserDefaults in debug).
+                if let active = AccountStore.shared.active {
+                    AccountStore.shared.update(active, token: enteredPAT)
+                }
                 await MainActor.run {
                     appState.pat = enteredPAT
                     appState.isAuthenticated = true

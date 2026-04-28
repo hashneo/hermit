@@ -3,17 +3,18 @@
 #
 # Bootstraps HermitNative for a local dev session:
 #
-#   Keychain     → PAT only (service=HermitNative account=hermit.pat)
-#   UserDefaults → all non-secret config (bundle ID: com.hermit.HermitNative)
+#   UserDefaults → all config including PAT (debug builds store token in UserDefaults)
+#   Keychain     → PAT also written for release builds (skipped with --no-keychain)
 #
-# This mirrors the KeychainHelper + ConfigStore split in the Swift app so the
-# app starts fully configured without Keychain prompts on every rebuild.
+# In DEBUG builds the Swift app reads the token directly from the Connection JSON
+# stored in UserDefaults (hermit.accounts), so no Keychain prompt is needed.
+# In Release builds the token field in the JSON is ignored and the Keychain is used.
 #
 # Usage:
 #   scripts/install-keychain-pat.sh [--no-keychain] [PAT] [HERMIT_YAML_PATH]
 #
-#   --no-keychain  Skip writing the PAT to Keychain (useful in CI or when the
-#                  PAT is managed separately). UserDefaults config is still written.
+#   --no-keychain  Skip writing the PAT to Keychain (debug builds don't need it).
+#                  UserDefaults config (including token in JSON) is still written.
 #
 # When called with no arguments it reads the PAT from .tmp/gitea-token.env
 # and the config from config/hermit.yaml (both relative to the repo root).
@@ -179,25 +180,12 @@ if [ -z "${BUNDLE_ID}" ] || echo "${BUNDLE_ID}" | grep -q "yourname"; then
     exit 1
 fi
 
-# ── 1. Write PAT to Keychain (service=HermitNative account=hermit.pat) ────────
+# ── 1. Write PAT to Keychain (service=HermitNative account=hermit.account.<UUID>) ─
 
 if [ "${SKIP_KEYCHAIN}" = true ]; then
     printf 'Skipping Keychain (--no-keychain).\n'
 else
     printf 'Installing PAT into Keychain...\n'
-    security delete-generic-password \
-        -a "hermit.pat" \
-        -s "HermitNative" 2>/dev/null || true
-
-    security add-generic-password \
-        -a "hermit.pat" \
-        -s "HermitNative" \
-        -w "${PAT}" \
-        -T "" \
-        -U
-
-    # Also store under the per-account key used by AccountStore so the
-    # connectivity probe can authenticate. Fixed UUID matches write_defaults().
     security delete-generic-password \
         -a "hermit.account.00000000-0000-0000-0000-000000000001" \
         -s "HermitNative" 2>/dev/null || true
@@ -235,8 +223,10 @@ write_defaults() {
     # Seed AccountStore with the default dev connection so the Account tab
     # shows a row without needing a runtime migration.
     # Use a fixed UUID so repeated runs are idempotent.
+    # token is included here — DEBUG builds read it directly from UserDefaults
+    # (no Keychain needed). Release builds ignore the token field in JSON.
     local ACCOUNT_UUID="00000000-0000-0000-0000-000000000001"
-    local ACCOUNTS_JSON="[{\"id\":\"${ACCOUNT_UUID}\",\"name\":\"Default (Gitea)\",\"endpoint\":\"${HERMIT_SERVER_URL}\"}]"
+    local ACCOUNTS_JSON="[{\"id\":\"${ACCOUNT_UUID}\",\"name\":\"Default (Gitea)\",\"endpoint\":\"${HERMIT_SERVER_URL}\",\"token\":\"${PAT}\"}]"
     defaults write "${domain}" hermit.accounts         -string "${ACCOUNTS_JSON}"
     defaults write "${domain}" hermit.accounts.activeID -string "${ACCOUNT_UUID}"
 
