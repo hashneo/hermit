@@ -29,7 +29,7 @@ struct SettingsView: View {
 // MARK: - Account tab
 
 private struct AccountSettingsTab: View {
-    @StateObject private var store = AccountStore.shared
+    @ObservedObject private var store = AccountStore.shared
     @State private var showAddSheet  = false
     @State private var editTarget: Connection? = nil
     @State private var revokeTarget: Connection? = nil
@@ -125,7 +125,7 @@ private struct AccountSettingsTab: View {
 // MARK: - Connection state indicator
 
 private struct ConnectionStateView: View {
-    @StateObject private var store = AccountStore.shared
+    @ObservedObject private var store = AccountStore.shared
     let connection: Connection
 
     var body: some View {
@@ -142,7 +142,7 @@ private struct ConnectionStateView: View {
 // MARK: - Add account sheet
 
 private struct AddAccountSheet: View {
-    @StateObject private var store = AccountStore.shared
+    @ObservedObject private var store = AccountStore.shared
     @Binding var isPresented: Bool
 
     @State private var name     = ""
@@ -205,7 +205,7 @@ private struct AddAccountSheet: View {
 // MARK: - Edit account sheet
 
 private struct EditAccountSheet: View {
-    @StateObject private var store = AccountStore.shared
+    @ObservedObject private var store = AccountStore.shared
     let connection: Connection
     @Binding var isPresented: Bool
 
@@ -273,7 +273,7 @@ private struct EditAccountSheet: View {
 
 private struct RepositorySettingsTab: View {
     @EnvironmentObject private var appState: AppState
-    @StateObject private var store = AccountStore.shared
+    @ObservedObject private var store = AccountStore.shared
 
     var body: some View {
         Table([repoRow]) {
