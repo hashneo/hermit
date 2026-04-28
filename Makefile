@@ -228,20 +228,17 @@ reset: ## Full reset: kill app, destroy Gitea container + data, remove keychain 
 	@$(MAKE) gitea-reset
 	@echo "Removing cached token..."
 	@rm -f .tmp/gitea-token.env .tmp/gitea-token-export.sh
-	@echo "Removing Keychain PAT..."
-	@security delete-generic-password -a "hermit.pat" -s "HermitNative" 2>/dev/null || true
-	@echo "Removing UserDefaults config..."
+	@echo "Removing Keychain entries..."
+	@# Delete all per-account tokens (hermit.account.<UUID>)
+	@security dump-keychain 2>/dev/null | awk -F'"' '/acct.*hermit\.account\./{print $$4}' | \
+		while read acct; do security delete-generic-password -a "$$acct" -s "HermitNative" 2>/dev/null || true; done
+	@echo "Removing UserDefaults and sandbox container..."
 	@BUNDLE_ID=$$(grep -E '^HERMIT_BUNDLE_ID\s*=' hermit-native/Local.xcconfig 2>/dev/null | head -1 | sed 's/.*=[ \t]*//;s/[[:space:]]*//g'); \
 		if [ -n "$$BUNDLE_ID" ]; then \
 			defaults delete "$$BUNDLE_ID" 2>/dev/null || true; \
-			SANDBOX_PLIST="$(HOME)/Library/Containers/$$BUNDLE_ID/Data/Library/Preferences/$$BUNDLE_ID.plist"; \
-			if [ -f "$$SANDBOX_PLIST" ]; then defaults delete "$$SANDBOX_PLIST" 2>/dev/null || true; fi; \
-			NONSANDBOX_PLIST="$(HOME)/Library/Preferences/$$BUNDLE_ID.plist"; \
-			if [ -f "$$NONSANDBOX_PLIST" ]; then \
-				for KEY in hermit.baseURL hermit.serverBaseURL hermit.repoOwner hermit.repoName hermit.docsPath hermit.rfcLabel hermit.serverMode; do \
-					defaults delete "$$NONSANDBOX_PLIST" "$$KEY" 2>/dev/null || true; \
-				done; \
-			fi; \
+			rm -f "$(HOME)/Library/Preferences/$$BUNDLE_ID.plist"; \
+			rm -rf "$(HOME)/Library/Containers/$$BUNDLE_ID"; \
+			echo "  cleared: $$BUNDLE_ID"; \
 		fi
 	@echo "Removing thread store..."
 	@rm -f data/hermit/threads.json
@@ -263,8 +260,6 @@ ipad-deploy: ## Build and push to connected iPad (requires Developer Mode enable
 		-configuration Debug \
 		-derivedDataPath $(NATIVE_BUILD_DIR) \
 		-allowProvisioningUpdates \
-		EXCLUDED_SOURCE_FILE_NAMES="HermitServer.xcframework" \
-		OTHER_SWIFT_FLAGS="-DDEBUG" \
 		build
 	@echo "Installing on iPad..."
 	DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl device install app \
