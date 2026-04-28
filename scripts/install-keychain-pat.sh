@@ -196,6 +196,19 @@ else
         -T "" \
         -U
 
+    # Also store under the per-account key used by AccountStore so the
+    # connectivity probe can authenticate. Fixed UUID matches write_defaults().
+    security delete-generic-password \
+        -a "hermit.account.00000000-0000-0000-0000-000000000001" \
+        -s "HermitNative" 2>/dev/null || true
+
+    security add-generic-password \
+        -a "hermit.account.00000000-0000-0000-0000-000000000001" \
+        -s "HermitNative" \
+        -w "${PAT}" \
+        -T "" \
+        -U
+
     printf '  PAT → (set)\n'
 fi
 
@@ -218,6 +231,14 @@ write_defaults() {
     defaults write "${domain}" hermit.docsPath      "${DOCS_PATH}"
     defaults write "${domain}" hermit.rfcLabel      "${RFC_LABEL}"
     defaults write "${domain}" hermit.serverMode    -string '{"type":"embeddedLocal"}'
+
+    # Seed AccountStore with the default dev connection so the Account tab
+    # shows a row without needing a runtime migration.
+    # Use a fixed UUID so repeated runs are idempotent.
+    local ACCOUNT_UUID="00000000-0000-0000-0000-000000000001"
+    local ACCOUNTS_JSON="[{\"id\":\"${ACCOUNT_UUID}\",\"name\":\"Default (Gitea)\",\"endpoint\":\"${HERMIT_SERVER_URL}\"}]"
+    defaults write "${domain}" hermit.accounts         -string "${ACCOUNTS_JSON}"
+    defaults write "${domain}" hermit.accounts.activeID -string "${ACCOUNT_UUID}"
 }
 
 printf 'Writing config to UserDefaults (global: %s)...\n' "${BUNDLE_ID}"
