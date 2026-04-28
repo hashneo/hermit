@@ -61,8 +61,9 @@ final class AccountStore: ObservableObject {
             if let endpoint = UserDefaults.standard.string(forKey: "hermit.serverBaseURL"),
                !endpoint.isEmpty {
                 let conn = Connection(name: "Default", endpoint: endpoint)
-                let token = KeychainHelper.shared.pat ?? ""
-                KeychainHelper.shared.writeAccountToken(token, key: conn.keychainKey)
+                // Migrate token from legacy hermit.pat key if present
+                let legacyToken = KeychainHelper.shared.readAccountToken(key: "hermit.pat") ?? ""
+                KeychainHelper.shared.writeAccountToken(legacyToken, key: conn.keychainKey)
                 conns = [conn]
                 AccountStore.saveToDefaults(connections: conns, activeID: conn.id)
             }
@@ -78,7 +79,11 @@ final class AccountStore: ObservableObject {
         let conn = Connection(name: name, endpoint: endpoint)
         KeychainHelper.shared.writeAccountToken(token, key: conn.keychainKey)
         connections.append(conn)
-        if connections.count == 1 { activeID = conn.id }
+        if connections.count == 1 {
+            activeID = conn.id
+            // First account — restart so the server picks it up.
+            restartEmbeddedServer()
+        }
         save()
     }
 
@@ -87,18 +92,27 @@ final class AccountStore: ObservableObject {
         connections[idx] = connection
         if let token { KeychainHelper.shared.writeAccountToken(token, key: connection.keychainKey) }
         save()
+        // Restart if the updated connection is the active one.
+        if activeID == connection.id {
+            restartEmbeddedServer()
+        }
     }
 
     func remove(_ connection: Connection) {
         KeychainHelper.shared.deleteAccountToken(key: connection.keychainKey)
         connections.removeAll { $0.id == connection.id }
-        if activeID == connection.id { activeID = connections.first?.id }
+        if activeID == connection.id {
+            activeID = connections.first?.id
+            // Active account removed — server must restart with new active (or no) account.
+            restartEmbeddedServer()
+        }
         save()
     }
 
     func setActive(_ connection: Connection) {
         activeID = connection.id
         UserDefaults.standard.set(connection.id.uuidString, forKey: activeIDKey)
+        restartEmbeddedServer()
     }
 
     func token(for connection: Connection) -> String? {
@@ -117,13 +131,22 @@ final class AccountStore: ObservableObject {
         let base = connection.endpoint
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard let url = URL(string: "\(base)/api/v1/health") else { return }
+
+        // Pick the right health endpoint based on the server type:
+        //   GitHub → GET /user  (returns 200 with valid token, 401 without)
+        //   Gitea/Hermit → GET /api/v1/health
+        let isGitHub = base.contains("github.com")
+        let healthPath = isGitHub ? "/user" : "/api/v1/health"
+        guard let url = URL(string: "\(base)\(healthPath)") else { return }
+
         var req = URLRequest(url: url, timeoutInterval: 8)
         if let token = token(for: connection) {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         do {
             let (_, resp) = try await URLSession.shared.data(for: req)
+            // GitHub /user returns 401 with no/bad token — treat that as reachable but
+            // still mark disconnected so the user knows the token is wrong.
             let ok = (resp as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
             if ok { connectedIDs.insert(connection.id) } else { connectedIDs.remove(connection.id) }
         } catch {
@@ -142,13 +165,21 @@ final class AccountStore: ObservableObject {
 
     private static func loadFromDefaults() -> ([Connection], UUID?) {
         let defaults = UserDefaults.standard
+        let rawString = defaults.string(forKey: "hermit.accounts")
+        let rawData   = defaults.data(forKey: "hermit.accounts")
+        NSLog("[AccountStore] hermit.accounts string=%@ data=%db",
+              rawString ?? "nil", rawData?.count ?? -1)
         var conns: [Connection] = []
-        // The bootstrap script writes the value with `defaults write -string '...'`
-        // which stores it as a plist String, not Data. Support both.
-        if let data = defaults.data(forKey: "hermit.accounts") ??
-                      defaults.string(forKey: "hermit.accounts")?.data(using: .utf8),
-           let decoded = try? JSONDecoder().decode([Connection].self, from: data) {
-            conns = decoded
+        if let data = rawData ?? rawString?.data(using: .utf8) {
+            do {
+                conns = try JSONDecoder().decode([Connection].self, from: data)
+                NSLog("[AccountStore] decoded %d connection(s): %@",
+                      conns.count, conns.map(\.name).joined(separator: ", "))
+            } catch {
+                NSLog("[AccountStore] decode error: %@", error.localizedDescription)
+            }
+        } else {
+            NSLog("[AccountStore] no data found for hermit.accounts")
         }
         var activeID: UUID? = nil
         if let raw = defaults.string(forKey: "hermit.accounts.activeID"),
@@ -193,7 +224,11 @@ final class RepositoryStore: ObservableObject {
         let repo = Repository(accountID: accountID, owner: owner, name: name,
                               docsPath: docsPath, rfcLabel: rfcLabel)
         repositories.append(repo)
-        if repositories.count == 1 { activeID = repo.id }
+        if repositories.count == 1 {
+            activeID = repo.id
+            // First repo — restart so the server picks it up.
+            restartEmbeddedServer()
+        }
         save()
     }
 
@@ -201,17 +236,26 @@ final class RepositoryStore: ObservableObject {
         guard let idx = repositories.firstIndex(where: { $0.id == repo.id }) else { return }
         repositories[idx] = repo
         save()
+        // Restart if the updated repo is the active one.
+        if activeID == repo.id {
+            restartEmbeddedServer()
+        }
     }
 
     func remove(_ repo: Repository) {
         repositories.removeAll { $0.id == repo.id }
-        if activeID == repo.id { activeID = repositories.first?.id }
+        if activeID == repo.id {
+            activeID = repositories.first?.id
+            // Active repo removed — server must restart with new active (or no) repo.
+            restartEmbeddedServer()
+        }
         save()
     }
 
     func setActive(_ repo: Repository) {
         activeID = repo.id
         UserDefaults.standard.set(repo.id.uuidString, forKey: "hermit.repositories.activeID")
+        restartEmbeddedServer()
     }
 
     // MARK: - Private
@@ -261,4 +305,15 @@ final class RepositoryStore: ObservableObject {
             defaults.set(id.uuidString, forKey: "hermit.repositories.activeID")
         }
     }
+}
+
+// MARK: - Embedded server restart helper
+
+/// Restarts the embedded Go server so it picks up the latest active account/repo.
+/// No-op on iOS where EmbeddedServerManager does not exist.
+@MainActor
+private func restartEmbeddedServer() {
+#if os(macOS)
+    EmbeddedServerManager.shared.restart()
+#endif
 }

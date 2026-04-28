@@ -264,13 +264,47 @@ final class EmbeddedServerManager: ObservableObject {
 
     private func buildConfigJSON(appState: AppState) -> String {
         let dataDir = Self.appSupportDirectory()
+
+        // Prefer live AccountStore/RepositoryStore over the stale AppState snapshot so
+        // that a setActive() call immediately takes effect without requiring a full
+        // AppState.applyConfig() pass first.
+        let accountStore = AccountStore.shared
+        let repoStore    = RepositoryStore.shared
+
+        let endpoint: String
+        let pat: String
+        if let conn = accountStore.active {
+            endpoint = conn.endpoint
+            pat      = KeychainHelper.shared.readAccountToken(key: conn.keychainKey) ?? ""
+        } else {
+            // Fall back to legacy AppState values during first-launch migration.
+            endpoint = appState.giteaBaseURL.isEmpty ? appState.baseURL : appState.giteaBaseURL
+            pat      = appState.pat
+        }
+
+        let owner:    String
+        let repoName: String
+        let docsPath: String
+        let rfcLabel: String
+        if let repo = repoStore.active {
+            owner    = repo.owner
+            repoName = repo.name
+            docsPath = repo.docsPath
+            rfcLabel = repo.rfcLabel
+        } else {
+            owner    = appState.repoOwner
+            repoName = appState.repoName
+            docsPath = appState.docsPath
+            rfcLabel = appState.rfcLabel
+        }
+
         let payload: [String: String] = [
-            "baseURL":  appState.giteaBaseURL.isEmpty ? appState.baseURL : appState.giteaBaseURL,
-            "pat":      appState.pat,
-            "owner":    appState.repoOwner,
-            "repo":     appState.repoName,
-            "docsPath": appState.docsPath,
-            "rfcLabel": appState.rfcLabel,
+            "baseURL":  endpoint,
+            "pat":      pat,
+            "owner":    owner,
+            "repo":     repoName,
+            "docsPath": docsPath,
+            "rfcLabel": rfcLabel,
             "dataDir":  dataDir,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
