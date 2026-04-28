@@ -17,8 +17,9 @@ struct HermitNativeApp: App {
 #endif
 
     init() {
-        // Migrate legacy single-account config into AccountStore on first launch.
-        AccountStore.shared.migrateIfNeeded()
+        // AccountStore.shared initialises itself — migration from legacy
+        // single-account config happens synchronously in its init().
+        _ = AccountStore.shared
     }
 
     var body: some Scene {

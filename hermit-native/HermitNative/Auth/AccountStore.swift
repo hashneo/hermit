@@ -35,7 +35,27 @@ final class AccountStore: ObservableObject {
     private let activeIDKey    = "hermit.accounts.activeID"
 
     private init() {
-        load()
+        // load() and migrateIfNeeded() only touch UserDefaults/Keychain — both
+        // thread-safe — so it is safe to call them here before the main actor
+        // is fully running. We assign directly to the stored properties rather
+        // than going through @Published so there is no actor boundary to cross.
+        let (loaded, activeID) = AccountStore.loadFromDefaults()
+        var conns = loaded
+
+        // Migrate legacy single-account config when no accounts exist yet.
+        if conns.isEmpty {
+            if let endpoint = UserDefaults.standard.string(forKey: "hermit.serverBaseURL"),
+               !endpoint.isEmpty {
+                let conn = Connection(name: "Default", endpoint: endpoint)
+                let token = KeychainHelper.shared.pat ?? ""
+                KeychainHelper.shared.writeAccountToken(token, key: conn.keychainKey)
+                conns = [conn]
+                AccountStore.saveToDefaults(connections: conns, activeID: conn.id)
+            }
+        }
+
+        self.connections = conns
+        self.activeID = activeID ?? conns.first?.id
     }
 
     // MARK: - Public API
@@ -64,7 +84,7 @@ final class AccountStore: ObservableObject {
 
     func setActive(_ connection: Connection) {
         activeID = connection.id
-        defaults.set(connection.id.uuidString, forKey: activeIDKey)
+        UserDefaults.standard.set(connection.id.uuidString, forKey: activeIDKey)
     }
 
     func token(for connection: Connection) -> String? {
@@ -98,42 +118,36 @@ final class AccountStore: ObservableObject {
         objectWillChange.send()
     }
 
-    // MARK: - Migration
-
-    /// Called once at launch to import the legacy single-account config.
-    func migrateIfNeeded() {
-        guard connections.isEmpty,
-              let endpoint = ConfigStore.shared.serverBaseURL,
-              !endpoint.isEmpty else { return }
-
-        let name  = "Default"
-        let token = KeychainHelper.shared.pat ?? ""
-        add(name: name, endpoint: endpoint, token: token)
-    }
-
     // MARK: - Private
 
     private var connectedIDs: Set<UUID> = []
 
-    private func load() {
-        if let data = defaults.data(forKey: connectionsKey),
-           let decoded = try? JSONDecoder().decode([Connection].self, from: data) {
-            connections = decoded
-        }
-        if let raw = defaults.string(forKey: activeIDKey),
-           let uuid = UUID(uuidString: raw) {
-            activeID = uuid
-        } else {
-            activeID = connections.first?.id
-        }
+    private func save() {
+        AccountStore.saveToDefaults(connections: connections, activeID: activeID)
     }
 
-    private func save() {
+    private static func loadFromDefaults() -> ([Connection], UUID?) {
+        let defaults = UserDefaults.standard
+        var conns: [Connection] = []
+        if let data = defaults.data(forKey: "hermit.accounts"),
+           let decoded = try? JSONDecoder().decode([Connection].self, from: data) {
+            conns = decoded
+        }
+        var activeID: UUID? = nil
+        if let raw = defaults.string(forKey: "hermit.accounts.activeID"),
+           let uuid = UUID(uuidString: raw) {
+            activeID = uuid
+        }
+        return (conns, activeID)
+    }
+
+    private static func saveToDefaults(connections: [Connection], activeID: UUID?) {
+        let defaults = UserDefaults.standard
         if let data = try? JSONEncoder().encode(connections) {
-            defaults.set(data, forKey: connectionsKey)
+            defaults.set(data, forKey: "hermit.accounts")
         }
         if let id = activeID {
-            defaults.set(id.uuidString, forKey: activeIDKey)
+            defaults.set(id.uuidString, forKey: "hermit.accounts.activeID")
         }
     }
 }
