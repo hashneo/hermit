@@ -239,6 +239,12 @@ write_defaults() {
     local ACCOUNTS_JSON="[{\"id\":\"${ACCOUNT_UUID}\",\"name\":\"Default (Gitea)\",\"endpoint\":\"${HERMIT_SERVER_URL}\"}]"
     defaults write "${domain}" hermit.accounts         -string "${ACCOUNTS_JSON}"
     defaults write "${domain}" hermit.accounts.activeID -string "${ACCOUNT_UUID}"
+
+    # Seed RepositoryStore with the default dev repo linked to the account above.
+    local REPO_UUID="00000000-0000-0000-0000-000000000002"
+    local REPOS_JSON="[{\"id\":\"${REPO_UUID}\",\"accountID\":\"${ACCOUNT_UUID}\",\"owner\":\"${REPO_OWNER}\",\"name\":\"${REPO_NAME}\",\"docsPath\":\"${DOCS_PATH}\",\"rfcLabel\":\"${RFC_LABEL}\"}]"
+    defaults write "${domain}" hermit.repositories         -string "${REPOS_JSON}"
+    defaults write "${domain}" hermit.repositories.activeID -string "${REPO_UUID}"
 }
 
 printf 'Writing config to UserDefaults (global: %s)...\n' "${BUNDLE_ID}"

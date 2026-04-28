@@ -13,6 +13,20 @@ struct Connection: Identifiable, Codable, Equatable {
     var keychainKey: String { "hermit.account.\(id.uuidString)" }
 }
 
+// MARK: - Repository
+
+/// A repository belonging to an account (connection).
+struct Repository: Identifiable, Codable, Equatable {
+    var id:        UUID   = UUID()
+    var accountID: UUID           // foreign key → Connection.id
+    var owner:     String         // e.g. "gitea_admin"
+    var name:      String         // e.g. "hermit-rfcs"
+    var docsPath:  String         // e.g. "docs-cms/rfcs"
+    var rfcLabel:  String         // e.g. "hermit:rfc-ready"
+
+    var fullName: String { "\(owner)/\(name)" }
+}
+
 // MARK: - AccountStore
 
 /// Observable store for all named server connections.
@@ -129,7 +143,10 @@ final class AccountStore: ObservableObject {
     private static func loadFromDefaults() -> ([Connection], UUID?) {
         let defaults = UserDefaults.standard
         var conns: [Connection] = []
-        if let data = defaults.data(forKey: "hermit.accounts"),
+        // The bootstrap script writes the value with `defaults write -string '...'`
+        // which stores it as a plist String, not Data. Support both.
+        if let data = defaults.data(forKey: "hermit.accounts") ??
+                      defaults.string(forKey: "hermit.accounts")?.data(using: .utf8),
            let decoded = try? JSONDecoder().decode([Connection].self, from: data) {
             conns = decoded
         }
@@ -148,6 +165,100 @@ final class AccountStore: ObservableObject {
         }
         if let id = activeID {
             defaults.set(id.uuidString, forKey: "hermit.accounts.activeID")
+        }
+    }
+}
+
+// MARK: - RepositoryStore
+
+/// Observable store for all saved repositories, grouped by account.
+///
+/// - Persists in UserDefaults as JSON under `hermit.repositories`.
+/// - `activeID` is the repository currently loaded in the main RFC view.
+@MainActor
+final class RepositoryStore: ObservableObject {
+    static let shared = RepositoryStore()
+
+    @Published private(set) var repositories: [Repository] = []
+    @Published private(set) var activeID: UUID? = nil
+
+    var active: Repository? { repositories.first { $0.id == activeID } }
+
+    func repos(for account: Connection) -> [Repository] {
+        repositories.filter { $0.accountID == account.id }
+    }
+
+    func add(accountID: UUID, owner: String, name: String,
+             docsPath: String = "docs-cms/rfcs", rfcLabel: String = "hermit:rfc-ready") {
+        let repo = Repository(accountID: accountID, owner: owner, name: name,
+                              docsPath: docsPath, rfcLabel: rfcLabel)
+        repositories.append(repo)
+        if repositories.count == 1 { activeID = repo.id }
+        save()
+    }
+
+    func update(_ repo: Repository) {
+        guard let idx = repositories.firstIndex(where: { $0.id == repo.id }) else { return }
+        repositories[idx] = repo
+        save()
+    }
+
+    func remove(_ repo: Repository) {
+        repositories.removeAll { $0.id == repo.id }
+        if activeID == repo.id { activeID = repositories.first?.id }
+        save()
+    }
+
+    func setActive(_ repo: Repository) {
+        activeID = repo.id
+        UserDefaults.standard.set(repo.id.uuidString, forKey: "hermit.repositories.activeID")
+    }
+
+    // MARK: - Private
+
+    private init() {
+        let defaults = UserDefaults.standard
+
+        // Load repositories — support both Data and String storage (bootstrap script writes -string)
+        if let data = defaults.data(forKey: "hermit.repositories") ??
+                      defaults.string(forKey: "hermit.repositories")?.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode([Repository].self, from: data) {
+            repositories = decoded
+        }
+
+        if let raw = defaults.string(forKey: "hermit.repositories.activeID"),
+           let uuid = UUID(uuidString: raw) {
+            activeID = uuid
+        } else {
+            activeID = repositories.first?.id
+        }
+
+        // Migrate legacy single-repo config when no repos exist yet
+        if repositories.isEmpty {
+            let ud = UserDefaults.standard
+            let owner = ud.string(forKey: "hermit.repoOwner") ?? ""
+            let name  = ud.string(forKey: "hermit.repoName")  ?? ""
+            // accountID: try to match the fixed dev UUID seeded by the script
+            let accountID = UUID(uuidString: "00000000-0000-0000-0000-000000000001") ?? UUID()
+            if !owner.isEmpty, !name.isEmpty {
+                let docs  = ud.string(forKey: "hermit.docsPath")  ?? "docs-cms/rfcs"
+                let label = ud.string(forKey: "hermit.rfcLabel")  ?? "hermit:rfc-ready"
+                let repo  = Repository(accountID: accountID, owner: owner, name: name,
+                                       docsPath: docs, rfcLabel: label)
+                repositories = [repo]
+                activeID     = repo.id
+                save()
+            }
+        }
+    }
+
+    private func save() {
+        let defaults = UserDefaults.standard
+        if let data = try? JSONEncoder().encode(repositories) {
+            defaults.set(data, forKey: "hermit.repositories")
+        }
+        if let id = activeID {
+            defaults.set(id.uuidString, forKey: "hermit.repositories.activeID")
         }
     }
 }

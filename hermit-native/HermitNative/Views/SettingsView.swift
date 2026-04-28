@@ -272,94 +272,238 @@ private struct EditAccountSheet: View {
 // MARK: - Repository tab
 
 private struct RepositorySettingsTab: View {
-    @EnvironmentObject private var appState: AppState
-    @ObservedObject private var store = AccountStore.shared
+    @ObservedObject private var accountStore = AccountStore.shared
+    @ObservedObject private var repoStore    = RepositoryStore.shared
+    @State private var showAddSheet  = false
+    @State private var editTarget:   Repository? = nil
+    @State private var deleteTarget: Repository? = nil
+    @State private var selection:    Set<UUID>   = []
 
     var body: some View {
-        Table([repoRow]) {
-            TableColumn("Account") { _ in
-                Text(store.active?.name ?? "—")
-                    .foregroundStyle(store.active == nil ? .secondary : .primary)
+        VStack(spacing: 0) {
+            // ── Toolbar ──────────────────────────────────────────────────
+            HStack {
+                Spacer()
+                Button { showAddSheet = true } label: {
+                    Label("Add Repository", systemImage: "plus")
+                }
+                .buttonStyle(.borderless)
+                .padding([.top, .trailing, .bottom], 8)
             }
-            TableColumn("Owner") { _ in
-                Text(appState.repoOwner.isEmpty ? "—" : appState.repoOwner)
-                    .foregroundStyle(appState.repoOwner.isEmpty ? .secondary : .primary)
-            }
-            TableColumn("Repository") { _ in
-                Text(appState.repoName.isEmpty ? "—" : appState.repoName)
-                    .foregroundStyle(appState.repoName.isEmpty ? .secondary : .primary)
-            }
-            TableColumn("Actions") { _ in
-                Button("Edit…") { /* handled by sheet below */ }
-                    .buttonStyle(.borderless)
-            }
-            .width(60)
-        }
-        .overlay {
-            // Tap anywhere on the single row opens the edit sheet — simpler than
-            // threading a binding through the TableColumn closure.
-            RepoEditOverlay()
-                .environmentObject(appState)
-        }
-    }
+            Divider()
 
-    // The Table API requires Identifiable rows; use a trivial wrapper.
-    private var repoRow: RepoRow { RepoRow() }
-}
-
-private struct RepoRow: Identifiable { let id = UUID() }
-
-// MARK: - Repo edit overlay (sits over the table, opens sheet on row tap)
-
-private struct RepoEditOverlay: View {
-    @EnvironmentObject private var appState: AppState
-    @State private var showSheet = false
-
-    var body: some View {
-        Color.clear
-            .contentShape(Rectangle())
-            .onTapGesture { showSheet = true }
-            .toolbar {
-                ToolbarItem(placement: .automatic) {
-                    Button { showSheet = true } label: {
-                        Label("Edit Repository", systemImage: "pencil")
+            // ── Table ─────────────────────────────────────────────────────
+            Table(repoStore.repositories, selection: $selection) {
+                TableColumn("Account") { repo in
+                    let acct = accountStore.connections.first { $0.id == repo.accountID }
+                    HStack(spacing: 6) {
+                        if repoStore.activeID == repo.id {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(Color.accentColor)
+                                .help("Active repository")
+                        }
+                        Text(acct?.name ?? "—")
+                            .foregroundStyle(acct == nil ? .secondary : .primary)
+                            .fontWeight(repoStore.activeID == repo.id ? .semibold : .regular)
                     }
                 }
+                .width(min: 120, ideal: 160)
+
+                TableColumn("Owner") { repo in
+                    Text(repo.owner)
+                }
+
+                TableColumn("Repository") { repo in
+                    Text(repo.name)
+                }
+
+                TableColumn("Actions") { repo in
+                    Menu {
+                        Button("Set Active") { repoStore.setActive(repo) }
+                        Divider()
+                        Button("Edit…") { editTarget = repo }
+                        Button("Delete", role: .destructive) { deleteTarget = repo }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .foregroundStyle(.secondary)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                }
+                .width(60)
             }
-            .sheet(isPresented: $showSheet) {
-                EditRepoSheet(isPresented: $showSheet)
-                    .environmentObject(appState)
+        }
+        .sheet(isPresented: $showAddSheet) {
+            AddRepoSheet(isPresented: $showAddSheet)
+        }
+        .sheet(item: $editTarget) { repo in
+            EditRepoSheet(repo: repo, isPresented: Binding(
+                get: { editTarget != nil },
+                set: { if !$0 { editTarget = nil } }
+            ))
+        }
+        .confirmationDialog(
+            "Delete \"\(deleteTarget?.fullName ?? "")\"?",
+            isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let r = deleteTarget { repoStore.remove(r) }
+                deleteTarget = nil
             }
+        }
     }
 }
 
-// MARK: - Edit repo sheet
+// MARK: - Add repository sheet
 
-private struct EditRepoSheet: View {
-    @EnvironmentObject private var appState: AppState
+private struct AddRepoSheet: View {
+    @ObservedObject private var accountStore = AccountStore.shared
+    @ObservedObject private var repoStore    = RepositoryStore.shared
     @Binding var isPresented: Bool
 
-    @State private var ownerDraft = ""
-    @State private var repoDraft  = ""
-    @State private var docsDraft  = ""
+    @State private var selectedAccountID: UUID? = nil
+    @State private var owner    = ""
+    @State private var name     = ""
+    @State private var docsPath = ""
+    @State private var rfcLabel = "hermit:rfc-ready"
+
+    var canSave: Bool {
+        selectedAccountID != nil &&
+        !owner.trimmingCharacters(in: .whitespaces).isEmpty &&
+        !name.trimmingCharacters(in: .whitespaces).isEmpty
+    }
 
     var body: some View {
         NavigationStack {
             Form {
+                Section("Account") {
+                    if accountStore.connections.isEmpty {
+                        Text("No accounts configured — add one in the Account tab first.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("Account", selection: $selectedAccountID) {
+                            Text("Select…").tag(Optional<UUID>.none)
+                            ForEach(accountStore.connections) { conn in
+                                Text(conn.name).tag(Optional(conn.id))
+                            }
+                        }
+                    }
+                }
                 Section("Repository") {
-                    TextField("Owner", text: $ownerDraft, prompt: Text("org-or-user"))
+                    TextField("Owner", text: $owner, prompt: Text("org-or-user"))
                         .autocorrectionDisabled()
 #if os(iOS)
                         .textInputAutocapitalization(.never)
 #endif
-                    TextField("Name", text: $repoDraft, prompt: Text("repository-name"))
+                    TextField("Name", text: $name, prompt: Text("repository-name"))
                         .autocorrectionDisabled()
 #if os(iOS)
                         .textInputAutocapitalization(.never)
 #endif
                 }
-                Section("Docs Path (optional)") {
-                    TextField("Path", text: $docsDraft, prompt: Text("docs-cms/rfcs"))
+                Section("Advanced (optional)") {
+                    TextField("Docs path", text: $docsPath, prompt: Text("docs-cms/rfcs"))
+                        .autocorrectionDisabled()
+#if os(iOS)
+                        .textInputAutocapitalization(.never)
+#endif
+                    TextField("RFC label", text: $rfcLabel, prompt: Text("hermit:rfc-ready"))
+                        .autocorrectionDisabled()
+#if os(iOS)
+                        .textInputAutocapitalization(.never)
+#endif
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("Add Repository")
+#if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+#endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { isPresented = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        guard let aid = selectedAccountID else { return }
+                        repoStore.add(
+                            accountID: aid,
+                            owner:     owner.trimmingCharacters(in: .whitespaces),
+                            name:      name.trimmingCharacters(in: .whitespaces),
+                            docsPath:  docsPath.isEmpty ? "docs-cms/rfcs" : docsPath.trimmingCharacters(in: .whitespaces),
+                            rfcLabel:  rfcLabel.isEmpty ? "hermit:rfc-ready" : rfcLabel.trimmingCharacters(in: .whitespaces)
+                        )
+                        isPresented = false
+                    }
+                    .disabled(!canSave)
+                }
+            }
+            .onAppear {
+                if selectedAccountID == nil {
+                    selectedAccountID = accountStore.activeID ?? accountStore.connections.first?.id
+                }
+            }
+        }
+#if os(macOS)
+        .frame(width: 480, height: 380)
+#endif
+    }
+}
+
+// MARK: - Edit repository sheet
+
+private struct EditRepoSheet: View {
+    @ObservedObject private var accountStore = AccountStore.shared
+    @ObservedObject private var repoStore    = RepositoryStore.shared
+    let repo: Repository
+    @Binding var isPresented: Bool
+
+    @State private var selectedAccountID: UUID
+    @State private var owner:    String
+    @State private var name:     String
+    @State private var docsPath: String
+    @State private var rfcLabel: String
+
+    init(repo: Repository, isPresented: Binding<Bool>) {
+        self.repo    = repo
+        _isPresented = isPresented
+        _selectedAccountID = State(initialValue: repo.accountID)
+        _owner    = State(initialValue: repo.owner)
+        _name     = State(initialValue: repo.name)
+        _docsPath = State(initialValue: repo.docsPath)
+        _rfcLabel = State(initialValue: repo.rfcLabel)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Account") {
+                    Picker("Account", selection: $selectedAccountID) {
+                        ForEach(accountStore.connections) { conn in
+                            Text(conn.name).tag(conn.id)
+                        }
+                    }
+                }
+                Section("Repository") {
+                    TextField("Owner", text: $owner)
+                        .autocorrectionDisabled()
+#if os(iOS)
+                        .textInputAutocapitalization(.never)
+#endif
+                    TextField("Name", text: $name)
+                        .autocorrectionDisabled()
+#if os(iOS)
+                        .textInputAutocapitalization(.never)
+#endif
+                }
+                Section("Advanced") {
+                    TextField("Docs path", text: $docsPath)
+                        .autocorrectionDisabled()
+#if os(iOS)
+                        .textInputAutocapitalization(.never)
+#endif
+                    TextField("RFC label", text: $rfcLabel)
                         .autocorrectionDisabled()
 #if os(iOS)
                         .textInputAutocapitalization(.never)
@@ -377,31 +521,24 @@ private struct EditRepoSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        let o = ownerDraft.trimmingCharacters(in: .whitespaces)
-                        let r = repoDraft.trimmingCharacters(in: .whitespaces)
-                        let d = docsDraft.trimmingCharacters(in: .whitespaces)
-                        guard !o.isEmpty, !r.isEmpty else { return }
-                        appState.repoOwner = o
-                        appState.repoName  = r
-                        ConfigStore.shared.repoOwner = o
-                        ConfigStore.shared.repoName  = r
-                        if !d.isEmpty { ConfigStore.shared.docsPath = d }
+                        var updated = repo
+                        updated.accountID = selectedAccountID
+                        updated.owner     = owner.trimmingCharacters(in: .whitespaces)
+                        updated.name      = name.trimmingCharacters(in: .whitespaces)
+                        updated.docsPath  = docsPath.trimmingCharacters(in: .whitespaces)
+                        updated.rfcLabel  = rfcLabel.trimmingCharacters(in: .whitespaces)
+                        repoStore.update(updated)
                         isPresented = false
                     }
                     .disabled(
-                        ownerDraft.trimmingCharacters(in: .whitespaces).isEmpty ||
-                        repoDraft.trimmingCharacters(in: .whitespaces).isEmpty
+                        owner.trimmingCharacters(in: .whitespaces).isEmpty ||
+                        name.trimmingCharacters(in: .whitespaces).isEmpty
                     )
                 }
             }
-            .onAppear {
-                ownerDraft = appState.repoOwner
-                repoDraft  = appState.repoName
-                docsDraft  = ConfigStore.shared.docsPath ?? ""
-            }
         }
 #if os(macOS)
-        .frame(width: 420, height: 280)
+        .frame(width: 480, height: 380)
 #endif
     }
 }
