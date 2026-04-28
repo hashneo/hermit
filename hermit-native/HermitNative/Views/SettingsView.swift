@@ -116,7 +116,7 @@ private struct AccountSettingsTab: View {
         } message: {
             Text("The token will be deleted from the Keychain.")
         }
-        .task {
+        .task(id: store.connections.map(\.id)) {
             for conn in store.connections { await store.probe(conn) }
         }
     }
