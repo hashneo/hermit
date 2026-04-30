@@ -180,12 +180,7 @@ final class RepoRFCLoader: ObservableObject {
             }
             do {
                 let (mainFiles, prs) = try await client.discoverRFCs()
-                // Menu bar shows only active RFCs (draft/accepted).
-                // Implemented RFCs are done and would flood the menu.
-                let activeStatuses: Set<String> = ["draft", "accepted"]
-                let mainRFCs = mainFiles
-                    .filter { activeStatuses.contains($0.lifecycleStatus ?? "") }
-                    .map {
+                let mainRFCs = mainFiles.map {
                     RFC(id: $0.id, title: $0.name, path: $0.path, sha: $0.sha, source: .mainBranch)
                 }.sorted { $0.title < $1.title }
                 let prRFCs = prs.map {
