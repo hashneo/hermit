@@ -233,6 +233,30 @@ final class AppState: ObservableObject {
         return HermitAPIClient(config: cfg)
     }
 
+    /// Returns a client scoped to a specific repository.
+    func makeAPIClient(for repo: Repository) -> (any HermitClientProtocol)? {
+        guard !serverBaseURL.isEmpty else { return nil }
+        let bearer: String
+        if case .localNetwork = serverMode {
+            guard !localNetworkToken.isEmpty else { return nil }
+            bearer = localNetworkToken
+        } else {
+            let conn = AccountStore.shared.connections.first(where: { $0.id == repo.accountID })
+                    ?? AccountStore.shared.connections.first
+            guard let c = conn, let token = AccountStore.shared.token(for: c), !token.isEmpty else { return nil }
+            bearer = token
+        }
+        let cfg = HermitAPIClient.Config(
+            baseURL:  serverBaseURL,
+            owner:    repo.owner,
+            repo:     repo.name,
+            docsPath: repo.docsPath,
+            rfcLabel: repo.rfcLabel,
+            pat:      bearer
+        )
+        return HermitAPIClient(config: cfg)
+    }
+
     // MARK: - Display helpers
 
     /// Human-readable repo label for display in the UI.

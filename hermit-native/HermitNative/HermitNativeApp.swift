@@ -260,6 +260,10 @@ final class RFCViewerWindowManager {
         let controller = NSWindowController(window: window)
         controllers[rfc.id] = controller
 
+        // Record in recents so the menu bar shows recently opened RFCs.
+        let repoID = RepositoryStore.shared.repositories.first?.id ?? UUID()
+        RecentRFCStore.shared.record(rfc, repoID: repoID)
+
         // hermit-z9j: donate Handoff activity for this RFC window
         let activity = NSUserActivity(activityType: HermitActivity.handoff)
         activity.title = rfc.title
@@ -293,11 +297,17 @@ final class RFCViewerWindowManager {
                     // hermit-iwq: clear persisted restore state when window is explicitly closed
                     appState.persistLastViewedRFC(nil)
                 }
+                // Return to accessory (menu-bar only) mode when all viewer windows are closed.
+                if self?.controllers.isEmpty == true {
+                    NSApp.setActivationPolicy(.accessory)
+                }
             }
         }
 
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+        // Switch to regular app so the viewer appears in the Dock and Cmd+Tab switcher.
+        NSApp.setActivationPolicy(.regular)
     }
 }
 #endif

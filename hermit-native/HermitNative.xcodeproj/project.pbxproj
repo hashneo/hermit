@@ -14,6 +14,7 @@
 		B001000A /* HermitNativeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000B /* HermitNativeApp.swift */; };
 		B001000C /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000D /* AppState.swift */; };
 		B001000E /* RFC.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000F /* RFC.swift */; };
+		B001RR01 /* RecentRFCStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001RR00 /* RecentRFCStore.swift */; };
 		B0010010 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010011 /* KeychainHelper.swift */; };
 		B001AC01 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001AC00 /* AccountStore.swift */; };
 		B0010012 /* GitHubAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010013 /* GitHubAPIClient.swift */; };
@@ -70,6 +71,7 @@
 		B001000B /* HermitNativeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitNativeApp.swift; sourceTree = "<group>"; };
 		B001000D /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		B001000F /* RFC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFC.swift; sourceTree = "<group>"; };
+		B001RR00 /* RecentRFCStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentRFCStore.swift; sourceTree = "<group>"; };
 		B0010011 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		B001AC00 /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
 		B0010013 /* GitHubAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubAPIClient.swift; sourceTree = "<group>"; };
@@ -189,6 +191,7 @@
 				B001D001 /* HermitActivity.swift */,
 				B001D003 /* SpotlightDonor.swift */,
 				B001000F /* RFC.swift */,
+				B001RR00 /* RecentRFCStore.swift */,
 				B001B002 /* HermitModels.swift */,
 			);
 			path = Models;
@@ -385,6 +388,7 @@
 				B001D004 /* HermitActivity.swift in Sources */,
 				B001D002 /* SpotlightDonor.swift in Sources */,
 				B001000E /* RFC.swift in Sources */,
+				B001RR01 /* RecentRFCStore.swift in Sources */,
 				B0010010 /* KeychainHelper.swift in Sources */,
 				B001AC01 /* AccountStore.swift in Sources */,
 				B001D010 /* ConfigStore.swift in Sources */,
