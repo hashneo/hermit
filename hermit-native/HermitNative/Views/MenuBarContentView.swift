@@ -292,20 +292,11 @@ struct MenuBarRFCListView: View {
                                 .frame(maxWidth: .infinity)
                         } else {
                             ForEach(loader.sections) { section in
-                                MenuBarSectionHeader(
-                                    title: "\(section.repo.owner)/\(section.repo.name)",
-                                    error: loader.errorByRepo[section.repo.id]
+                                MenuBarRepoSection(
+                                    section: section,
+                                    error: loader.errorByRepo[section.repo.id],
+                                    onOpen: { open($0, repo: section.repo) }
                                 )
-                                if section.rfcs.isEmpty {
-                                    Text(loader.errorByRepo[section.repo.id] != nil ? "Failed to load" : "No RFCs")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                        .padding(.horizontal, 16).padding(.vertical, 6)
-                                } else {
-                                    ForEach(section.rfcs) { rfc in
-                                        MenuBarRFCRow(rfc: rfc) { open(rfc, repo: section.repo) }
-                                        Divider().padding(.leading, 12)
-                                    }
-                                }
                             }
                         }
                     }
@@ -341,7 +332,69 @@ struct MenuBarRFCListView: View {
     }
 }
 
-// MARK: - Section header
+// MARK: - Collapsible repo section
+
+private struct MenuBarRepoSection: View {
+    let section: MultiRepoRFCLoader.RepoRFCs
+    var error: String? = nil
+    let onOpen: (RFC) -> Void
+
+    @State private var isExpanded = true
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // ── Repo header row (click to expand/collapse) ─────────────
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 10)
+                    Text("\(section.repo.owner)/\(section.repo.name)")
+                        .font(.caption).fontWeight(.semibold)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    if error != nil {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                            .help(error ?? "")
+                    }
+                    Spacer()
+                    Text(isExpanded ? "" : "\(section.rfcs.count)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
+                .padding(.bottom, 4)
+            }
+            .buttonStyle(.plain)
+
+            // ── RFC rows (shown when expanded) ─────────────────────────
+            if isExpanded {
+                if section.rfcs.isEmpty {
+                    Text(error != nil ? "Failed to load" : "No RFCs")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .padding(.horizontal, 28).padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ForEach(section.rfcs) { rfc in
+                        MenuBarRFCRow(rfc: rfc, indented: true) { onOpen(rfc) }
+                        Divider().padding(.leading, 28)
+                    }
+                }
+            }
+
+            Divider().padding(.top, 4)
+        }
+    }
+}
+
+// MARK: - Section header (retained for search/recents use)
 
 private struct MenuBarSectionHeader: View {
     let title: String
@@ -403,6 +456,7 @@ private struct MenuBarRecentRow: View {
 
 private struct MenuBarRFCRow: View {
     let rfc: RFC
+    var indented: Bool = false
     let onSelect: () -> Void
     @State private var isHovered = false
 
@@ -423,7 +477,9 @@ private struct MenuBarRFCRow: View {
                     .font(.caption).foregroundStyle(.tertiary)
                     .opacity(isHovered ? 1 : 0)
             }
-            .padding(.horizontal, 12).padding(.vertical, 8)
+            .padding(.leading, indented ? 28 : 12)
+            .padding(.trailing, 12)
+            .padding(.vertical, 8)
             .background(isHovered ? Color.accentColor.opacity(0.1) : Color.clear)
         }
         .buttonStyle(.plain)
