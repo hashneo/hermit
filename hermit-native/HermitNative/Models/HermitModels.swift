@@ -67,3 +67,15 @@ struct ReviewState: Equatable {
     let approved: Bool
     let reviewers: [String]
 }
+
+struct SubmitForReviewResult: Decodable {
+    let prNumber: Int
+    let htmlURL: String
+    let branch: String
+
+    enum CodingKeys: String, CodingKey {
+        case prNumber = "pr_number"
+        case htmlURL  = "html_url"
+        case branch
+    }
+}

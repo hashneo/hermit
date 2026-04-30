@@ -103,6 +103,27 @@ func (h *Handler) RenderRFCByID(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
+func (h *Handler) SubmitForReview(w http.ResponseWriter, r *http.Request) {
+	repositoryID := r.PathValue("repositoryId")
+	if repositoryID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_repository_id", "repositoryId path parameter is required")
+		return
+	}
+	rfcID := r.PathValue("rfcId")
+	if rfcID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_rfc_id", "rfcId path parameter is required")
+		return
+	}
+
+	result, err := h.service.SubmitForReview(r.Context(), repositoryID, rfcID)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "submit_for_review_failed", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
+}
+
 func parsePRPathParams(w http.ResponseWriter, r *http.Request) (string, int, bool) {
 	repositoryID := r.PathValue("repositoryId")
 	if repositoryID == "" {

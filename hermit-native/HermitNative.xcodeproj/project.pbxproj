@@ -26,6 +26,7 @@
 		B001001E /* VoiceCommentSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001001F /* VoiceCommentSession.swift */; };
 		B0010020 /* PublishingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010021 /* PublishingSession.swift */; };
 		B0010022 /* RFCPublishingHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010023 /* RFCPublishingHelpers.swift */; };
+		B00100A0 /* SubmitForReviewSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100A1 /* SubmitForReviewSession.swift */; };
 		B0010024 /* VoiceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010025 /* VoiceEngine.swift */; };
 		B0010026 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010027 /* SpeechRecognizer.swift */; };
 		B0010028 /* SpeechSynthesizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010029 /* SpeechSynthesizer.swift */; };
@@ -83,6 +84,7 @@
 		B001001F /* VoiceCommentSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCommentSession.swift; sourceTree = "<group>"; };
 		B0010021 /* PublishingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PublishingSession.swift; sourceTree = "<group>"; };
 		B0010023 /* RFCPublishingHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCPublishingHelpers.swift; sourceTree = "<group>"; };
+		B00100A1 /* SubmitForReviewSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubmitForReviewSession.swift; sourceTree = "<group>"; };
 		B0010025 /* VoiceEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceEngine.swift; sourceTree = "<group>"; };
 		B0010027 /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
 		B0010029 /* SpeechSynthesizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSynthesizer.swift; sourceTree = "<group>"; };
@@ -236,6 +238,7 @@
 				B001001F /* VoiceCommentSession.swift */,
 				B0010021 /* PublishingSession.swift */,
 				B0010023 /* RFCPublishingHelpers.swift */,
+				B00100A1 /* SubmitForReviewSession.swift */,
 			);
 			path = Sessions;
 			sourceTree = "<group>";
@@ -403,6 +406,7 @@
 				B001001E /* VoiceCommentSession.swift in Sources */,
 				B0010020 /* PublishingSession.swift in Sources */,
 				B0010022 /* RFCPublishingHelpers.swift in Sources */,
+				B00100A0 /* SubmitForReviewSession.swift in Sources */,
 				B0010024 /* VoiceEngine.swift in Sources */,
 				B0010026 /* SpeechRecognizer.swift in Sources */,
 				B0010028 /* SpeechSynthesizer.swift in Sources */,

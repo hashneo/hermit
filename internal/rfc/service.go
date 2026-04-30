@@ -6,6 +6,7 @@ import (
 	"fmt"
 	stdhtml "html"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -299,6 +300,123 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 	})
 
 	return items, nil
+}
+
+// SubmitForReviewResult is returned by SubmitForReview on success.
+type SubmitForReviewResult struct {
+	PRNumber int    `json:"pr_number"`
+	HTMLURL  string `json:"html_url"`
+	Branch   string `json:"branch"`
+}
+
+// SubmitForReview promotes a draft RFC on the main branch to "in-review" by:
+//  1. Ensuring the hermit:rfc-ready label exists on the repository.
+//  2. Fetching the current RFC content and rewriting its frontmatter status to "in-review".
+//  3. Creating a new branch (rfc-review/<slug>).
+//  4. Committing the updated file onto that branch.
+//  5. Opening a PR against the default branch with the hermit:rfc-ready label applied.
+func (s *Service) SubmitForReview(ctx context.Context, repositoryID, rfcPath string) (SubmitForReviewResult, error) {
+	if s.repoResolver == nil {
+		return SubmitForReviewResult{}, fmt.Errorf("repository resolver is not configured")
+	}
+
+	owner, name, registry, branch, _, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	if !ok {
+		return SubmitForReviewResult{}, fmt.Errorf("repository not found")
+	}
+	if token == "" {
+		return SubmitForReviewResult{}, fmt.Errorf("repository token unavailable")
+	}
+
+	client, ok := s.githubClients[registry]
+	if !ok {
+		client = NewHTTPGitHubRFCClient()
+	}
+	baseURL := s.registryBaseURL(registry)
+
+	// 1. Ensure the rfc-ready label exists.
+	if err := client.EnsureLabel(ctx, baseURL, owner, name, rfcLabel, "0075ca", "RFC ready for review", token); err != nil {
+		return SubmitForReviewResult{}, fmt.Errorf("ensure label: %w", err)
+	}
+
+	// 2. Fetch current RFC content and rewrite status to "in-review".
+	view, err := client.GetRFC(ctx, baseURL, owner, name, branch, rfcPath, token)
+	if err != nil {
+		return SubmitForReviewResult{}, fmt.Errorf("fetch rfc: %w", err)
+	}
+	updated := rewriteFrontmatterStatus(view.MarkdownSource, "in-review")
+	title := view.Title
+
+	// 3. Create review branch.
+	headSHA, err := client.GetMainBranchSHA(ctx, baseURL, owner, name, branch, token)
+	if err != nil {
+		return SubmitForReviewResult{}, fmt.Errorf("get branch SHA: %w", err)
+	}
+	reviewBranch := reviewBranchName(rfcPath)
+	if err := client.CreateBranch(ctx, baseURL, owner, name, reviewBranch, headSHA, token); err != nil {
+		return SubmitForReviewResult{}, fmt.Errorf("create branch: %w", err)
+	}
+
+	// 4. Commit updated file.
+	commitMsg := fmt.Sprintf("docs(rfc): submit %s for review", path.Base(rfcPath))
+	if _, err := client.CommitFile(ctx, baseURL, owner, name, reviewBranch, rfcPath, updated, commitMsg, token); err != nil {
+		return SubmitForReviewResult{}, fmt.Errorf("commit file: %w", err)
+	}
+
+	// 5. Open PR with the rfc-ready label.
+	prBody := fmt.Sprintf("## %s\n\nSubmitted for review via Hermit.\n\n<!-- %s -->", title, rfcLabel)
+	pr, err := client.CreatePR(ctx, baseURL, owner, name, title, prBody, reviewBranch, branch, []string{rfcLabel}, token)
+	if err != nil {
+		return SubmitForReviewResult{}, fmt.Errorf("create PR: %w", err)
+	}
+
+	return SubmitForReviewResult{PRNumber: pr.Number, HTMLURL: pr.HTMLURL, Branch: reviewBranch}, nil
+}
+
+// rewriteFrontmatterStatus replaces the value of the "status" key inside a
+// YAML frontmatter block. If no frontmatter or no status key is present one
+// is inserted. The rest of the document is left unchanged.
+func rewriteFrontmatterStatus(markdown, newStatus string) string {
+	lines := strings.Split(markdown, "\n")
+	if len(lines) < 3 || strings.TrimSpace(lines[0]) != "---" {
+		// No frontmatter — prepend a minimal block.
+		return fmt.Sprintf("---\nstatus: %s\n---\n%s", newStatus, markdown)
+	}
+
+	// Find closing ---.
+	end := -1
+	statusLine := -1
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			end = i
+			break
+		}
+		parts := strings.SplitN(lines[i], ":", 2)
+		if len(parts) == 2 && strings.TrimSpace(parts[0]) == "status" {
+			statusLine = i
+		}
+	}
+	if end == -1 {
+		// Malformed frontmatter — prepend.
+		return fmt.Sprintf("---\nstatus: %s\n---\n%s", newStatus, markdown)
+	}
+
+	out := make([]string, len(lines))
+	copy(out, lines)
+	if statusLine != -1 {
+		out[statusLine] = "status: " + newStatus
+	} else {
+		// Insert before closing ---.
+		out = append(out[:end], append([]string{"status: " + newStatus}, out[end:]...)...)
+	}
+	return strings.Join(out, "\n")
+}
+
+// reviewBranchName derives a branch name from the RFC file path.
+// e.g. "docs-cms/rfcs/rfc-008-logging.md" → "rfc-review/rfc-008-logging"
+func reviewBranchName(rfcPath string) string {
+	base := strings.TrimSuffix(path.Base(rfcPath), ".md")
+	return "rfc-review/" + base
 }
 
 // RenderPRRFC fetches the RFC file from the PR's head branch and renders it.

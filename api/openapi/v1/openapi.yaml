@@ -231,6 +231,33 @@ paths:
         default:
           $ref: '#/components/responses/ApiError'
 
+  /api/v1/repositories/{repositoryId}/rfcs/{rfcId}/submit-for-review:
+    post:
+      tags: [RFC Documents]
+      summary: Submit a draft RFC for review
+      description: >-
+        Promotes a draft RFC on the main branch to "in-review" status by
+        rewriting the frontmatter status field, ensuring the hermit:rfc-ready
+        label exists on the repository, creating a review branch, committing
+        the updated file, and opening a pull request with the label applied.
+      operationId: submitRfcForReview
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+        - $ref: '#/components/parameters/RfcId'
+      responses:
+        '201':
+          description: Pull request created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitForReviewResult'
+        '400':
+          $ref: '#/components/responses/ApiError'
+        '502':
+          $ref: '#/components/responses/ApiError'
+        default:
+          $ref: '#/components/responses/ApiError'
+
   /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/threads:
     get:
       tags: [Threads]
@@ -455,7 +482,22 @@ components:
           schema:
             $ref: '#/components/schemas/ApiError'
 
-  schemas:
+   schemas:
+    SubmitForReviewResult:
+      type: object
+      required: [pr_number, html_url, branch]
+      properties:
+        pr_number:
+          type: integer
+          example: 42
+        html_url:
+          type: string
+          format: uri
+          example: https://github.com/org/repo/pull/42
+        branch:
+          type: string
+          example: rfc-review/rfc-008-logging
+
     PlatformHealth:
       type: object
       required: [status, service, version, timestamp]

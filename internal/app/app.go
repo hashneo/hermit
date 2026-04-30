@@ -92,6 +92,7 @@ func newMux(cfg config.Config) *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/rfcs/{rfcId}", rfcHandler.RenderRFCByID)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/rfcs", rfcHandler.ListRepositoryRFCs)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/rfcs/{rfcId}", rfcHandler.RenderRepositoryRFCByID)
+	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rfcs/{rfcId}/submit-for-review", rfcHandler.SubmitForReview)
 
 	reviewService := review.NewService(nil)
 	reviewHandler := review.NewHandler(reviewService)

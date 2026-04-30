@@ -34,6 +34,9 @@ protocol HermitClientProtocol: Actor {
                     message: String) async throws -> String   // returns commit SHA
     func createPR(title: String, body: String,
                   headBranch: String, label: String) async throws -> RFCPullRequest
+
+    // Promote draft RFC to in-review: rewrites frontmatter, ensures label, opens PR.
+    func submitForReview(rfcID: String) async throws -> SubmitForReviewResult
 }
 
 // MARK: - HermitAPIClient
@@ -228,6 +231,20 @@ actor HermitAPIClient: HermitClientProtocol {
         let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/review/approve")
         _ = try await post(u, body: [:])
+    }
+
+    // MARK: - submitForReview
+
+    func submitForReview(rfcID: String) async throws -> SubmitForReviewResult {
+        let repoID = try await repoID()
+        // rfcID may be a full path like "docs-cms/rfcs/rfc-008-logging.md".
+        // URL-encode the path so it travels as a single path segment.
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove("/")
+        let encoded = rfcID.addingPercentEncoding(withAllowedCharacters: allowed) ?? rfcID
+        let u = url("/api/v1/repositories/\(repoID)/rfcs/\(encoded)/submit-for-review")
+        let data = try await post(u, body: [:])
+        return try JSONDecoder().decode(SubmitForReviewResult.self, from: data)
     }
 
     // MARK: - getMainBranchSHA

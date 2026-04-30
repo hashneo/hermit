@@ -17,6 +17,20 @@ type GitHubRFCClient interface {
 	GetRFC(ctx context.Context, baseURL, owner, name, branch, filePath, token string) (DocumentView, error)
 	ListReviewReadyRFCs(ctx context.Context, baseURL, owner, name, docsPath, rfcLabel, token string) ([]ReviewReadyRFCItem, error)
 	GetRFCFromPullRequest(ctx context.Context, baseURL, owner, name string, prNumber int, filePath, token string) (DocumentView, error)
+
+	// Write path — used by SubmitForReview.
+	EnsureLabel(ctx context.Context, baseURL, owner, name, label, color, description, token string) error
+	GetMainBranchSHA(ctx context.Context, baseURL, owner, name, branch, token string) (string, error)
+	CreateBranch(ctx context.Context, baseURL, owner, name, branchName, fromSHA, token string) error
+	CommitFile(ctx context.Context, baseURL, owner, name, branch, filePath, content, message, token string) (string, error)
+	CreatePR(ctx context.Context, baseURL, owner, name, title, body, head, base string, labels []string, token string) (CreatedPR, error)
+}
+
+// CreatedPR is the minimal response from a PR creation call.
+type CreatedPR struct {
+	Number  int    `json:"number"`
+	HTMLURL string `json:"html_url"`
+	Title   string `json:"title"`
 }
 
 // RFCReadyLabel is the GitHub label that marks a PR as ready for RFC review.
@@ -316,6 +330,231 @@ func (c *HTTPGitHubRFCClient) listPullRequestFiles(ctx context.Context, apiBase,
 	}
 
 	return files, nil
+}
+
+// EnsureLabel creates the label on the repo if it does not already exist.
+// A 422 response (label already exists on GitHub) is treated as success.
+func (c *HTTPGitHubRFCClient) EnsureLabel(ctx context.Context, baseURL, owner, name, label, color, description, token string) error {
+	apiBase := strings.TrimRight(baseURL, "/")
+
+	// Check whether the label already exists.
+	checkURL := fmt.Sprintf("%s/repos/%s/%s/labels/%s", apiBase, owner, name, label)
+	checkReq, err := http.NewRequestWithContext(ctx, http.MethodGet, checkURL, nil)
+	if err != nil {
+		return err
+	}
+	setGitHubHeaders(checkReq, token)
+	checkResp, err := c.client.Do(checkReq)
+	if err != nil {
+		return err
+	}
+	defer checkResp.Body.Close()
+	io.Copy(io.Discard, checkResp.Body) //nolint:errcheck
+	if checkResp.StatusCode == http.StatusOK {
+		return nil // already exists
+	}
+
+	// Create it.
+	if color == "" {
+		color = "0075ca" // GitHub's default blue
+	}
+	createBody, _ := json.Marshal(map[string]string{
+		"name":        label,
+		"color":       color,
+		"description": description,
+	})
+	createURL := fmt.Sprintf("%s/repos/%s/%s/labels", apiBase, owner, name)
+	createReq, err := http.NewRequestWithContext(ctx, http.MethodPost, createURL, strings.NewReader(string(createBody)))
+	if err != nil {
+		return err
+	}
+	setGitHubHeaders(createReq, token)
+	createReq.Header.Set("Content-Type", "application/json")
+	createResp, err := c.client.Do(createReq)
+	if err != nil {
+		return err
+	}
+	defer createResp.Body.Close()
+	io.Copy(io.Discard, createResp.Body) //nolint:errcheck
+	// 201 = created, 422 = already exists (race) — both are fine.
+	if createResp.StatusCode != http.StatusCreated && createResp.StatusCode != http.StatusUnprocessableEntity {
+		return fmt.Errorf("create label failed: %d", createResp.StatusCode)
+	}
+	return nil
+}
+
+// GetMainBranchSHA returns the HEAD SHA of the given branch.
+func (c *HTTPGitHubRFCClient) GetMainBranchSHA(ctx context.Context, baseURL, owner, name, branch, token string) (string, error) {
+	apiBase := strings.TrimRight(baseURL, "/")
+	u := fmt.Sprintf("%s/repos/%s/%s/git/refs/heads/%s", apiBase, owner, name, branch)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", err
+	}
+	setGitHubHeaders(req, token)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return "", fmt.Errorf("get branch SHA failed: %d %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	var ref struct {
+		Object struct {
+			SHA string `json:"sha"`
+		} `json:"object"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&ref); err != nil {
+		return "", err
+	}
+	return ref.Object.SHA, nil
+}
+
+// CreateBranch creates a new branch from an existing SHA.
+func (c *HTTPGitHubRFCClient) CreateBranch(ctx context.Context, baseURL, owner, name, branchName, fromSHA, token string) error {
+	apiBase := strings.TrimRight(baseURL, "/")
+	u := fmt.Sprintf("%s/repos/%s/%s/git/refs", apiBase, owner, name)
+	payload, _ := json.Marshal(map[string]string{
+		"ref": "refs/heads/" + branchName,
+		"sha": fromSHA,
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, strings.NewReader(string(payload)))
+	if err != nil {
+		return err
+	}
+	setGitHubHeaders(req, token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body) //nolint:errcheck
+	if resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("create branch failed: %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// CommitFile creates or updates a file on a branch via the GitHub Contents API.
+// Returns the commit SHA.
+func (c *HTTPGitHubRFCClient) CommitFile(ctx context.Context, baseURL, owner, name, branch, filePath, content, message, token string) (string, error) {
+	apiBase := strings.TrimRight(baseURL, "/")
+	cleanPath := strings.TrimPrefix(filePath, "/")
+
+	// Supply the blob SHA if the file already exists (required for updates).
+	var existingSHA string
+	getURL := fmt.Sprintf("%s/repos/%s/%s/contents/%s?ref=%s", apiBase, owner, name, cleanPath, branch)
+	getReq, err := http.NewRequestWithContext(ctx, http.MethodGet, getURL, nil)
+	if err != nil {
+		return "", err
+	}
+	setGitHubHeaders(getReq, token)
+	getResp, err := c.client.Do(getReq)
+	if err != nil {
+		return "", err
+	}
+	defer getResp.Body.Close()
+	if getResp.StatusCode == http.StatusOK {
+		var existing struct {
+			SHA string `json:"sha"`
+		}
+		if jsonErr := json.NewDecoder(getResp.Body).Decode(&existing); jsonErr == nil {
+			existingSHA = existing.SHA
+		}
+	} else {
+		io.Copy(io.Discard, getResp.Body) //nolint:errcheck
+	}
+
+	payloadMap := map[string]string{
+		"message": message,
+		"content": base64.StdEncoding.EncodeToString([]byte(content)),
+		"branch":  branch,
+	}
+	if existingSHA != "" {
+		payloadMap["sha"] = existingSHA
+	}
+	payloadBytes, _ := json.Marshal(payloadMap)
+
+	putURL := fmt.Sprintf("%s/repos/%s/%s/contents/%s", apiBase, owner, name, cleanPath)
+	putReq, err := http.NewRequestWithContext(ctx, http.MethodPut, putURL, strings.NewReader(string(payloadBytes)))
+	if err != nil {
+		return "", err
+	}
+	setGitHubHeaders(putReq, token)
+	putReq.Header.Set("Content-Type", "application/json")
+	putResp, err := c.client.Do(putReq)
+	if err != nil {
+		return "", err
+	}
+	defer putResp.Body.Close()
+	if putResp.StatusCode != http.StatusOK && putResp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(io.LimitReader(putResp.Body, 2048))
+		return "", fmt.Errorf("commit file failed: %d %s", putResp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	var result struct {
+		Commit struct {
+			SHA string `json:"sha"`
+		} `json:"commit"`
+	}
+	if err := json.NewDecoder(putResp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	return result.Commit.SHA, nil
+}
+
+// CreatePR opens a pull request and applies the given labels via the Issues API.
+func (c *HTTPGitHubRFCClient) CreatePR(ctx context.Context, baseURL, owner, name, title, body, head, base string, labels []string, token string) (CreatedPR, error) {
+	apiBase := strings.TrimRight(baseURL, "/")
+	payload, _ := json.Marshal(map[string]any{
+		"title": title,
+		"body":  body,
+		"head":  head,
+		"base":  base,
+	})
+	prURL := fmt.Sprintf("%s/repos/%s/%s/pulls", apiBase, owner, name)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, prURL, strings.NewReader(string(payload)))
+	if err != nil {
+		return CreatedPR{}, err
+	}
+	setGitHubHeaders(req, token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return CreatedPR{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return CreatedPR{}, fmt.Errorf("create PR failed: %d %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	var pr struct {
+		Number  int    `json:"number"`
+		HTMLURL string `json:"html_url"`
+		Title   string `json:"title"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
+		return CreatedPR{}, err
+	}
+
+	// Apply labels via the Issues API (GitHub PRs are issues).
+	if len(labels) > 0 {
+		labelsPayload, _ := json.Marshal(map[string]any{"labels": labels})
+		labelsURL := fmt.Sprintf("%s/repos/%s/%s/issues/%d/labels", apiBase, owner, name, pr.Number)
+		lReq, lErr := http.NewRequestWithContext(ctx, http.MethodPost, labelsURL, strings.NewReader(string(labelsPayload)))
+		if lErr == nil {
+			setGitHubHeaders(lReq, token)
+			lReq.Header.Set("Content-Type", "application/json")
+			if lResp, lErr := c.client.Do(lReq); lErr == nil {
+				io.Copy(io.Discard, lResp.Body) //nolint:errcheck
+				lResp.Body.Close()
+			}
+		}
+	}
+
+	return CreatedPR{Number: pr.Number, HTMLURL: pr.HTMLURL, Title: pr.Title}, nil
 }
 
 func prHasLabel(labels []struct{ Name string `json:"name"` }, target string) bool {
