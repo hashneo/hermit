@@ -628,24 +628,30 @@ func isDocuchangoRFCFilename(name string) bool {
 // rfcFilenameNumberPattern matches rfc-NNN- at the start of a filename.
 var rfcFilenameNumberPattern = regexp.MustCompile(`^rfc-(\d{3})-`)
 
-// rfcTitlePrefixPattern matches an existing RFC-NNN prefix (any separator) in a title.
-var rfcTitlePrefixPattern = regexp.MustCompile(`(?i)^rfc[-\s]?\d{3}`)
+// rfcTitlePrefixPattern strips any existing RFC-NNN prefix with any separator
+// (e.g. "RFC-001 - ", "RFC-008: ", "RFC-037 - ", "rfc-002 ") from a title,
+// capturing the number and the bare text after it.
+var rfcTitlePrefixPattern = regexp.MustCompile(`(?i)^rfc[-\s]?(\d{3})[:\s\-]+\s*(.+)`)
 
-// normalizeRFCTitle ensures the display title starts with "RFC-NNN: <rest>".
-// If the title already contains the RFC number it is returned unchanged.
-// Otherwise the number is extracted from the filename (rfc-NNN-slug.md) and prepended.
+// normalizeRFCTitle rewrites the display title to the canonical form "RFC-NNN: <bare title>".
+// Any existing RFC-NNN prefix with inconsistent separators (-, :, spaces) is stripped and
+// replaced. When the title has no prefix the number is extracted from the filename instead.
 func normalizeRFCTitle(title, filePath string) string {
-	if rfcTitlePrefixPattern.MatchString(title) {
-		return title
+	// Case 1: title already has an RFC-NNN prefix — strip it and rebuild canonically.
+	if m := rfcTitlePrefixPattern.FindStringSubmatch(title); m != nil {
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			return title
+		}
+		return fmt.Sprintf("RFC-%03d: %s", n, strings.TrimSpace(m[2]))
 	}
+	// Case 2: no prefix in title — extract number from filename.
 	base := filepath.Base(filePath)
 	m := rfcFilenameNumberPattern.FindStringSubmatch(base)
 	if m == nil {
 		return title
 	}
-	num := m[1]
-	// Parse to strip leading zeros for display: "001" → "1", but keep 3 digits to match convention.
-	n, err := strconv.Atoi(num)
+	n, err := strconv.Atoi(m[1])
 	if err != nil {
 		return title
 	}
