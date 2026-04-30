@@ -62,7 +62,10 @@ type CatalogItem struct {
 	Labels          []string `json:"labels,omitempty"`
 	Commentable     bool     `json:"commentable"`
 	StatusMutable   bool     `json:"status_mutable"`
-	HTMLURL         string   `json:"html_url,omitempty"`
+	// hermit-ixk: full web URL for the RFC file, used by the native client Share button.
+	// For Gitea: {baseURL}/{owner}/{name}/src/branch/{branch}/{path}
+	// For GitHub: https://github.com/{owner}/{name}/blob/{branch}/{path}
+	HTMLURL string `json:"html_url,omitempty"`
 }
 
 type DocumentView struct {
@@ -268,7 +271,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 				LifecycleStatus: lifecycleStatus,
 				Commentable:     false,
 				StatusMutable:   true,
-				HTMLURL:         item.HTMLURL,
+				HTMLURL:         rfcWebURL(baseURL, owner, name, branch, item.Path),
 			}
 		}(idx, item)
 	}
@@ -654,6 +657,18 @@ func (s *Service) registryBaseURL(registry string) string {
 		return baseURL
 	}
 	return "https://api.github.com"
+}
+
+// rfcWebURL constructs the browser-accessible URL for an RFC file.
+// hermit-ixk: Gitea uses /src/branch/{branch}/{path}; GitHub uses /blob/{branch}/{path}.
+// The distinction is made by checking whether baseURL is api.github.com.
+func rfcWebURL(baseURL, owner, name, branch, filePath string) string {
+	base := strings.TrimRight(baseURL, "/")
+	if base == "https://api.github.com" {
+		return fmt.Sprintf("https://github.com/%s/%s/blob/%s/%s", owner, name, branch, filePath)
+	}
+	// Gitea (and Forgejo) web URL pattern.
+	return fmt.Sprintf("%s/%s/%s/src/branch/%s/%s", base, owner, name, branch, filePath)
 }
 
 func evaluateEligibility(content, filePath string) Eligibility {
@@ -1059,4 +1074,29 @@ func (s *Service) checkPrivileged(ctx context.Context, baseURL, owner, name, tok
 		return fmt.Errorf("forbidden: user %q has permission %q; approve/mark-implemented requires admin or maintain", login, perm)
 	}
 	return nil
+}
+
+// CallerPermissionResult is returned by GetCallerPermission.
+type CallerPermissionResult struct {
+	Login      string `json:"login"`
+	Permission string `json:"permission"`
+}
+
+// GetCallerPermission resolves the authenticated caller's GitHub login and
+// their collaborator permission level on the given repository.
+// This is used by the native client to decide which toolbar buttons to show.
+func (s *Service) GetCallerPermission(ctx context.Context, repositoryID string) (CallerPermissionResult, error) {
+	owner, name, _, _, _, _, token, client, baseURL, err := s.resolveRepoClient(repositoryID)
+	if err != nil {
+		return CallerPermissionResult{}, err
+	}
+	login, err := client.GetAuthenticatedUser(ctx, baseURL, token)
+	if err != nil {
+		return CallerPermissionResult{}, fmt.Errorf("resolve caller identity: %w", err)
+	}
+	perm, err := client.GetCollaboratorPermission(ctx, baseURL, owner, name, login, token)
+	if err != nil {
+		return CallerPermissionResult{}, fmt.Errorf("check collaborator permission: %w", err)
+	}
+	return CallerPermissionResult{Login: login, Permission: perm}, nil
 }

@@ -11,6 +11,10 @@ struct RFC: Identifiable, Hashable {
     /// Normalised lifecycle status from frontmatter: "draft", "accepted",
     /// "implemented", "superseded", "rejected", "unknown", or nil for PR RFCs.
     let lifecycleStatus: String?
+    /// hermit-ixk: full GitHub/Gitea web URL for sharing (e.g.
+    /// https://github.com/owner/repo/blob/main/docs-cms/rfcs/rfc-001.md).
+    /// Empty string when the server did not return html_url (older builds).
+    let htmlURL: String
 
     enum RFCSource { case mainBranch, pullRequest(RFCPullRequest) }
 

@@ -15,6 +15,11 @@ struct RFCDetailView: View {
     var commentStore: CommentStore? = nil
     var onLineTapped: ((Int, Int) -> Void)? = nil
 
+    // hermit-d42: isReadingMode is a @Binding so the parent (MenuBarRFCBrowserView)
+    // can react to changes and hide/show the NavigationSplitView sidebar.
+    // A .constant(false) default keeps all other call sites working unchanged.
+    @Binding var isReadingMode: Bool
+
     @EnvironmentObject private var appState: AppState
 
     // Observed so toolbar re-evaluates when comments load/change.
@@ -51,11 +56,13 @@ struct RFCDetailView: View {
 
     init(rfc: RFC, repo: Repository? = nil,
          commentStore: CommentStore? = nil,
-         onLineTapped: ((Int, Int) -> Void)? = nil) {
+         onLineTapped: ((Int, Int) -> Void)? = nil,
+         isReadingMode: Binding<Bool> = .constant(false)) {
         self.rfc          = rfc
         self.repo         = repo
         self.commentStore = commentStore
         self.onLineTapped = onLineTapped
+        self._isReadingMode = isReadingMode
         self._currentRFC  = State(initialValue: rfc)
     }
 
@@ -355,7 +362,8 @@ struct RFCDetailView: View {
             currentRFC = RFC(id: currentRFC.id, title: currentRFC.title,
                              path: currentRFC.path, sha: currentRFC.sha,
                              source: currentRFC.source,
-                             lifecycleStatus: result.newStatus)
+                             lifecycleStatus: result.newStatus,
+                             htmlURL: currentRFC.htmlURL)
         } catch {
             lifecycleError = error.localizedDescription
         }
@@ -368,7 +376,8 @@ struct RFCDetailView: View {
             currentRFC = RFC(id: currentRFC.id, title: currentRFC.title,
                              path: currentRFC.path, sha: currentRFC.sha,
                              source: currentRFC.source,
-                             lifecycleStatus: result.newStatus)
+                             lifecycleStatus: result.newStatus,
+                             htmlURL: currentRFC.htmlURL)
         } catch {
             lifecycleError = error.localizedDescription
         }

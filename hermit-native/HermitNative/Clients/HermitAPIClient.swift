@@ -108,6 +108,7 @@ actor HermitAPIClient: HermitClientProtocol {
             let head_ref: String?
             let labels: [String]?
             let commentable: Bool?
+            // hermit-ixk: populated by server for both main-branch and PR items.
             let html_url: String?
         }
 
@@ -133,7 +134,8 @@ actor HermitAPIClient: HermitClientProtocol {
             } else {
                 files.append(RFCFile(id: item.id, name: item.title,
                                      path: item.path, sha: item.head_sha ?? "",
-                                     htmlURL: item.html_url ?? "", lifecycleStatus: item.lifecycle_status))
+                                     htmlURL: item.html_url ?? "",
+                                     lifecycleStatus: item.lifecycle_status))
             }
         }
         return (files, prs)
@@ -364,37 +366,22 @@ actor HermitAPIClient: HermitClientProtocol {
 
     // MARK: - getCallerPermission
 
-    /// Returns the caller's collaborator permission level by resolving their
-    /// GitHub login via /user then checking /repos/{owner}/{repo}/collaborators/{login}/permission.
+    /// Returns the caller's collaborator permission level via the Hermit server.
+    /// hermit-cns: previously called api.github.com directly, which silently
+    /// failed against Gitea (a self-hosted GitHub-compatible server).  Now routes
+    /// through GET /api/v1/repositories/{id}/caller-permission so the Go server
+    /// uses the configured Gitea baseURL for all identity + permission lookups.
     /// Returns one of: "admin", "maintain", "write", "triage", "read", "none".
     func getCallerPermission() async throws -> String {
-        // Step 1: resolve GitHub login from the token via GitHub API directly.
-        // The Hermit server is a local proxy for GitHub interactions; permission
-        // resolution uses the PAT to call GitHub directly from the Swift layer,
-        // consistent with how the Go server resolves collaborator roles.
-        let githubBase = "https://api.github.com"
-        var req = URLRequest(url: URL(string: "\(githubBase)/user")!)
-        req.setValue("Bearer \(config.pat)", forHTTPHeaderField: "Authorization")
-        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
-        let (userData, userResp) = try await session.data(for: req)
-        try checkResponse(userResp, data: userData)
-        struct GHUser: Decodable { let login: String }
-        let ghUser = try JSONDecoder().decode(GHUser.self, from: userData)
-
-        // Step 2: check collaborator permission.
-        var permReq = URLRequest(url: URL(string: "\(githubBase)/repos/\(config.owner)/\(config.repo)/collaborators/\(ghUser.login)/permission")!)
-        permReq.setValue("Bearer \(config.pat)", forHTTPHeaderField: "Authorization")
-        permReq.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        permReq.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
-        let (permData, permResp) = try await session.data(for: permReq)
-        if let http = permResp as? HTTPURLResponse, http.statusCode == 404 {
-            return "none"
+        let repoID = try await repoID()
+        let u = url("/api/v1/repositories/\(repoID)/caller-permission")
+        let data = try await get(u)
+        struct CallerPermissionResult: Decodable {
+            let login: String
+            let permission: String
         }
-        try checkResponse(permResp, data: permData)
-        struct PermPayload: Decodable { let permission: String }
-        let payload = try JSONDecoder().decode(PermPayload.self, from: permData)
-        return payload.permission.isEmpty ? "none" : payload.permission
+        let result = try JSONDecoder().decode(CallerPermissionResult.self, from: data)
+        return result.permission.isEmpty ? "none" : result.permission
     }
 
     // MARK: - getMainBranchSHA

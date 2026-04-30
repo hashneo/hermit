@@ -125,32 +125,46 @@ struct RFCLifecycleToolbar: ToolbarContent {
         isActioning = false
     }
 
+    // hermit-1mg: NSSavePanel must run modally on the main thread with an
+    // explicit window context.  Using runModal() is the safest approach when
+    // the calling site may not have a key-window available (e.g. SwiftUI
+    // toolbar actions dispatched off the main run-loop phase).
+    // renderToPDF was also broken: the detached NSTextView had zero height
+    // because its layout manager had never been asked to lay out the glyphs.
+    // Fix: force a full glyph-layout pass, read the used rect, resize the
+    // view to match, then capture with dataWithPDF(inside:).
+
+    @MainActor
     private func exportPDF() {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.pdf]
         panel.nameFieldStringValue = pdfFilename()
-        panel.begin { response in
-            guard response == .OK, let dest = panel.url else { return }
-            guard let data = renderToPDF() else { return }
-            try? data.write(to: dest)
-        }
+        let response = panel.runModal()
+        guard response == .OK, let dest = panel.url else { return }
+        guard let data = renderToPDF() else { return }
+        try? data.write(to: dest)
     }
 
+    @MainActor
     private func exportDOCX() {
         let panel = NSSavePanel()
         if let docxType = UTType(filenameExtension: "docx") {
             panel.allowedContentTypes = [docxType]
         }
         panel.nameFieldStringValue = docxFilename()
-        panel.begin { response in
-            guard response == .OK, let dest = panel.url else { return }
-            // Full OOXML generation is out of scope; write raw markdown so the
-            // file is at minimum openable and contains the RFC content.
-            let data = markdownSource.data(using: .utf8) ?? Data()
-            try? data.write(to: dest)
-        }
+        let response = panel.runModal()
+        guard response == .OK, let dest = panel.url else { return }
+        // Full OOXML generation is out of scope; write raw markdown so the
+        // file is at minimum openable and contains the RFC content.
+        let data = markdownSource.data(using: .utf8) ?? Data()
+        try? data.write(to: dest)
     }
 
+    // hermit-fdq: NSPrintOperation.run() is a no-op when the view has no
+    // window context (Ventura+ silently drops it).  Fix: use runModal(for:)
+    // targeting NSApp.keyWindow so the print panel has a proper parent; fall
+    // back to run() when no key window is available (e.g. in unit tests).
+    @MainActor
     private func printRFC() {
         let printInfo = NSPrintInfo.shared.copy() as! NSPrintInfo
         printInfo.horizontalPagination = .automatic
@@ -158,42 +172,65 @@ struct RFCLifecycleToolbar: ToolbarContent {
         printInfo.isHorizontallyCentered = true
         printInfo.isVerticallyCentered   = false
 
-        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 595, height: 842))
-        textView.string = markdownSource
-        let op = NSPrintOperation(view: textView, printInfo: printInfo)
+        guard let view = layoutedTextView(width: 522) else { return }
+        let op = NSPrintOperation(view: view, printInfo: printInfo)
         op.showsPrintPanel    = true
         op.showsProgressPanel = true
-        op.run()
+        if let window = NSApp.keyWindow {
+            op.runModal(for: window, delegate: nil,
+                        didRun: nil, contextInfo: nil)
+        } else {
+            op.run()
+        }
     }
 
+    /// Builds a fully laid-out NSTextView from `markdownSource` and returns
+    /// its PDF representation.  Forces a layout pass so the view has non-zero
+    /// height before capturing — the original implementation skipped this step
+    /// and produced an empty document.
+    @MainActor
     private func renderToPDF() -> Data? {
+        guard let view = layoutedTextView(width: 522) else { return nil }
+        return view.dataWithPDF(inside: view.bounds)
+    }
+
+    /// Returns a fully laid-out, off-screen NSTextView whose height matches
+    /// the content of `markdownSource` at the given `width` in points.
+    @MainActor
+    private func layoutedTextView(width: CGFloat) -> NSTextView? {
+        guard !markdownSource.isEmpty else { return nil }
+
         let textStorage = NSTextStorage(string: markdownSource)
         let layoutMgr   = NSLayoutManager()
         textStorage.addLayoutManager(layoutMgr)
+
         let container = NSTextContainer(
-            containerSize: NSSize(width: 522, height: CGFloat.greatestFiniteMagnitude))
+            containerSize: NSSize(width: width, height: CGFloat.greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
         layoutMgr.addTextContainer(container)
-        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 522, height: 792),
+
+        // Force a complete glyph-layout pass so usedRect is accurate.
+        layoutMgr.ensureLayout(for: container)
+        let usedRect = layoutMgr.usedRect(for: container)
+        let height   = max(usedRect.height, 1)
+
+        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: width, height: height),
                                   textContainer: container)
-
-        let pi = NSPrintInfo()
-        pi.paperSize    = NSSize(width: 612, height: 792)
-        pi.topMargin    = 36; pi.bottomMargin = 36
-        pi.leftMargin   = 54; pi.rightMargin  = 54
-        pi.isHorizontallyCentered = false
-        pi.isVerticallyCentered   = false
-
-        let outputData = NSMutableData()
-        let op = NSPrintOperation.pdfOperation(
-            with: textView, inside: textView.bounds,
-            to: outputData, printInfo: pi)
-        op.showsPrintPanel    = false
-        op.showsProgressPanel = false
-        op.run()
-        return outputData as Data
+        textView.isEditable    = false
+        textView.isSelectable  = false
+        return textView
     }
 
+    // hermit-ixk: share the real GitHub/Gitea web URL so recipients can open
+    // the file in a browser without needing Hermit installed.
+    // rfc.htmlURL is populated by the server's CatalogItem.html_url field.
+    // Fall back to a hermit:// deep-link only when htmlURL is empty (e.g. for
+    // RFCs fetched by an older server build that predates this field).
     private func rfcShareURL() -> URL {
+        if !rfc.htmlURL.isEmpty, let webURL = URL(string: rfc.htmlURL) {
+            return webURL
+        }
+        // Fallback: hermit:// deep-link (opens in Hermit on devices that have it).
         let path = rfc.path.isEmpty ? rfc.id : rfc.path
         let encoded = path.addingPercentEncoding(
             withAllowedCharacters: .urlPathAllowed) ?? path

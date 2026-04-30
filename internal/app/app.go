@@ -100,6 +100,7 @@ func newMux(cfg config.Config) *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/ci-status", rfcHandler.GetCIStatus)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rfcs/{rfcId}/approve", rfcHandler.ApproveRFC)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rfcs/{rfcId}/mark-implemented", rfcHandler.MarkImplemented)
+	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/caller-permission", rfcHandler.GetCallerPermission)
 
 	reviewService := review.NewServiceWithMergeClient(nil, review.NewHTTPMergeClient(repositoryService, registryBaseURLs))
 	reviewHandler := review.NewHandler(reviewService)

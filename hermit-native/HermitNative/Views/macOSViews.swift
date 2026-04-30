@@ -18,6 +18,10 @@ struct MenuBarRFCBrowserView: View {
     @StateObject private var store = RFCStore()
     @State private var selectedRFC: RFC? = nil
     @State private var showNewRFC = false
+    // hermit-d42: owned here so the NavigationSplitView sidebar can be
+    // controlled by RFCDetailView's reading-mode toggle.
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var isReadingMode = false
 
     /// Stable identity for the current (account, repo, server-port) triple.
     /// Changing any of these fires a new `.task`, reconfigures the client, and reloads.
@@ -29,7 +33,7 @@ struct MenuBarRFCBrowserView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             RFCListView(rfcs: store.rfcs, selectedRFC: $selectedRFC) {
                 await store.load()
             }
@@ -51,9 +55,22 @@ struct MenuBarRFCBrowserView: View {
             }
         } detail: {
             if let rfc = selectedRFC {
-                RFCDetailView(rfc: rfc)
+                RFCDetailView(rfc: rfc, isReadingMode: $isReadingMode)
             } else {
                 ContentUnavailableView("Select an RFC", systemImage: "doc.text")
+            }
+        }
+        // hermit-d42: sync isReadingMode ↔ columnVisibility so the sidebar
+        // actually hides/shows when the toolbar button is pressed.
+        .onChange(of: isReadingMode) { _, reading in
+            withAnimation {
+                columnVisibility = reading ? .detailOnly : .all
+            }
+        }
+        .onChange(of: columnVisibility) { _, vis in
+            // If the user restores the sidebar via swipe or drag, clear reading mode.
+            if vis != .detailOnly && isReadingMode {
+                isReadingMode = false
             }
         }
         .frame(width: 780, height: 540)

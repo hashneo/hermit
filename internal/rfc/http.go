@@ -237,6 +237,27 @@ func (h *Handler) MarkImplemented(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+// GetCallerPermission handles GET /api/v1/repositories/{repositoryId}/caller-permission.
+// It resolves the authenticated user's collaborator role on the repository and
+// returns it so the native client can decide which toolbar buttons to show.
+// hermit-cns: routes this through the Hermit server (Gitea baseURL) instead of
+// letting the Swift client call api.github.com directly.
+func (h *Handler) GetCallerPermission(w http.ResponseWriter, r *http.Request) {
+	repositoryID := r.PathValue("repositoryId")
+	if repositoryID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_repository_id", "repositoryId path parameter is required")
+		return
+	}
+
+	result, err := h.service.GetCallerPermission(r.Context(), repositoryID)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "get_caller_permission_failed", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
 func parsePRPathParams(w http.ResponseWriter, r *http.Request) (string, int, bool) {
 	repositoryID := r.PathValue("repositoryId")
 	if repositoryID == "" {
