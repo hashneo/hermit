@@ -959,3 +959,104 @@ func parsePRCatalogID(id string) (int, string, bool) {
 
 	return prNumber, filePath, true
 }
+
+// LifecycleTransitionResult is returned on a successful lifecycle status change.
+type LifecycleTransitionResult struct {
+	RfcID     string `json:"rfc_id"`
+	NewStatus string `json:"new_status"`
+	CommitSHA string `json:"commit_sha"`
+}
+
+// isPrivilegedPermission reports whether a GitHub collaborator permission level
+// grants approve/mark-implemented rights.
+// Owners ("admin") and maintainers ("maintain") qualify.
+func isPrivilegedPermission(permission string) bool {
+	switch permission {
+	case "admin", "maintain":
+		return true
+	default:
+		return false
+	}
+}
+
+// ApproveRFC transitions a draft main-branch RFC to "accepted".
+// Caller must be a repo owner or maintainer (403 otherwise).
+func (s *Service) ApproveRFC(ctx context.Context, repositoryID, rfcPath string) (LifecycleTransitionResult, error) {
+	owner, name, _, branch, _, _, token, client, baseURL, err := s.resolveRepoClient(repositoryID)
+	if err != nil {
+		return LifecycleTransitionResult{}, err
+	}
+
+	if err := s.checkPrivileged(ctx, baseURL, owner, name, token, client); err != nil {
+		return LifecycleTransitionResult{}, err
+	}
+
+	sha, err := client.ApproveRFCFile(ctx, baseURL, owner, name, branch, rfcPath, token)
+	if err != nil {
+		return LifecycleTransitionResult{}, err
+	}
+	return LifecycleTransitionResult{RfcID: rfcPath, NewStatus: "accepted", CommitSHA: sha}, nil
+}
+
+// MarkImplemented transitions an accepted main-branch RFC to "implemented".
+// Caller must be a repo owner or maintainer (403 otherwise).
+func (s *Service) MarkImplemented(ctx context.Context, repositoryID, rfcPath string) (LifecycleTransitionResult, error) {
+	owner, name, _, branch, _, _, token, client, baseURL, err := s.resolveRepoClient(repositoryID)
+	if err != nil {
+		return LifecycleTransitionResult{}, err
+	}
+
+	if err := s.checkPrivileged(ctx, baseURL, owner, name, token, client); err != nil {
+		return LifecycleTransitionResult{}, err
+	}
+
+	sha, err := client.MarkRFCFileImplemented(ctx, baseURL, owner, name, branch, rfcPath, token)
+	if err != nil {
+		return LifecycleTransitionResult{}, err
+	}
+	return LifecycleTransitionResult{RfcID: rfcPath, NewStatus: "implemented", CommitSHA: sha}, nil
+}
+
+// resolveRepoClient is a convenience helper that resolves the repo and returns
+// the owner, name, registry, branch, _, _, token, client, baseURL, and any error.
+func (s *Service) resolveRepoClient(repositoryID string) (owner, name, registry, branch, docsPath, rfcLabel, token string, client GitHubRFCClient, baseURL string, err error) {
+	if s.repoResolver == nil {
+		err = fmt.Errorf("repository resolver is not configured")
+		return
+	}
+	var ok bool
+	owner, name, registry, branch, docsPath, rfcLabel, token, ok = s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	if !ok {
+		err = fmt.Errorf("repository not found")
+		return
+	}
+	if token == "" {
+		err = fmt.Errorf("repository token unavailable")
+		return
+	}
+	var exists bool
+	client, exists = s.githubClients[registry]
+	if !exists {
+		client = NewHTTPGitHubRFCClient()
+	}
+	baseURL = s.registryBaseURL(registry)
+	return
+}
+
+// checkPrivileged resolves the caller's GitHub login and verifies they have
+// admin or maintain permission on the repository.
+// Returns a sentinel error whose message starts with "forbidden:" on 403.
+func (s *Service) checkPrivileged(ctx context.Context, baseURL, owner, name, token string, client GitHubRFCClient) error {
+	login, err := client.GetAuthenticatedUser(ctx, baseURL, token)
+	if err != nil {
+		return fmt.Errorf("resolve caller identity: %w", err)
+	}
+	perm, err := client.GetCollaboratorPermission(ctx, baseURL, owner, name, login, token)
+	if err != nil {
+		return fmt.Errorf("check collaborator permission: %w", err)
+	}
+	if !isPrivilegedPermission(perm) {
+		return fmt.Errorf("forbidden: user %q has permission %q; approve/mark-implemented requires admin or maintain", login, perm)
+	}
+	return nil
+}

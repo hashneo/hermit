@@ -101,3 +101,15 @@ struct AcceptRFCResult: Decodable {
         self.handedToIronhide = handedToIronhide
     }
 }
+
+struct LifecycleTransitionResult: Decodable {
+    let rfcID: String
+    let newStatus: String
+    let commitSHA: String
+
+    enum CodingKeys: String, CodingKey {
+        case rfcID     = "rfc_id"
+        case newStatus = "new_status"
+        case commitSHA = "commit_sha"
+    }
+}

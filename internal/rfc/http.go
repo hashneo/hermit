@@ -181,6 +181,62 @@ func (h *Handler) GetCIStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (h *Handler) ApproveRFC(w http.ResponseWriter, r *http.Request) {
+	repositoryID := r.PathValue("repositoryId")
+	if repositoryID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_repository_id", "repositoryId path parameter is required")
+		return
+	}
+	rfcID := r.PathValue("rfcId")
+	if rfcID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_rfc_id", "rfcId path parameter is required")
+		return
+	}
+
+	result, err := h.service.ApproveRFC(r.Context(), repositoryID, rfcID)
+	if err != nil {
+		switch {
+		case strings.HasPrefix(err.Error(), "forbidden:"):
+			writeError(w, http.StatusForbidden, "forbidden", err.Error())
+		case strings.Contains(err.Error(), "cannot approve"):
+			writeError(w, http.StatusConflict, "invalid_status_transition", err.Error())
+		default:
+			writeError(w, http.StatusBadGateway, "approve_rfc_failed", err.Error())
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) MarkImplemented(w http.ResponseWriter, r *http.Request) {
+	repositoryID := r.PathValue("repositoryId")
+	if repositoryID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_repository_id", "repositoryId path parameter is required")
+		return
+	}
+	rfcID := r.PathValue("rfcId")
+	if rfcID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_rfc_id", "rfcId path parameter is required")
+		return
+	}
+
+	result, err := h.service.MarkImplemented(r.Context(), repositoryID, rfcID)
+	if err != nil {
+		switch {
+		case strings.HasPrefix(err.Error(), "forbidden:"):
+			writeError(w, http.StatusForbidden, "forbidden", err.Error())
+		case strings.Contains(err.Error(), "cannot mark implemented"):
+			writeError(w, http.StatusConflict, "invalid_status_transition", err.Error())
+		default:
+			writeError(w, http.StatusBadGateway, "mark_implemented_failed", err.Error())
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
 func parsePRPathParams(w http.ResponseWriter, r *http.Request) (string, int, bool) {
 	repositoryID := r.PathValue("repositoryId")
 	if repositoryID == "" {

@@ -7,6 +7,7 @@ import UIKit
 
 // MARK: - hermit-ii0: RFCDetailView — native markdown viewer with gutter comment markers
 // hermit-8q5: Reading Mode — full-screen RFC view with swipe-to-restore sidebar
+// hermit-ec7: RFC window toolbar — export/print/share + lifecycle transitions
 
 struct RFCDetailView: View {
     let rfc: RFC
@@ -43,6 +44,21 @@ struct RFCDetailView: View {
     /// Bumped by the reload button to re-trigger .task without navigating away.
     @State private var reloadToken = UUID()
 
+    // hermit-ec7: toolbar state
+    @State private var callerPermission: String = "none"
+    @State private var lifecycleError: String? = nil
+    @State private var currentRFC: RFC         // mutable copy so status refreshes after transition
+
+    init(rfc: RFC, repo: Repository? = nil,
+         commentStore: CommentStore? = nil,
+         onLineTapped: ((Int, Int) -> Void)? = nil) {
+        self.rfc          = rfc
+        self.repo         = repo
+        self.commentStore = commentStore
+        self.onLineTapped = onLineTapped
+        self._currentRFC  = State(initialValue: rfc)
+    }
+
     var body: some View {
         Group {
             if isLoading {
@@ -54,7 +70,7 @@ struct RFCDetailView: View {
                 rfcContentView
             }
         }
-        .navigationTitle(rfc.title)
+        .navigationTitle(currentRFC.title)
         .toolbar {
             RFCLifecycleToolbar(
                 rfc: rfc,
@@ -125,15 +141,28 @@ struct RFCDetailView: View {
                 .disabled(isLoading)
                 .help("Reload this RFC")
             }
+            // hermit-8q5: reading-mode toggle (existing)
             ToolbarItem(placement: .automatic) {
                 Button {
                     withAnimation { isReadingMode.toggle() }
                 } label: {
-                    Image(systemName: isReadingMode ? "sidebar.left" : "arrow.up.left.and.arrow.down.right")
+                    Image(systemName: isReadingMode
+                          ? "sidebar.left"
+                          : "arrow.up.left.and.arrow.down.right")
                 }
                 .help(isReadingMode ? "Restore sidebar" : "Reading mode")
             }
+
+            // hermit-ec7: export/print/share + lifecycle toolbar
+            RFCLifecycleToolbar(
+                rfc: currentRFC,
+                callerPermission: callerPermission,
+                onApprove: handleApprove,
+                onMarkImplemented: handleMarkImplemented,
+                markdownSource: markdown
+            )
         }
+        .overlay(lifecycleErrorBanner, alignment: .top)
         .task(id: rfc.id) { await loadContent() }
         .onChange(of: reloadToken) { Task { await loadContent() } }
         .alert("Merge Failed", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
@@ -150,6 +179,27 @@ struct RFCDetailView: View {
                     }
                 }
         )
+    }
+
+    // MARK: - Error banner
+
+    @ViewBuilder
+    private var lifecycleErrorBanner: some View {
+        if let msg = lifecycleError {
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.yellow)
+                Text(msg)
+                    .font(.caption)
+                Spacer()
+                Button("Dismiss") { lifecycleError = nil }
+                    .font(.caption)
+            }
+            .padding(8)
+            .background(.ultraThinMaterial)
+            .cornerRadius(8)
+            .padding([.horizontal, .top], 12)
+        }
     }
 
     @State private var viewportHeight: CGFloat = 800
@@ -203,6 +253,8 @@ struct RFCDetailView: View {
             }
         }
     }
+
+    // MARK: - Content loading
 
     private func loadContent() async {
         isLoading = true
@@ -279,6 +331,54 @@ struct RFCDetailView: View {
         }
 
         isLoading = false
+
+        // hermit-ec7: fetch caller permission level for toolbar access control
+        await fetchCallerPermission(client: client)
+    }
+
+    // MARK: - Permission fetch
+
+    private func fetchCallerPermission(client: any HermitClientProtocol) async {
+        guard case .mainBranch = rfc.source else {
+            // PR RFCs don't expose lifecycle transitions; no need to check.
+            callerPermission = "none"
+            return
+        }
+        do {
+            callerPermission = try await client.getCallerPermission()
+        } catch {
+            // Non-fatal — toolbar buttons will be disabled (safest default).
+            callerPermission = "none"
+        }
+    }
+
+    // MARK: - Lifecycle transition handlers
+
+    private func handleApprove() async {
+        guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient() else { return }
+        do {
+            let result = try await client.approveRFC(rfcID: rfc.path)
+            // Refresh the displayed RFC with the new status.
+            currentRFC = RFC(id: currentRFC.id, title: currentRFC.title,
+                             path: currentRFC.path, sha: currentRFC.sha,
+                             source: currentRFC.source,
+                             lifecycleStatus: result.newStatus)
+        } catch {
+            lifecycleError = error.localizedDescription
+        }
+    }
+
+    private func handleMarkImplemented() async {
+        guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient() else { return }
+        do {
+            let result = try await client.markRFCImplemented(rfcID: rfc.path)
+            currentRFC = RFC(id: currentRFC.id, title: currentRFC.title,
+                             path: currentRFC.path, sha: currentRFC.sha,
+                             source: currentRFC.source,
+                             lifecycleStatus: result.newStatus)
+        } catch {
+            lifecycleError = error.localizedDescription
+        }
     }
 
     /// Extracts the value of the `status` key from YAML frontmatter in the given markdown.

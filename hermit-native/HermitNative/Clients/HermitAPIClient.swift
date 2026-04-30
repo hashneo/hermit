@@ -52,6 +52,13 @@ protocol HermitClientProtocol: Actor {
     func acceptRFC(prNumber: Int, filePath: String) async throws -> AcceptRFCResult
     // Poll GitHub CI check status for a commit SHA.
     func getCIStatus(commitSHA: String) async throws -> String  // "pending" | "success" | "failure"
+
+    // Lifecycle transitions on main-branch RFCs (require admin/maintain permission).
+    func approveRFC(rfcID: String) async throws -> LifecycleTransitionResult
+    func markRFCImplemented(rfcID: String) async throws -> LifecycleTransitionResult
+
+    // Access control — returns the caller's collaborator permission level for the repo.
+    func getCallerPermission() async throws -> String
 }
 
 // MARK: - HermitAPIClient
@@ -329,6 +336,65 @@ actor HermitAPIClient: HermitClientProtocol {
         let data = try await get(u)
         struct Response: Decodable { let status: String }
         return (try? JSONDecoder().decode(Response.self, from: data))?.status ?? "pending"
+    }
+
+    // MARK: - approveRFC
+
+    func approveRFC(rfcID: String) async throws -> LifecycleTransitionResult {
+        let repoID = try await repoID()
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove("/")
+        let encoded = rfcID.addingPercentEncoding(withAllowedCharacters: allowed) ?? rfcID
+        let u = url("/api/v1/repositories/\(repoID)/rfcs/\(encoded)/approve")
+        let data = try await post(u, body: [:])
+        return try JSONDecoder().decode(LifecycleTransitionResult.self, from: data)
+    }
+
+    // MARK: - markRFCImplemented
+
+    func markRFCImplemented(rfcID: String) async throws -> LifecycleTransitionResult {
+        let repoID = try await repoID()
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove("/")
+        let encoded = rfcID.addingPercentEncoding(withAllowedCharacters: allowed) ?? rfcID
+        let u = url("/api/v1/repositories/\(repoID)/rfcs/\(encoded)/mark-implemented")
+        let data = try await post(u, body: [:])
+        return try JSONDecoder().decode(LifecycleTransitionResult.self, from: data)
+    }
+
+    // MARK: - getCallerPermission
+
+    /// Returns the caller's collaborator permission level by resolving their
+    /// GitHub login via /user then checking /repos/{owner}/{repo}/collaborators/{login}/permission.
+    /// Returns one of: "admin", "maintain", "write", "triage", "read", "none".
+    func getCallerPermission() async throws -> String {
+        // Step 1: resolve GitHub login from the token via GitHub API directly.
+        // The Hermit server is a local proxy for GitHub interactions; permission
+        // resolution uses the PAT to call GitHub directly from the Swift layer,
+        // consistent with how the Go server resolves collaborator roles.
+        let githubBase = "https://api.github.com"
+        var req = URLRequest(url: URL(string: "\(githubBase)/user")!)
+        req.setValue("Bearer \(config.pat)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        let (userData, userResp) = try await session.data(for: req)
+        try checkResponse(userResp, data: userData)
+        struct GHUser: Decodable { let login: String }
+        let ghUser = try JSONDecoder().decode(GHUser.self, from: userData)
+
+        // Step 2: check collaborator permission.
+        var permReq = URLRequest(url: URL(string: "\(githubBase)/repos/\(config.owner)/\(config.repo)/collaborators/\(ghUser.login)/permission")!)
+        permReq.setValue("Bearer \(config.pat)", forHTTPHeaderField: "Authorization")
+        permReq.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        permReq.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        let (permData, permResp) = try await session.data(for: permReq)
+        if let http = permResp as? HTTPURLResponse, http.statusCode == 404 {
+            return "none"
+        }
+        try checkResponse(permResp, data: permData)
+        struct PermPayload: Decodable { let permission: String }
+        let payload = try JSONDecoder().decode(PermPayload.self, from: permData)
+        return payload.permission.isEmpty ? "none" : payload.permission
     }
 
     // MARK: - getMainBranchSHA

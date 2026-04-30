@@ -39,6 +39,15 @@ type GitHubRFCClient interface {
 	LabelExists(ctx context.Context, baseURL, owner, name, label, token string) (bool, error)
 	// AddLabels appends labels to a pull request (issues API).
 	AddLabels(ctx context.Context, baseURL, owner, name string, prNumber int, labels []string, token string) error
+
+	// Access control — returns "admin", "maintain", "write", "triage", "read", or "none".
+	GetCollaboratorPermission(ctx context.Context, baseURL, owner, name, username, token string) (string, error)
+	// GetAuthenticatedUser returns the GitHub login for the token owner.
+	GetAuthenticatedUser(ctx context.Context, baseURL, token string) (string, error)
+
+	// Lifecycle transitions on main-branch RFCs.
+	ApproveRFCFile(ctx context.Context, baseURL, owner, name, branch, filePath, token string) (string, error)
+	MarkRFCFileImplemented(ctx context.Context, baseURL, owner, name, branch, filePath, token string) (string, error)
 }
 
 // CreatedPR is the minimal response from a PR creation call.
@@ -684,7 +693,6 @@ func (c *HTTPGitHubRFCClient) GetPRHead(ctx context.Context, baseURL, owner, nam
 }
 
 // CommitFileOnBranch commits content to filePath on branch, returning the new commit SHA.
-// It first fetches the current blob SHA so GitHub accepts the update.
 func (c *HTTPGitHubRFCClient) CommitFileOnBranch(ctx context.Context, baseURL, owner, name, branch, filePath, content, message, token string) (string, error) {
 	return c.CommitFile(ctx, baseURL, owner, name, branch, filePath, content, message, token)
 }
@@ -696,7 +704,6 @@ func (c *HTTPGitHubRFCClient) CommitFileOnBranch(ctx context.Context, baseURL, o
 func (c *HTTPGitHubRFCClient) MergePR(ctx context.Context, baseURL, owner, name string, prNumber int, token string) (bool, bool, error) {
 	apiBase := strings.TrimRight(baseURL, "/")
 	u := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/merge", apiBase, owner, name, prNumber)
-
 	body, err := json.Marshal(map[string]string{"merge_method": "squash"})
 	if err != nil {
 		return false, false, err
@@ -707,21 +714,17 @@ func (c *HTTPGitHubRFCClient) MergePR(ctx context.Context, baseURL, owner, name 
 	}
 	setGitHubHeaders(req, token)
 	req.Header.Set("Content-Type", "application/json")
-
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return false, false, err
 	}
 	defer resp.Body.Close()
-
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusCreated:
 		return true, false, nil
 	case http.StatusMethodNotAllowed:
-		// 405: merge blocked by required status checks pending or failing — poll CI and retry.
 		return false, true, nil
 	case http.StatusConflict:
-		// 409: merge conflict — this is a real error the user must resolve.
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		return false, false, fmt.Errorf("merge conflict: %s", strings.TrimSpace(string(b)))
 	default:
@@ -740,7 +743,6 @@ func (c *HTTPGitHubRFCClient) GetCIStatus(ctx context.Context, baseURL, owner, n
 		return "pending", err
 	}
 	setGitHubHeaders(req, token)
-
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return "pending", err
@@ -749,7 +751,6 @@ func (c *HTTPGitHubRFCClient) GetCIStatus(ctx context.Context, baseURL, owner, n
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "pending", fmt.Errorf("get check-runs failed: %d", resp.StatusCode)
 	}
-
 	var result struct {
 		TotalCount int `json:"total_count"`
 		CheckRuns  []struct {
@@ -760,11 +761,9 @@ func (c *HTTPGitHubRFCClient) GetCIStatus(ctx context.Context, baseURL, owner, n
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "pending", err
 	}
-
 	if result.TotalCount == 0 {
-		return "success", nil // no checks required
+		return "success", nil
 	}
-
 	for _, run := range result.CheckRuns {
 		if run.Status != "completed" {
 			return "pending", nil
@@ -824,4 +823,110 @@ func (c *HTTPGitHubRFCClient) AddLabels(ctx context.Context, baseURL, owner, nam
 		return fmt.Errorf("add labels failed: %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// GetCollaboratorPermission returns the permission level for username on the
+// given repository using the GitHub collaborator permission API.
+// Returns one of: "admin", "maintain", "write", "triage", "read", "none".
+func (c *HTTPGitHubRFCClient) GetCollaboratorPermission(ctx context.Context, baseURL, owner, name, username, token string) (string, error) {
+	apiBase := strings.TrimRight(baseURL, "/")
+	u := fmt.Sprintf("%s/repos/%s/%s/collaborators/%s/permission", apiBase, owner, name, username)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "none", err
+	}
+	setGitHubHeaders(req, token)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "none", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		// Not a collaborator at all.
+		return "none", nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return "none", fmt.Errorf("get collaborator permission failed: %d %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	var payload struct {
+		Permission string `json:"permission"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "none", err
+	}
+	if payload.Permission == "" {
+		return "none", nil
+	}
+	return payload.Permission, nil
+}
+
+// GetAuthenticatedUser returns the GitHub login for the token owner.
+func (c *HTTPGitHubRFCClient) GetAuthenticatedUser(ctx context.Context, baseURL, token string) (string, error) {
+	apiBase := strings.TrimRight(baseURL, "/")
+	// GitHub: /user. Gitea-compatible: same endpoint.
+	u := fmt.Sprintf("%s/user", apiBase)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", err
+	}
+	setGitHubHeaders(req, token)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return "", fmt.Errorf("get authenticated user failed: %d %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	var payload struct {
+		Login string `json:"login"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", err
+	}
+	return payload.Login, nil
+}
+
+// ApproveRFCFile rewrites the RFC frontmatter status to "accepted" on the main branch.
+// Returns the commit SHA.
+func (c *HTTPGitHubRFCClient) ApproveRFCFile(ctx context.Context, baseURL, owner, name, branch, filePath, token string) (string, error) {
+	view, err := c.GetRFC(ctx, baseURL, owner, name, branch, filePath, token)
+	if err != nil {
+		return "", fmt.Errorf("fetch rfc for approve: %w", err)
+	}
+	meta, _ := parseFrontmatter(view.MarkdownSource)
+	current := normalizeLifecycleStatus(meta["status"])
+	if current != "draft" {
+		return "", fmt.Errorf("cannot approve: RFC status is %q (only draft RFCs may be approved)", current)
+	}
+	updated := rewriteFrontmatterStatus(view.MarkdownSource, "accepted")
+	commitMsg := fmt.Sprintf("docs(rfc): approve %s", path.Base(filePath))
+	sha, err := c.CommitFile(ctx, baseURL, owner, name, branch, filePath, updated, commitMsg, token)
+	if err != nil {
+		return "", fmt.Errorf("commit approved rfc: %w", err)
+	}
+	return sha, nil
+}
+
+// MarkRFCFileImplemented rewrites the RFC frontmatter status to "implemented" on the main branch.
+// Returns the commit SHA.
+func (c *HTTPGitHubRFCClient) MarkRFCFileImplemented(ctx context.Context, baseURL, owner, name, branch, filePath, token string) (string, error) {
+	view, err := c.GetRFC(ctx, baseURL, owner, name, branch, filePath, token)
+	if err != nil {
+		return "", fmt.Errorf("fetch rfc for mark-implemented: %w", err)
+	}
+	meta, _ := parseFrontmatter(view.MarkdownSource)
+	current := normalizeLifecycleStatus(meta["status"])
+	if current != "accepted" {
+		return "", fmt.Errorf("cannot mark implemented: RFC status is %q (only accepted RFCs may be marked implemented)", current)
+	}
+	updated := rewriteFrontmatterStatus(view.MarkdownSource, "implemented")
+	commitMsg := fmt.Sprintf("docs(rfc): mark %s implemented", path.Base(filePath))
+	sha, err := c.CommitFile(ctx, baseURL, owner, name, branch, filePath, updated, commitMsg, token)
+	if err != nil {
+		return "", fmt.Errorf("commit implemented rfc: %w", err)
+	}
+	return sha, nil
 }

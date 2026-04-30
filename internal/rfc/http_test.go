@@ -111,3 +111,217 @@ func TestRenderPRRFC(t *testing.T) {
 		t.Fatalf("title = %q, want %q", view.Title, "Test RFC")
 	}
 }
+
+// newLifecycleTestServer builds a fake GitHub API server that serves a single RFC
+// and responds to user/permission/contents endpoints as needed for lifecycle tests.
+func newLifecycleTestServer(t *testing.T, rfcMarkdown, permission string, captureCommit *string) *httptest.Server {
+	t.Helper()
+	rfcContent := base64.StdEncoding.EncodeToString([]byte(rfcMarkdown))
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		// Authenticated user lookup
+		case r.URL.Path == "/user":
+			_ = json.NewEncoder(w).Encode(map[string]string{"login": "alice"})
+
+		// Collaborator permission
+		case strings.HasPrefix(r.URL.Path, "/repos/owner/repo/collaborators/alice/permission"):
+			_ = json.NewEncoder(w).Encode(map[string]string{"permission": permission})
+
+		// RFC content GET
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/repos/owner/repo/contents/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"name":    "rfc-001-test.md",
+				"path":    "docs-cms/rfcs/rfc-001-test.md",
+				"sha":     "blobsha",
+				"content": rfcContent,
+			})
+
+		// RFC content PUT (commit)
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/repos/owner/repo/contents/"):
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if captureCommit != nil {
+				if msg, ok := body["message"].(string); ok {
+					*captureCommit = msg
+				}
+			}
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"commit": map[string]string{"sha": "newsha123"},
+			})
+
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func TestApproveRFC_Success(t *testing.T) {
+	rfcMarkdown := "---\ntitle: Test RFC\nstatus: draft\n---\n# Test RFC\n"
+	var capturedCommitMsg string
+	srv := newLifecycleTestServer(t, rfcMarkdown, "admin", &capturedCommitMsg)
+	defer srv.Close()
+
+	resolver := &fakeResolver{
+		owner: "owner", name: "repo",
+		registry: "gh", branch: "main",
+		docsPath: "docs-cms/rfcs", token: "tok",
+	}
+	service := NewServiceWithRepositoryResolver(resolver, map[string]string{"gh": srv.URL})
+	handler := NewHandler(service)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rfcs/{rfcId}/approve", handler.ApproveRFC)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/repositories/repo-1/rfcs/docs-cms%2Frfcs%2Frfc-001-test.md/approve", nil)
+	resp := httptest.NewRecorder()
+	mux.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("approve status = %d, want 200; body = %s", resp.Code, resp.Body.String())
+	}
+	var result LifecycleTransitionResult
+	if err := json.Unmarshal(resp.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode approve response: %v", err)
+	}
+	if result.NewStatus != "accepted" {
+		t.Errorf("new_status = %q, want accepted", result.NewStatus)
+	}
+	if result.CommitSHA != "newsha123" {
+		t.Errorf("commit_sha = %q, want newsha123", result.CommitSHA)
+	}
+}
+
+func TestApproveRFC_Forbidden(t *testing.T) {
+	rfcMarkdown := "---\ntitle: Test RFC\nstatus: draft\n---\n# Test RFC\n"
+	srv := newLifecycleTestServer(t, rfcMarkdown, "read", nil)
+	defer srv.Close()
+
+	resolver := &fakeResolver{
+		owner: "owner", name: "repo",
+		registry: "gh", branch: "main",
+		docsPath: "docs-cms/rfcs", token: "tok",
+	}
+	service := NewServiceWithRepositoryResolver(resolver, map[string]string{"gh": srv.URL})
+	handler := NewHandler(service)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rfcs/{rfcId}/approve", handler.ApproveRFC)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/repositories/repo-1/rfcs/docs-cms%2Frfcs%2Frfc-001-test.md/approve", nil)
+	resp := httptest.NewRecorder()
+	mux.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d; body = %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestApproveRFC_WrongStatus(t *testing.T) {
+	rfcMarkdown := "---\ntitle: Test RFC\nstatus: accepted\n---\n# Test RFC\n"
+	srv := newLifecycleTestServer(t, rfcMarkdown, "admin", nil)
+	defer srv.Close()
+
+	resolver := &fakeResolver{
+		owner: "owner", name: "repo",
+		registry: "gh", branch: "main",
+		docsPath: "docs-cms/rfcs", token: "tok",
+	}
+	service := NewServiceWithRepositoryResolver(resolver, map[string]string{"gh": srv.URL})
+	handler := NewHandler(service)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rfcs/{rfcId}/approve", handler.ApproveRFC)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/repositories/repo-1/rfcs/docs-cms%2Frfcs%2Frfc-001-test.md/approve", nil)
+	resp := httptest.NewRecorder()
+	mux.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d; body = %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestMarkImplemented_Success(t *testing.T) {
+	rfcMarkdown := "---\ntitle: Test RFC\nstatus: accepted\n---\n# Test RFC\n"
+	var capturedCommitMsg string
+	srv := newLifecycleTestServer(t, rfcMarkdown, "admin", &capturedCommitMsg)
+	defer srv.Close()
+
+	resolver := &fakeResolver{
+		owner: "owner", name: "repo",
+		registry: "gh", branch: "main",
+		docsPath: "docs-cms/rfcs", token: "tok",
+	}
+	service := NewServiceWithRepositoryResolver(resolver, map[string]string{"gh": srv.URL})
+	handler := NewHandler(service)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rfcs/{rfcId}/mark-implemented", handler.MarkImplemented)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/repositories/repo-1/rfcs/docs-cms%2Frfcs%2Frfc-001-test.md/mark-implemented", nil)
+	resp := httptest.NewRecorder()
+	mux.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("mark-implemented status = %d, want 200; body = %s", resp.Code, resp.Body.String())
+	}
+	var result LifecycleTransitionResult
+	if err := json.Unmarshal(resp.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode mark-implemented response: %v", err)
+	}
+	if result.NewStatus != "implemented" {
+		t.Errorf("new_status = %q, want implemented", result.NewStatus)
+	}
+}
+
+func TestMarkImplemented_Forbidden(t *testing.T) {
+	rfcMarkdown := "---\ntitle: Test RFC\nstatus: accepted\n---\n# Test RFC\n"
+	srv := newLifecycleTestServer(t, rfcMarkdown, "write", nil)
+	defer srv.Close()
+
+	resolver := &fakeResolver{
+		owner: "owner", name: "repo",
+		registry: "gh", branch: "main",
+		docsPath: "docs-cms/rfcs", token: "tok",
+	}
+	service := NewServiceWithRepositoryResolver(resolver, map[string]string{"gh": srv.URL})
+	handler := NewHandler(service)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rfcs/{rfcId}/mark-implemented", handler.MarkImplemented)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/repositories/repo-1/rfcs/docs-cms%2Frfcs%2Frfc-001-test.md/mark-implemented", nil)
+	resp := httptest.NewRecorder()
+	mux.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d; body = %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestMarkImplemented_WrongStatus(t *testing.T) {
+	rfcMarkdown := "---\ntitle: Test RFC\nstatus: draft\n---\n# Test RFC\n"
+	srv := newLifecycleTestServer(t, rfcMarkdown, "admin", nil)
+	defer srv.Close()
+
+	resolver := &fakeResolver{
+		owner: "owner", name: "repo",
+		registry: "gh", branch: "main",
+		docsPath: "docs-cms/rfcs", token: "tok",
+	}
+	service := NewServiceWithRepositoryResolver(resolver, map[string]string{"gh": srv.URL})
+	handler := NewHandler(service)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rfcs/{rfcId}/mark-implemented", handler.MarkImplemented)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/repositories/repo-1/rfcs/docs-cms%2Frfcs%2Frfc-001-test.md/mark-implemented", nil)
+	resp := httptest.NewRecorder()
+	mux.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d; body = %s", resp.Code, resp.Body.String())
+	}
+}
