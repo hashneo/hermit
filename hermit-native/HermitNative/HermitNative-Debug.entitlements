@@ -2,8 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- hermit-hy4: sandbox ON in all configurations; subprocess fallback removed -->
 	<key>com.apple.security.app-sandbox</key>
-	<false/>
+	<true/>
 	<!-- hermit-y9x: embedded Go server binds a TCP port -->
 	<key>com.apple.security.network.server</key>
 	<true/>
@@ -12,9 +13,8 @@
 	<true/>
 	<key>com.apple.security.device.microphone</key>
 	<true/>
-	<!-- Note: com.apple.security.network.server and com.apple.developer.nearby-interaction
-	     require a provisioned development certificate and are only present in the
-	     release entitlements (HermitNative.entitlements). The embedded server is
-	     guarded by #if HERMIT_EMBEDDED_SERVER which is only set in provisioned builds. -->
+	<!-- hermit-z9j: Handoff/NSUserActivity requires nearby-interaction entitlement -->
+	<key>com.apple.developer.nearby-interaction</key>
+	<true/>
 </dict>
 </plist>

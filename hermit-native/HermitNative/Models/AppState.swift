@@ -139,9 +139,8 @@ final class AppState: ObservableObject {
             ))
             if !detected.pat.isEmpty {
                 if let conn = AccountStore.shared.connections.first {
-                    // Use updateTokenOnly to avoid triggering restartEmbeddedServer()
-                    // during init — that would cause a dispatch_once re-entrancy deadlock
-                    // via AppState.shared before this singleton has finished initialising.
+                    // Use updateTokenOnly to avoid posting hermitRestartRequired
+                    // during init — the server has not started yet at this point.
                     AccountStore.shared.updateTokenOnly(conn, token: detected.pat)
                 }
             }

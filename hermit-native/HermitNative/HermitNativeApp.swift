@@ -65,20 +65,9 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let msg = "[\(Date())] [AppDelegate] applicationDidFinishLaunching\n"
         if let d = msg.data(using: .utf8), let fh = FileHandle(forWritingAtPath: "/tmp/hermit-native-debug.log") { fh.seekToEndOfFile(); fh.write(d); try? fh.close() }
-        killStaleServerProcesses()
         DispatchQueue.main.async {
             self.startServerIfNeeded()
         }
-    }
-
-    /// Kill any stale `bin/hermit` subprocess left over from a previous app run.
-    /// This ensures the new launch always starts a fresh server with the current PAT.
-    private func killStaleServerProcesses() {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        task.arguments = ["-f", "bin/hermit"]
-        try? task.run()
-        task.waitUntilExit()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

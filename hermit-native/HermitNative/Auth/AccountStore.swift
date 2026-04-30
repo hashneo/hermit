@@ -90,10 +90,12 @@ final class AccountStore: ObservableObject {
             if let endpoint = UserDefaults.standard.string(forKey: "hermit.serverBaseURL"),
                !endpoint.isEmpty {
                 var conn = Connection(name: "Default", endpoint: endpoint)
-                let legacyToken = KeychainHelper.shared.readAccountToken(key: "hermit.pat") ?? ""
 #if DEBUG
+                // hermit-dp7: In DEBUG, read legacy PAT from UserDefaults only (no Keychain).
+                let legacyToken = UserDefaults.standard.string(forKey: "hermit.pat") ?? ""
                 conn.token = legacyToken.isEmpty ? nil : legacyToken
 #else
+                let legacyToken = KeychainHelper.shared.readAccountToken(key: "hermit.pat") ?? ""
                 KeychainHelper.shared.writeAccountToken(legacyToken, key: conn.keychainKey)
 #endif
                 conns = [conn]
@@ -115,13 +117,15 @@ final class AccountStore: ObservableObject {
 #endif
         connections.append(conn)
         save()
-        restartEmbeddedServer()
+        // hermit-9ds: no live server restart — user must relaunch to apply config changes.
+        NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
     }
 
     func update(_ connection: Connection, token: String? = nil) {
         updateInPlace(connection, token: token)
         save()
-        restartEmbeddedServer()
+        // hermit-9ds: no live server restart — user must relaunch to apply config changes.
+        NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
     }
 
     /// Update a token without triggering a server restart.
@@ -151,7 +155,8 @@ final class AccountStore: ObservableObject {
 #endif
         connections.removeAll { $0.id == connection.id }
         save()
-        restartEmbeddedServer()
+        // hermit-9ds: no live server restart — user must relaunch to apply config changes.
+        NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
     }
 
     func token(for connection: Connection) -> String? {
@@ -250,20 +255,23 @@ final class RepositoryStore: ObservableObject {
                               docsPath: docsPath, rfcLabel: rfcLabel)
         repositories.append(repo)
         save()
-        restartEmbeddedServer()
+        // hermit-9ds: no live server restart — user must relaunch to apply config changes.
+        NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
     }
 
     func update(_ repo: Repository) {
         guard let idx = repositories.firstIndex(where: { $0.id == repo.id }) else { return }
         repositories[idx] = repo
         save()
-        restartEmbeddedServer()
+        // hermit-9ds: no live server restart — user must relaunch to apply config changes.
+        NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
     }
 
     func remove(_ repo: Repository) {
         repositories.removeAll { $0.id == repo.id }
         save()
-        restartEmbeddedServer()
+        // hermit-9ds: no live server restart — user must relaunch to apply config changes.
+        NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
     }
 
     // MARK: - Private
@@ -301,11 +309,11 @@ final class RepositoryStore: ObservableObject {
     }
 }
 
-// MARK: - Embedded server restart helper
+// MARK: - hermit-9ds: Notification posted when config changes require an app relaunch
 
-@MainActor
-private func restartEmbeddedServer() {
-#if os(macOS)
-    EmbeddedServerManager.shared.restart()
-#endif
+extension Notification.Name {
+    /// Posted by AccountStore/RepositoryStore when the user saves a change that
+    /// requires the app to be relaunched for the embedded server to pick it up.
+    /// Config changes no longer trigger a live server restart.
+    static let hermitRestartRequired = Notification.Name("com.hashicorp.hermit.restartRequired")
 }

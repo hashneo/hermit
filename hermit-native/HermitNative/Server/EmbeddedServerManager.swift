@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import os.log
 #if os(macOS)
 import AppKit
 #endif
@@ -7,17 +8,42 @@ import AppKit
 import HermitServer
 #endif
 
+// MARK: - hermit-nnn: Debug logging helpers
+
+private let hermitLog = OSLog(subsystem: "com.hashicorp.hermit", category: "EmbeddedServer")
+
+/// Append a timestamped line to /tmp/hermit-native-debug.log and emit an os_log message.
+private func esLog(_ message: String) {
+    os_log("%{public}@", log: hermitLog, type: .debug, message)
+    let line = "[\(Date())] [EmbeddedServerManager] \(message)\n"
+    guard let data = line.data(using: .utf8) else { return }
+    if FileManager.default.fileExists(atPath: "/tmp/hermit-native-debug.log"),
+       let fh = FileHandle(forWritingAtPath: "/tmp/hermit-native-debug.log") {
+        fh.seekToEndOfFile()
+        fh.write(data)
+        try? fh.close()
+    } else {
+        try? data.write(to: URL(fileURLWithPath: "/tmp/hermit-native-debug.log"), options: .atomic)
+    }
+}
+
+/// Replace every "pat":"<value>" in a JSON string with "pat":"[REDACTED]".
+private func redactPATs(in json: String) -> String {
+    guard let regex = try? NSRegularExpression(pattern: #""pat"\s*:\s*"[^"]*""#) else { return json }
+    let range = NSRange(json.startIndex..., in: json)
+    return regex.stringByReplacingMatches(in: json, range: range, withTemplate: #""pat":"[REDACTED]""#)
+}
+
 // MARK: - hermit-y9x: Launch embedded Go server at app startup
 // MARK: - hermit-6et: Register Bonjour _hermit._tcp service after server starts
 
 /// Manages the lifecycle of the embedded Hermit Go server on macOS.
 ///
-/// Production: Go server compiled into HermitServer.xcframework via `make gomobile-build`,
-/// started in-process via MobileStart(). Enable with -DHERMIT_EMBEDDED_SERVER.
+/// The Go server is compiled into HermitServer.xcframework via `make gomobile-build`
+/// and started in-process via MobileStart(). Enable with -DHERMIT_EMBEDDED_SERVER.
 ///
-/// Debug fallback: when xcframework is not available, spawns the Go server as a
-/// subprocess via `make run` from the repo root, then polls until it responds.
-/// The subprocess is terminated when the app quits.
+/// There is no subprocess fallback. If MobileStart is unavailable the build
+/// simply fails to compile, making the architecture explicit and non-negotiable.
 #if os(macOS)
 @MainActor
 final class EmbeddedServerManager: ObservableObject {
@@ -28,18 +54,8 @@ final class EmbeddedServerManager: ObservableObject {
     @Published private(set) var errorMessage: String? = nil
 
     private var bonjourListener: NWListener? = nil
-    private var serverProcess: Process? = nil   // debug subprocess only
 
-    private init() {
-        // Stop subprocess when app terminates
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.stop() }
-        }
-    }
+    private init() {}
 
     // MARK: - Start
 
@@ -48,25 +64,39 @@ final class EmbeddedServerManager: ObservableObject {
 
 #if HERMIT_EMBEDDED_SERVER
         let config = buildConfigJSON(appState: appState)
+
+        // hermit-nnn: log config JSON with PATs redacted, then log the raw result
+        esLog("MobileStart config: \(redactPATs(in: config))")
+        esLog("Calling MobileStart…")
+
         let result = MobileStart(config)
+
+        esLog("MobileStart result: \(result)")
 
         if result.hasPrefix("error:") {
             errorMessage = result
+            esLog("MobileStart error — errorMessage set: \(result)")
             return
         }
         guard let p = Int(result) else {
-            errorMessage = "embedded server returned unexpected port: \(result)"
+            let msg = "embedded server returned unexpected port: \(result)"
+            errorMessage = msg
+            esLog("MobileStart unexpected result — errorMessage set: \(msg)")
             return
         }
 
+        esLog("MobileStart succeeded — port=\(p)")
         port = p
         errorMessage = nil
         appState.serverBaseURL = "http://127.0.0.1:\(p)"
         registerBonjour(port: p)
         PairingAdvertiser.shared.restart()
 #else
-        // Dev fallback: spawn Go server as a subprocess.
-        startSubprocess(appState: appState)
+        // hermit-abh: subprocess fallback intentionally removed.
+        // MobileStart (HermitServer.xcframework) is the only supported start path.
+        // Build with -DHERMIT_EMBEDDED_SERVER to enable the server.
+        esLog("HERMIT_EMBEDDED_SERVER not set — server will not start in this build.")
+        errorMessage = "Server not available: build with HERMIT_EMBEDDED_SERVER."
 #endif
     }
 
@@ -77,157 +107,8 @@ final class EmbeddedServerManager: ObservableObject {
         bonjourListener = nil
 #if HERMIT_EMBEDDED_SERVER
         MobileStop()
-#else
-        serverProcess?.terminate()
-        serverProcess = nil
 #endif
         port = nil
-    }
-
-    /// Stop the server and restart it with fresh config from AccountStore/RepositoryStore.
-    /// No-op if the server has not started yet (port == nil) — avoids triggering
-    /// re-entrant access to AppState.shared during singleton initialisation.
-    func restart() {
-        guard port != nil else { return }
-        let appState = AppState.shared
-        stop()
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            self.start(appState: appState)
-        }
-    }
-
-    // MARK: - Dev subprocess fallback
-    // Used when HERMIT_EMBEDDED_SERVER is not set (xcframework not yet built).
-    // Runs the pre-built bin/hermit binary as a child process and polls until ready.
-
-    private func startSubprocess(appState: AppState) {
-        let startMsg = "[\(Date())] [EmbeddedServerManager] startSubprocess called\n"
-        if let d = startMsg.data(using: .utf8), let fh = FileHandle(forWritingAtPath: "/tmp/hermit-native-debug.log") { fh.seekToEndOfFile(); fh.write(d); try? fh.close() }
-
-        let listenPort = 8080
-
-        // If the server is already running (e.g. launched separately via `make run`),
-        // adopt it immediately without spawning a second process.
-        Task {
-            let alreadyUp = await isPortResponding(port: listenPort)
-            if alreadyUp {
-                let m = "[\(Date())] [EmbeddedServerManager] server already running on port \(listenPort) — adopting\n"
-                if let d = m.data(using: .utf8), let fh = FileHandle(forWritingAtPath: "/tmp/hermit-native-debug.log") { fh.seekToEndOfFile(); fh.write(d); try? fh.close() }
-                await MainActor.run {
-                    self.port = listenPort
-                    self.errorMessage = nil
-                    appState.serverBaseURL = "http://127.0.0.1:\(listenPort)"
-                    self.registerBonjour(port: listenPort)
-                    PairingAdvertiser.shared.restart()
-                }
-                return
-            }
-
-            // Server not running — spawn the binary subprocess.
-            await MainActor.run {
-                self.spawnBinarySubprocess(appState: appState, listenPort: listenPort)
-            }
-        }
-    }
-
-    private func isPortResponding(port: Int) async -> Bool {
-        let url = URL(string: "http://127.0.0.1:\(port)/api/v1/health")!
-        return (try? await URLSession.shared.data(from: url)) != nil
-    }
-
-    @MainActor
-    private func spawnBinarySubprocess(appState: AppState, listenPort: Int) {
-        guard let repoRoot = findRepoRoot() else {
-            errorMessage = "Could not locate Hermit repo root to start server."
-            return
-        }
-
-        let binaryURL = repoRoot.appendingPathComponent("bin/hermit")
-        guard FileManager.default.fileExists(atPath: binaryURL.path) else {
-            errorMessage = "Server binary not found at \(binaryURL.path). Run make build first."
-            return
-        }
-
-        let process = Process()
-        process.executableURL = binaryURL
-        process.currentDirectoryURL = repoRoot
-        process.environment = ProcessInfo.processInfo.environment.merging([
-            "HERMIT_PAT": appState.pat,
-        ]) { _, new in new }
-
-        // Redirect stdout/stderr to a log file
-        let logPath = "/tmp/hermit-server-subprocess.log"
-        _ = FileManager.default.createFile(atPath: logPath, contents: Data())
-        if let logFH = FileHandle(forWritingAtPath: logPath) {
-            process.standardOutput = logFH
-            process.standardError  = logFH
-        }
-
-        do {
-            try process.run()
-        } catch {
-            self.errorMessage = "Failed to start server subprocess: \(error)"
-            return
-        }
-
-        serverProcess = process
-
-        // Poll until the server responds then update AppState
-        Task {
-            await pollUntilReady(port: listenPort, timeout: 15)
-            await MainActor.run {
-                self.port = listenPort
-                self.errorMessage = nil
-                appState.serverBaseURL = "http://127.0.0.1:\(listenPort)"
-                self.registerBonjour(port: listenPort)
-                PairingAdvertiser.shared.restart()
-            }
-        }
-    }
-
-    private func pollUntilReady(port: Int, timeout: TimeInterval) async {
-        let deadline = Date().addingTimeInterval(timeout)
-        let url = URL(string: "http://127.0.0.1:\(port)/api/v1/health")!
-        while Date() < deadline {
-            if let (_, response) = try? await URLSession.shared.data(from: url),
-               (response as? HTTPURLResponse)?.statusCode == 200 {
-                return
-            }
-            try? await Task.sleep(nanoseconds: 500_000_000)
-        }
-        await MainActor.run {
-            self.errorMessage = "Server did not respond within \(Int(timeout))s."
-        }
-    }
-
-    private func findRepoRoot() -> URL? {
-        // 1. Security-scoped bookmark (sandboxed access)
-        if let bookmarked = BookmarkStore.shared.resolve() {
-            if FileManager.default.fileExists(atPath: bookmarked.appendingPathComponent("config/hermit.yaml").path) {
-                return bookmarked
-            }
-            BookmarkStore.shared.stopAccessing()
-        }
-
-        // 2. Walk up from app bundle (works in dev without sandbox)
-        var candidate = Bundle.main.bundleURL
-        for _ in 0..<10 {
-            candidate = candidate.deletingLastPathComponent()
-            if FileManager.default.fileExists(atPath: candidate.appendingPathComponent("config/hermit.yaml").path) {
-                return candidate
-            }
-        }
-
-        // 3. Well-known developer paths
-        let known = ["~/Development/github/hashicorp/hermit", "~/code/hashicorp/hermit"]
-        for raw in known {
-            let url = URL(fileURLWithPath: (raw as NSString).expandingTildeInPath)
-            if FileManager.default.fileExists(atPath: url.appendingPathComponent("config/hermit.yaml").path) {
-                return url
-            }
-        }
-        return nil
     }
 
     // MARK: - Bonjour advertising
@@ -245,7 +126,7 @@ final class EmbeddedServerManager: ObservableObject {
             listener.stateUpdateHandler = { state in
                 switch state {
                 case .failed(let error):
-                    print("[EmbeddedServerManager] Bonjour listener failed: \(error)")
+                    esLog("Bonjour listener failed: \(error)")
                 default:
                     break
                 }
@@ -258,7 +139,7 @@ final class EmbeddedServerManager: ObservableObject {
             listener.start(queue: .main)
             bonjourListener = listener
         } catch {
-            print("[EmbeddedServerManager] Failed to create Bonjour listener: \(error)")
+            esLog("Failed to create Bonjour listener: \(error)")
         }
     }
 

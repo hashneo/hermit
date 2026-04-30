@@ -9,20 +9,44 @@ import Network
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
 
+    // hermit-9ds: shown when any config change requires an app relaunch
+    @State private var showRestartBanner = false
+
     var body: some View {
-        TabView {
-            AccountSettingsTab()
-                .tabItem { Label("Account", systemImage: "person.circle") }
-            RepositorySettingsTab()
-                .tabItem { Label("Repository", systemImage: "arrow.triangle.branch") }
-            ServerSettingsTab()
-                .tabItem { Label("Server", systemImage: "server.rack") }
-            AISettingsTab()
-                .tabItem { Label("AI", systemImage: "sparkles") }
+        VStack(spacing: 0) {
+            // hermit-9ds: non-dismissible restart-required banner
+            if showRestartBanner {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.clockwise.circle.fill")
+                        .foregroundStyle(.white)
+                    Text("Quit and relaunch Hermit to apply changes.")
+                        .foregroundStyle(.white)
+                        .font(.callout)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(Color.accentColor)
+            }
+
+            TabView {
+                AccountSettingsTab()
+                    .tabItem { Label("Account", systemImage: "person.circle") }
+                RepositorySettingsTab()
+                    .tabItem { Label("Repository", systemImage: "arrow.triangle.branch") }
+                ServerSettingsTab()
+                    .tabItem { Label("Server", systemImage: "server.rack") }
+                AISettingsTab()
+                    .tabItem { Label("AI", systemImage: "sparkles") }
+            }
         }
 #if os(macOS)
         .frame(width: 600, height: 560)
 #endif
+        // hermit-9ds: listen for config-change notifications from AccountStore/RepositoryStore
+        .onReceive(NotificationCenter.default.publisher(for: .hermitRestartRequired)) { _ in
+            showRestartBanner = true
+        }
     }
 }
 
@@ -934,7 +958,9 @@ private struct RepositoryLocationRow: View {
                     .deletingLastPathComponent   // drops "config/"
                 bookmarkPath = (repoRoot as NSString).abbreviatingWithTildeInPath
                 errorMessage = nil
-                EmbeddedServerManager.shared.restart()
+                // hermit-9ds: no live server restart — post notification so SettingsView
+                // shows the "quit and relaunch" banner.
+                NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
             } catch {
                 errorMessage = error.localizedDescription
             }
