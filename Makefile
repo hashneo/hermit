@@ -139,7 +139,7 @@ native-embed-config: ## Copy config/hermit.yaml + .tmp/gitea-token-export.sh int
 		echo "Warning: .tmp/gitea-token-export.sh not found — token will not be embedded"; \
 	fi
 
-native-build-macos: native-embed-config ## Build the native app for macOS
+native-build-macos: gomobile-build native-embed-config ## Build the native app for macOS (rebuilds xcframework if Go changed)
 	@echo "Building HermitNative for macOS..."
 	$(XCODE) \
 		-project $(NATIVE_PROJECT) \
@@ -215,7 +215,7 @@ dev: ## Zero-to-demo: start Gitea (idempotent), seed PRs, install PAT to Keychai
 	@printf '\033[1;32m  Hermit is running\033[0m\n'
 	@printf '\033[1;32m══════════════════════════════════════════\033[0m\n'
 	@printf '  Gitea:   \033[4mhttp://localhost:$(GITEA_HTTP_PORT)\033[0m\n'
-	@printf '  Server:  \033[4mhttp://localhost:8080\033[0m\n'
+	@printf '  Server:  \033[4mhttp://localhost:$(GITEA_HTTP_PORT)\033[0m (embedded; port assigned at runtime)\n'
 	@TOKEN=$$(grep -o 'GITEA_TOKEN=.*' .tmp/gitea-token-export.sh 2>/dev/null | cut -d= -f2 || echo "(not found)"); \
 		printf '  PAT:     \033[1;33m%s\033[0m\n' "$$TOKEN"
 	@printf '\033[1;32m══════════════════════════════════════════\033[0m\n\n'

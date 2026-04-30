@@ -64,7 +64,8 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let msg = "[\(Date())] [AppDelegate] applicationDidFinishLaunching\n"
-        if let d = msg.data(using: .utf8), let fh = FileHandle(forWritingAtPath: "/tmp/hermit-native-debug.log") { fh.seekToEndOfFile(); fh.write(d); try? fh.close() }
+        let _logPath = FileManager.default.temporaryDirectory.appendingPathComponent("hermit-native-debug.log").path
+        if let d = msg.data(using: .utf8), let fh = FileHandle(forWritingAtPath: _logPath) { fh.seekToEndOfFile(); fh.write(d); try? fh.close() }
         DispatchQueue.main.async {
             self.startServerIfNeeded()
         }
@@ -164,11 +165,12 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
 extension HermitNativeApp {
     @MainActor
     static func startEmbeddedServer(appState: AppState) {
+        let _logPath = FileManager.default.temporaryDirectory.appendingPathComponent("hermit-native-debug.log").path
         let msg = "[\(Date())] [startEmbeddedServer] serverMode=\(appState.serverMode) serverBaseURL=\(appState.serverBaseURL)\n"
-        if let d = msg.data(using: .utf8), let fh = FileHandle(forWritingAtPath: "/tmp/hermit-native-debug.log") { fh.seekToEndOfFile(); fh.write(d); try? fh.close() }
+        if let d = msg.data(using: .utf8), let fh = FileHandle(forWritingAtPath: _logPath) { fh.seekToEndOfFile(); fh.write(d); try? fh.close() }
         guard appState.serverMode == .embeddedLocal else {
             let m = "[\(Date())] [startEmbeddedServer] skipped — not embeddedLocal\n"
-            if let d = m.data(using: .utf8), let fh = FileHandle(forWritingAtPath: "/tmp/hermit-native-debug.log") { fh.seekToEndOfFile(); fh.write(d); try? fh.close() }
+            if let d = m.data(using: .utf8), let fh = FileHandle(forWritingAtPath: _logPath) { fh.seekToEndOfFile(); fh.write(d); try? fh.close() }
             return
         }
         EmbeddedServerManager.shared.start(appState: appState)

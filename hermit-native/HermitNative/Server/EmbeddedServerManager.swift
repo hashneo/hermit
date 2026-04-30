@@ -12,18 +12,27 @@ import HermitServer
 
 private let hermitLog = OSLog(subsystem: "com.hashicorp.hermit", category: "EmbeddedServer")
 
-/// Append a timestamped line to /tmp/hermit-native-debug.log and emit an os_log message.
+/// Resolve a writable log path that works under both sandboxed and non-sandboxed builds.
+/// Sandboxed builds cannot write to /tmp; use the app's temp directory instead.
+private let hermitLogPath: String = {
+    // FileManager.default.temporaryDirectory resolves to the sandbox-safe temp dir
+    // when sandboxed, and /var/folders/… (writable) when not.
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("hermit-native-debug.log")
+    return url.path
+}()
+
+/// Append a timestamped line to the debug log file and emit an os_log message.
 private func esLog(_ message: String) {
     os_log("%{public}@", log: hermitLog, type: .debug, message)
     let line = "[\(Date())] [EmbeddedServerManager] \(message)\n"
     guard let data = line.data(using: .utf8) else { return }
-    if FileManager.default.fileExists(atPath: "/tmp/hermit-native-debug.log"),
-       let fh = FileHandle(forWritingAtPath: "/tmp/hermit-native-debug.log") {
+    if FileManager.default.fileExists(atPath: hermitLogPath),
+       let fh = FileHandle(forWritingAtPath: hermitLogPath) {
         fh.seekToEndOfFile()
         fh.write(data)
         try? fh.close()
     } else {
-        try? data.write(to: URL(fileURLWithPath: "/tmp/hermit-native-debug.log"), options: .atomic)
+        try? data.write(to: URL(fileURLWithPath: hermitLogPath), options: .atomic)
     }
 }
 

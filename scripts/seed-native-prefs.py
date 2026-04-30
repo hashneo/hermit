@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """
-Seed hermit UserDefaults for the ad-hoc debug build from config/hermit.yaml.
+Seed hermit UserDefaults for the debug build from config/hermit.yaml.
 
-Ad-hoc signed macOS apps (sandbox disabled) read UserDefaults from
-~/Library/Preferences/<bundle-id>.plist rather than from the sandbox container.
-This script writes legacy keys AND hermit.accounts / hermit.repositories JSON
-so the app has fully-populated stores on first launch without prompting.
+Sandboxed macOS apps (app-sandbox=true) read UserDefaults from
+~/Library/Containers/<bundle-id>/Data/Library/Preferences/<bundle-id>.plist.
+Non-sandboxed ad-hoc builds read from ~/Library/Preferences/<bundle-id>.plist.
+
+This script detects which location applies and writes to both, so it works
+regardless of sandbox state. It writes hermit.accounts / hermit.repositories
+JSON so the app has fully-populated stores on first launch without prompting.
 
 Usage:
     python3 scripts/seed-native-prefs.py <bundle-id> [config/hermit.yaml] [--token TOKEN]
@@ -117,7 +120,21 @@ def main():
         "hermit.repositories":  json.dumps(repositories).encode(),
     })
     plistlib.dump(d, open(plist_path, "wb"))
-    print(f"Seeded UserDefaults for {bundle_id}")
+    print(f"Seeded UserDefaults (non-sandboxed) for {bundle_id}")
+
+    # Also write into the sandbox container if it exists.
+    # Sandboxed apps (app-sandbox=true) read from the container, not ~/Library/Preferences.
+    sandbox_plist = os.path.expanduser(
+        f"~/Library/Containers/{bundle_id}/Data/Library/Preferences/{bundle_id}.plist"
+    )
+    sandbox_prefs_dir = os.path.dirname(sandbox_plist)
+    if os.path.isdir(os.path.expanduser(f"~/Library/Containers/{bundle_id}")):
+        os.makedirs(sandbox_prefs_dir, exist_ok=True)
+        sd = plistlib.load(open(sandbox_plist, "rb")) if os.path.exists(sandbox_plist) else {}
+        sd.update(d)
+        plistlib.dump(sd, open(sandbox_plist, "wb"))
+        print(f"Seeded UserDefaults (sandboxed container) for {bundle_id}")
+
     print(f"  account:  {account_endpoint} (token: {token[:8]}…)" if token else f"  account:  {account_endpoint} (no token)")
     print(f"  repo:     {owner}/{name} @ {docs}")
 
