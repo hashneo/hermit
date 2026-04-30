@@ -60,10 +60,16 @@ struct RFCLifecycleToolbar: ToolbarContent {
         // Export / Print group
         ToolbarItem(placement: .automatic) {
             Menu {
-                Button("Export as PDF…")  { exportPDF()  }
-                Button("Export as DOCX…") { exportDOCX() }
+                // hermit-1mg / hermit-fdq: must dispatch via Task { @MainActor in }
+                // so that NSSavePanel.runModal() / NSPrintOperation.runModal(for:)
+                // are called after the current SwiftUI event has fully unwound.
+                // Calling @MainActor functions directly from a synchronous Button
+                // closure does not guarantee the run-loop is in the right state
+                // for modal presentation on macOS.
+                Button("Export as PDF…")  { Task { @MainActor in exportPDF()  } }
+                Button("Export as DOCX…") { Task { @MainActor in exportDOCX() } }
                 Divider()
-                Button("Print…") { printRFC() }
+                Button("Print…") { Task { @MainActor in printRFC() } }
             } label: {
                 Label("Export", systemImage: "square.and.arrow.up")
             }

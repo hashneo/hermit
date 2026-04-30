@@ -55,7 +55,7 @@ struct MenuBarRFCBrowserView: View {
             }
         } detail: {
             if let rfc = selectedRFC {
-                RFCDetailView(rfc: rfc, isReadingMode: $isReadingMode)
+                RFCDetailView(rfc: rfc, isReadingMode: $isReadingMode, hasSidebar: true)
             } else {
                 ContentUnavailableView("Select an RFC", systemImage: "doc.text")
             }

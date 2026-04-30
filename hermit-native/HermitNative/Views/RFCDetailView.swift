@@ -20,6 +20,11 @@ struct RFCDetailView: View {
     // A .constant(false) default keeps all other call sites working unchanged.
     @Binding var isReadingMode: Bool
 
+    // hermit-d42: only show the reading-mode toolbar button when this view is
+    // embedded in a NavigationSplitView that has a sidebar to hide.
+    // Standalone NSWindow usage (HermitNativeApp, iPad) sets this to false.
+    var hasSidebar: Bool = false
+
     @EnvironmentObject private var appState: AppState
 
     // Observed so toolbar re-evaluates when comments load/change.
@@ -57,12 +62,14 @@ struct RFCDetailView: View {
     init(rfc: RFC, repo: Repository? = nil,
          commentStore: CommentStore? = nil,
          onLineTapped: ((Int, Int) -> Void)? = nil,
-         isReadingMode: Binding<Bool> = .constant(false)) {
+         isReadingMode: Binding<Bool> = .constant(false),
+         hasSidebar: Bool = false) {
         self.rfc          = rfc
         self.repo         = repo
         self.commentStore = commentStore
         self.onLineTapped = onLineTapped
         self._isReadingMode = isReadingMode
+        self.hasSidebar   = hasSidebar
         self._currentRFC  = State(initialValue: rfc)
     }
 
@@ -79,8 +86,6 @@ struct RFCDetailView: View {
         }
         .navigationTitle(currentRFC.title)
         .toolbar {
-            // hermit-8q5 / hermit-d42: reading-mode toggle — labelled so macOS
-            // toolbar can render it as text+icon in customised toolbar layouts.
             RFCLifecycleToolbar(
                 rfc: rfc,
                 fileURL: resolvedFileURL,
@@ -139,18 +144,22 @@ struct RFCDetailView: View {
                     .disabled(isLoading)
                     .help("Reload this RFC")
             }
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    withAnimation { isReadingMode.toggle() }
-                } label: {
-                    Label(
-                        isReadingMode ? "Show Sidebar" : "Reading Mode",
-                        systemImage: isReadingMode ? "sidebar.left" : "book.pages"
-                    )
+            // hermit-d42: only show reading-mode toggle when there is a sidebar
+            // to hide — standalone NSWindow usage has no NavigationSplitView.
+            if hasSidebar {
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        withAnimation { isReadingMode.toggle() }
+                    } label: {
+                        Label(
+                            isReadingMode ? "Show Sidebar" : "Reading Mode",
+                            systemImage: isReadingMode ? "sidebar.left" : "book.pages"
+                        )
+                    }
+                    .help(isReadingMode
+                          ? "Show sidebar (or swipe right)"
+                          : "Reading Mode — expand RFC to full window")
                 }
-                .help(isReadingMode
-                      ? "Show sidebar (or swipe right)"
-                      : "Reading Mode — expand RFC to full window")
             }
 
             // hermit-ec7: export/print/share + lifecycle toolbar
