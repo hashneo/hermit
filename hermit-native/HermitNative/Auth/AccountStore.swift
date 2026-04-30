@@ -119,6 +119,20 @@ final class AccountStore: ObservableObject {
     }
 
     func update(_ connection: Connection, token: String? = nil) {
+        updateInPlace(connection, token: token)
+        save()
+        restartEmbeddedServer()
+    }
+
+    /// Update a token without triggering a server restart.
+    /// Use this only during app initialisation, before the server has started,
+    /// to avoid a dispatch_once re-entrancy deadlock via AppState.shared.
+    func updateTokenOnly(_ connection: Connection, token: String) {
+        updateInPlace(connection, token: token)
+        save()
+    }
+
+    private func updateInPlace(_ connection: Connection, token: String?) {
         guard let idx = connections.firstIndex(where: { $0.id == connection.id }) else { return }
         var updated = connection
         if let token {
@@ -129,8 +143,6 @@ final class AccountStore: ObservableObject {
 #endif
         }
         connections[idx] = updated
-        save()
-        restartEmbeddedServer()
     }
 
     func remove(_ connection: Connection) {

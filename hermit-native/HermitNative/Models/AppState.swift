@@ -139,7 +139,10 @@ final class AppState: ObservableObject {
             ))
             if !detected.pat.isEmpty {
                 if let conn = AccountStore.shared.connections.first {
-                    AccountStore.shared.update(conn, token: detected.pat)
+                    // Use updateTokenOnly to avoid triggering restartEmbeddedServer()
+                    // during init — that would cause a dispatch_once re-entrancy deadlock
+                    // via AppState.shared before this singleton has finished initialising.
+                    AccountStore.shared.updateTokenOnly(conn, token: detected.pat)
                 }
             }
             debugLog("loaded from bundled config — \(detected.owner)/\(detected.repo) @ \(detected.baseURL)")
@@ -243,7 +246,11 @@ final class AppState: ObservableObject {
         } else {
             let conn = AccountStore.shared.connections.first(where: { $0.id == repo.accountID })
                     ?? AccountStore.shared.connections.first
-            guard let c = conn, let token = AccountStore.shared.token(for: c), !token.isEmpty else { return nil }
+            // Fall back to appState.pat (set by GiteaAutoConfig bundled config) when
+            // the account store has no token — this covers the dev migration path.
+            let storeToken = conn.flatMap { AccountStore.shared.token(for: $0) } ?? ""
+            let token = storeToken.isEmpty ? pat : storeToken
+            guard !token.isEmpty else { return nil }
             bearer = token
         }
         let cfg = HermitAPIClient.Config(
