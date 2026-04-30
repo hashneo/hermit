@@ -253,6 +253,12 @@ paths:
                 $ref: '#/components/schemas/SubmitForReviewResult'
         '400':
           $ref: '#/components/responses/ApiError'
+        '409':
+          description: RFC is not in a state that allows submission (accepted, implemented, superseded, rejected)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '502':
           $ref: '#/components/responses/ApiError'
         default:

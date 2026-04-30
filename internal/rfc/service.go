@@ -339,10 +339,16 @@ func (s *Service) SubmitForReview(ctx context.Context, repositoryID, rfcPath str
 		return SubmitForReviewResult{}, fmt.Errorf("ensure label: %w", err)
 	}
 
-	// 2. Fetch current RFC content and rewrite status to "in-review".
+	// 2. Fetch current RFC content, guard status transition, rewrite to "in-review".
 	view, err := client.GetRFC(ctx, baseURL, owner, name, branch, rfcPath, token)
 	if err != nil {
 		return SubmitForReviewResult{}, fmt.Errorf("fetch rfc: %w", err)
+	}
+	meta, _ := parseFrontmatter(view.MarkdownSource)
+	currentStatus := normalizeLifecycleStatus(meta["status"])
+	if currentStatus != "draft" {
+		return SubmitForReviewResult{}, fmt.Errorf(
+			"cannot submit for review: RFC status is %q (only draft RFCs may be submitted)", currentStatus)
 	}
 	updated := rewriteFrontmatterStatus(view.MarkdownSource, "in-review")
 	title := view.Title

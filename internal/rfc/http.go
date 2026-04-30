@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 type Handler struct {
@@ -117,6 +118,10 @@ func (h *Handler) SubmitForReview(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.service.SubmitForReview(r.Context(), repositoryID, rfcID)
 	if err != nil {
+		if strings.Contains(err.Error(), "cannot submit for review") {
+			writeError(w, http.StatusConflict, "invalid_status_transition", err.Error())
+			return
+		}
 		writeError(w, http.StatusBadGateway, "submit_for_review_failed", err.Error())
 		return
 	}
