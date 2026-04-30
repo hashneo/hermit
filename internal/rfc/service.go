@@ -77,7 +77,7 @@ type Service struct {
 var docuchangoRFCFilenamePattern = regexp.MustCompile(`^rfc-[0-9]{3}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$`)
 
 type RepositoryResolver interface {
-	ResolveRepositoryAccess(id string) (owner, name, registry, defaultBranch, docsPathPolicy, token string, ok bool)
+	ResolveRepositoryAccess(id string) (owner, name, registry, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool)
 }
 
 func NewServiceWithRepositoryResolver(resolver RepositoryResolver, registries map[string]string) *Service {
@@ -220,7 +220,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 		return nil, fmt.Errorf("repository resolver is not configured")
 	}
 
-	owner, name, registry, branch, docsPath, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, branch, docsPath, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return nil, fmt.Errorf("repository not found")
 	}
@@ -262,7 +262,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 		})
 	}
 
-	prItems, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, token)
+	prItems, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, rfcLabel, token)
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +309,7 @@ func (s *Service) RenderPRRFC(ctx context.Context, repositoryID string, prNumber
 		return DocumentView{}, fmt.Errorf("repository resolver is not configured")
 	}
 
-	owner, name, registry, _, docsPath, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, _, docsPath, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return DocumentView{}, fmt.Errorf("repository not found")
 	}
@@ -325,7 +325,7 @@ func (s *Service) RenderPRRFC(ctx context.Context, repositoryID string, prNumber
 	baseURL := s.registryBaseURL(registry)
 
 	// List PR files to find the RFC path.
-	prFiles, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, token)
+	prFiles, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, rfcLabel, token)
 	if err != nil {
 		return DocumentView{}, fmt.Errorf("list PR RFCs: %w", err)
 	}
@@ -354,7 +354,7 @@ func (s *Service) RenderRFCByRepository(ctx context.Context, repositoryID, rfcID
 		return DocumentView{}, fmt.Errorf("repository resolver is not configured")
 	}
 
-	owner, name, registry, branch, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, branch, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return DocumentView{}, fmt.Errorf("repository not found")
 	}

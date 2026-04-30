@@ -14,7 +14,7 @@ import (
 )
 
 type RepositoryAccessResolver interface {
-	ResolveRepositoryAccess(id string) (owner, name, registry, defaultBranch, docsPathPolicy, token string, ok bool)
+	ResolveRepositoryAccess(id string) (owner, name, registry, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool)
 }
 
 type HTTPGitHubClient struct {
@@ -360,7 +360,7 @@ func (c *HTTPGitHubClient) resolve(repositoryID string) (owner, repo, baseURL, t
 		return "", "", "", "", fmt.Errorf("repository resolver not configured")
 	}
 
-	resolvedOwner, resolvedRepo, registry, _, _, resolvedToken, ok := c.repoResolver.ResolveRepositoryAccess(repositoryID)
+	resolvedOwner, resolvedRepo, registry, _, _, _, resolvedToken, ok := c.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return "", "", "", "", fmt.Errorf("repository not found")
 	}

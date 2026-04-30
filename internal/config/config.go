@@ -28,6 +28,7 @@ type Repository struct {
 	Registry       string `yaml:"registry"`
 	DefaultBranch  string `yaml:"default_branch"`
 	DocsPathPolicy string `yaml:"docs_path_policy"`
+	RFCLabel       string `yaml:"rfc_label"`
 	// Token is an in-memory PAT used when building config programmatically
 	// (e.g. the embedded mobile server). It is never read from or written to YAML.
 	Token string `yaml:"-"`
@@ -104,6 +105,9 @@ func Load() (Config, error) {
 		}
 		if repository.DocsPathPolicy == "" {
 			repository.DocsPathPolicy = "docs-cms/rfcs/"
+		}
+		if repository.RFCLabel == "" {
+			repository.RFCLabel = "hermit:rfc-ready"
 		}
 	}
 

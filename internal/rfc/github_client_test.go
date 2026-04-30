@@ -67,7 +67,7 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *t
 	defer server.Close()
 
 	client := NewHTTPGitHubRFCClient()
-	items, err := client.ListReviewReadyRFCs(context.Background(), server.URL, "owner", "repo", "docs-cms/rfcs", "token")
+	items, err := client.ListReviewReadyRFCs(context.Background(), server.URL, "owner", "repo", "docs-cms/rfcs", "hermit:rfc-ready", "token")
 	if err != nil {
 		t.Fatalf("ListReviewReadyRFCs returned error: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_ExcludesPRsWithoutRFCReadyLabel
 	defer server.Close()
 
 	client := NewHTTPGitHubRFCClient()
-	items, err := client.ListReviewReadyRFCs(context.Background(), server.URL, "owner", "repo", "docs-cms/rfcs", "token")
+	items, err := client.ListReviewReadyRFCs(context.Background(), server.URL, "owner", "repo", "docs-cms/rfcs", "hermit:rfc-ready", "token")
 	if err != nil {
 		t.Fatalf("ListReviewReadyRFCs returned error: %v", err)
 	}

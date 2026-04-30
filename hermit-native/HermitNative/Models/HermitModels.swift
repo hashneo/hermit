@@ -8,6 +8,7 @@ struct RFCFile: Identifiable, Hashable {
     let path: String
     let sha: String
     let htmlURL: String
+    let lifecycleStatus: String?  // "draft", "accepted", "implemented", "unknown"
 }
 
 struct RFCPullRequest: Identifiable {

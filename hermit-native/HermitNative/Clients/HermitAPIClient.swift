@@ -77,6 +77,7 @@ actor HermitAPIClient: HermitClientProtocol {
             let title: String
             let path: String
             let source_type: String
+            let lifecycle_status: String?
             let pr_number: Int?
             let head_sha: String?
             let commentable: Bool?
@@ -104,7 +105,7 @@ actor HermitAPIClient: HermitClientProtocol {
             } else {
                 files.append(RFCFile(id: item.id, name: item.title,
                                      path: item.path, sha: item.head_sha ?? "",
-                                     htmlURL: ""))
+                                     htmlURL: "", lifecycleStatus: item.lifecycle_status))
             }
         }
         return (files, prs)

@@ -45,6 +45,7 @@ type Config struct {
 	Registry       string             `json:"registry"`
 	DefaultBranch  string             `json:"default_branch"`
 	DocsPathPolicy string             `json:"docs_path_policy"`
+	RFCLabel       string             `json:"rfc_label"`
 	Auth           AuthMetadata       `json:"auth"`
 	Validation     ValidationResponse `json:"validation"`
 	CreatedAt      string             `json:"created_at"`
@@ -58,6 +59,7 @@ type createInput struct {
 	Token          string
 	DefaultBranch  string
 	DocsPathPolicy string
+	RFCLabel       string
 }
 
 type storedConfig struct {
@@ -117,6 +119,10 @@ func (s *Service) SeedFromConfig(repositories []config.Repository) {
 		if docsPath == "" {
 			docsPath = "docs-cms/rfcs/"
 		}
+		rfcLabel := repository.RFCLabel
+		if rfcLabel == "" {
+			rfcLabel = "hermit:rfc-ready"
+		}
 
 		token := strings.TrimSpace(repository.Token)
 		if token == "" {
@@ -157,6 +163,7 @@ func (s *Service) SeedFromConfig(repositories []config.Repository) {
 			Registry:       registry,
 			DefaultBranch:  defaultBranch,
 			DocsPathPolicy: docsPath,
+			RFCLabel:       rfcLabel,
 			Auth: AuthMetadata{
 				Method:               "pat",
 				TokenLastValidatedAt: validatedAt,
@@ -186,6 +193,9 @@ func (s *Service) Create(ctx context.Context, input createInput) (Config, error)
 	}
 	if input.DocsPathPolicy == "" {
 		input.DocsPathPolicy = "docs-cms/rfcs/"
+	}
+	if input.RFCLabel == "" {
+		input.RFCLabel = "hermit:rfc-ready"
 	}
 
 	fullName := repositoryKey(input.Registry, input.Owner, input.Name)
@@ -217,6 +227,7 @@ func (s *Service) Create(ctx context.Context, input createInput) (Config, error)
 		Registry:       input.Registry,
 		DefaultBranch:  input.DefaultBranch,
 		DocsPathPolicy: input.DocsPathPolicy,
+		RFCLabel:       input.RFCLabel,
 		Auth: AuthMetadata{
 			Method:               "pat",
 			TokenLastValidatedAt: tokenValidatedAt,
@@ -271,16 +282,16 @@ func (s *Service) List() []Config {
 	return items
 }
 
-func (s *Service) ResolveRepositoryAccess(id string) (owner, name, registry, defaultBranch, docsPathPolicy, token string, ok bool) {
+func (s *Service) ResolveRepositoryAccess(id string) (owner, name, registry, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	item, exists := s.items[id]
 	if !exists {
-		return "", "", "", "", "", "", false
+		return "", "", "", "", "", "", "", false
 	}
 
-	return item.Owner, item.Name, item.Registry, item.DefaultBranch, item.DocsPathPolicy, decryptToken(item.EncryptedToken), true
+	return item.Owner, item.Name, item.Registry, item.DefaultBranch, item.DocsPathPolicy, item.RFCLabel, decryptToken(item.EncryptedToken), true
 }
 
 func (s *Service) Validate(ctx context.Context, id string) (ValidationResponse, error) {

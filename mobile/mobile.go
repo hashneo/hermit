@@ -198,6 +198,7 @@ func buildConfig(sc StartConfig) (config.Config, error) {
 			Registry:       registryName,
 			DefaultBranch:  "main",
 			DocsPathPolicy: r.DocsPath,
+			RFCLabel:       r.RFCLabel,
 			Token:          r.PAT,
 		})
 	}

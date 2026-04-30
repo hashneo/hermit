@@ -15,7 +15,7 @@ import (
 type GitHubRFCClient interface {
 	ListRFCs(ctx context.Context, baseURL, owner, name, branch, docsPath, token string) ([]CatalogItem, error)
 	GetRFC(ctx context.Context, baseURL, owner, name, branch, filePath, token string) (DocumentView, error)
-	ListReviewReadyRFCs(ctx context.Context, baseURL, owner, name, docsPath, token string) ([]ReviewReadyRFCItem, error)
+	ListReviewReadyRFCs(ctx context.Context, baseURL, owner, name, docsPath, rfcLabel, token string) ([]ReviewReadyRFCItem, error)
 	GetRFCFromPullRequest(ctx context.Context, baseURL, owner, name string, prNumber int, filePath, token string) (DocumentView, error)
 }
 
@@ -139,11 +139,14 @@ func (c *HTTPGitHubRFCClient) GetRFC(ctx context.Context, baseURL, owner, name, 
 	}, nil
 }
 
-func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, owner, name, docsPath, token string) ([]ReviewReadyRFCItem, error) {
+func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, owner, name, docsPath, rfcLabel, token string) ([]ReviewReadyRFCItem, error) {
 	apiBase := strings.TrimRight(baseURL, "/")
 	docsPath = strings.Trim(strings.TrimSpace(docsPath), "/")
 	if docsPath == "" {
 		docsPath = "docs-cms/rfcs"
+	}
+	if rfcLabel == "" {
+		rfcLabel = RFCReadyLabel
 	}
 
 	// Query open PRs then filter by label client-side.
@@ -187,7 +190,7 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 		}
 
 		// Confirm the RFC-ready label is present in the decoded response.
-		if !prHasLabel(pr.Labels, RFCReadyLabel) {
+		if !prHasLabel(pr.Labels, rfcLabel) {
 			continue
 		}
 

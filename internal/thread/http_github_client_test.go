@@ -18,9 +18,9 @@ type resolverStub struct {
 	docs   string
 }
 
-func (r resolverStub) ResolveRepositoryAccess(id string) (owner, name, registry, defaultBranch, docsPathPolicy, token string, ok bool) {
+func (r resolverStub) ResolveRepositoryAccess(id string) (owner, name, registry, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool) {
 	_ = id
-	return r.owner, r.name, r.reg, r.branch, r.docs, r.token, r.found
+	return r.owner, r.name, r.reg, r.branch, r.docs, "hermit:rfc-ready", r.token, r.found
 }
 
 func TestHTTPGitHubClient_CreateThreadPostsInlineComment(t *testing.T) {
