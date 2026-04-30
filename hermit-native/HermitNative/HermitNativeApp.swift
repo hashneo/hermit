@@ -237,7 +237,7 @@ final class RFCViewerWindowManager {
     // hermit-z9j: one donated activity per open RFC window
     private var activities: [String: NSUserActivity] = [:]
 
-    func open(rfc: RFC, appState: AppState) {
+    func open(rfc: RFC, repo: Repository, appState: AppState) {
         // hermit-olq: track selection in AppState for NSUserActivity access
         appState.selectedRFC = rfc
         appState.selectedLine = nil
@@ -249,7 +249,7 @@ final class RFCViewerWindowManager {
         }
 
         let commentStore = CommentStore()
-        let detail = RFCDetailView(rfc: rfc, commentStore: commentStore)
+        let detail = RFCDetailView(rfc: rfc, repo: repo, commentStore: commentStore)
             .environmentObject(appState)
             .environmentObject(commentStore)
             .frame(minWidth: 760, minHeight: 540)
@@ -268,8 +268,7 @@ final class RFCViewerWindowManager {
         controllers[rfc.id] = controller
 
         // Record in recents so the menu bar shows recently opened RFCs.
-        let repoID = RepositoryStore.shared.repositories.first?.id ?? UUID()
-        RecentRFCStore.shared.record(rfc, repoID: repoID)
+        RecentRFCStore.shared.record(rfc, repoID: repo.id)
 
         // hermit-z9j: donate Handoff activity for this RFC window
         let activity = NSUserActivity(activityType: HermitActivity.handoff)

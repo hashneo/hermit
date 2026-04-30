@@ -130,7 +130,7 @@ private struct RepoSubmenu: View {
 
     private func open(_ rfc: RFC) {
         RecentRFCStore.shared.record(rfc, repoID: repo.id)
-        RFCViewerWindowManager.shared.open(rfc: rfc, appState: appState)
+        RFCViewerWindowManager.shared.open(rfc: rfc, repo: repo, appState: appState)
     }
 }
 

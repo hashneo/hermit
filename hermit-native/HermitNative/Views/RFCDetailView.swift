@@ -5,6 +5,7 @@ import SwiftUI
 
 struct RFCDetailView: View {
     let rfc: RFC
+    var repo: Repository? = nil     // when set, scopes the API client to this repo
     var commentStore: CommentStore? = nil
     var onLineTapped: ((Int, Int) -> Void)? = nil
 
@@ -77,7 +78,7 @@ struct RFCDetailView: View {
         isLoading = true
         errorMessage = nil
 
-        guard let client = appState.makeAPIClient() else {
+        guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient() else {
             errorMessage = "Not configured."
             isLoading = false
             return
