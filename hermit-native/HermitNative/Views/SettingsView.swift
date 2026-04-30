@@ -14,12 +14,12 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // hermit-9ds: non-dismissible restart-required banner
+        // hermit-9ds: transient banner shown while the server restarts in the background
             if showRestartBanner {
                 HStack(spacing: 8) {
                     Image(systemName: "arrow.clockwise.circle.fill")
                         .foregroundStyle(.white)
-                    Text("Quit and relaunch Hermit to apply changes.")
+                    Text("Restarting server to apply changes…")
                         .foregroundStyle(.white)
                         .font(.callout)
                     Spacer()
@@ -46,6 +46,10 @@ struct SettingsView: View {
         // hermit-9ds: listen for config-change notifications from AccountStore/RepositoryStore
         .onReceive(NotificationCenter.default.publisher(for: .hermitRestartRequired)) { _ in
             showRestartBanner = true
+        }
+        // Dismiss banner once the server has restarted and has a port again.
+        .onReceive(EmbeddedServerManager.shared.$port) { port in
+            if port != nil { showRestartBanner = false }
         }
     }
 }

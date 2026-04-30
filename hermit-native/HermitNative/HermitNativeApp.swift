@@ -61,8 +61,23 @@ struct HermitNativeApp: App {
 
 final class HermitAppDelegate: NSObject, NSApplicationDelegate {
     private var serverStarted = false
+    private var restartObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // hermit-9ds: live-restart the embedded server when credentials/repos change.
+        restartObserver = NotificationCenter.default.addObserver(
+            forName: .hermitRestartRequired,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard self?.serverStarted == true else { return }
+            Task { @MainActor in
+                EmbeddedServerManager.shared.restart(appState: AppState.shared)
+                if let port = EmbeddedServerManager.shared.port {
+                    ConfigStore.shared.serverBaseURL = "http://127.0.0.1:\(port)"
+                }
+            }
+        }
         let msg = "[\(Date())] [AppDelegate] applicationDidFinishLaunching\n"
         let _logPath = FileManager.default.temporaryDirectory.appendingPathComponent("hermit-native-debug.log").path
         if let d = msg.data(using: .utf8), let fh = FileHandle(forWritingAtPath: _logPath) { fh.seekToEndOfFile(); fh.write(d); try? fh.close() }

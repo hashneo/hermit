@@ -109,6 +109,16 @@ final class EmbeddedServerManager: ObservableObject {
 #endif
     }
 
+    // MARK: - Restart
+
+    /// Stop the running server and start it again with fresh config from appState.
+    /// Safe to call at any time; no-ops if the server was not running.
+    func restart(appState: AppState) {
+        esLog("restart requested")
+        stop()
+        start(appState: appState)
+    }
+
     // MARK: - Stop
 
     func stop() {
