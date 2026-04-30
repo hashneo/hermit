@@ -21,7 +21,6 @@
 		B0010014 /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010015 /* AIProvider.swift */; };
 		B0010016 /* AppleIntelligenceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010017 /* AppleIntelligenceProvider.swift */; };
 		B0010018 /* OpenAIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010019 /* OpenAIProvider.swift */; };
-		B0010302 /* TemplateAIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010303 /* TemplateAIProvider.swift */; };
 		B001001A /* RFCInterviewPrompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001001B /* RFCInterviewPrompts.swift */; };
 		B001001C /* RFCInterviewSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001001D /* RFCInterviewSession.swift */; };
 		B001001E /* VoiceCommentSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001001F /* VoiceCommentSession.swift */; };
@@ -31,7 +30,6 @@
 		B0010024 /* VoiceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010025 /* VoiceEngine.swift */; };
 		B0010026 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010027 /* SpeechRecognizer.swift */; };
 		B0010028 /* SpeechSynthesizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010029 /* SpeechSynthesizer.swift */; };
-		B0010301 /* LiveVoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010300 /* LiveVoiceSession.swift */; };
 		B001002A /* WaveformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001002B /* WaveformView.swift */; };
 		B001002C /* WebViewRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001002D /* WebViewRenderer.swift */; };
 		B001002E /* MarkdownRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001002F /* MarkdownRenderer.swift */; };
@@ -44,7 +42,7 @@
 		B001003C /* macOSViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001003D /* macOSViews.swift */; };
 		B001003E /* iPadRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001003F /* iPadRootView.swift */; };
 		B0010040 /* RFCDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010041 /* RFCDetailView.swift */; };
-		50858936184142FB86D944B5 /* RFCToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69D51260E6354E01ACC94D55 /* RFCToolbar.swift */; };
+		B00100C0 /* RFCToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100C1 /* RFCToolbar.swift */; };
 		B0010042 /* RFCInterviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010043 /* RFCInterviewView.swift */; };
 		B0010044 /* RFCListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010045 /* RFCListView.swift */; };
 		B00100B0 /* DiagramPopoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100B1 /* DiagramPopoutView.swift */; };
@@ -83,7 +81,6 @@
 		B0010015 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
 		B0010017 /* AppleIntelligenceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleIntelligenceProvider.swift; sourceTree = "<group>"; };
 		B0010019 /* OpenAIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIProvider.swift; sourceTree = "<group>"; };
-		B0010303 /* TemplateAIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemplateAIProvider.swift; sourceTree = "<group>"; };
 		B001001B /* RFCInterviewPrompts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCInterviewPrompts.swift; sourceTree = "<group>"; };
 		B001001D /* RFCInterviewSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCInterviewSession.swift; sourceTree = "<group>"; };
 		B001001F /* VoiceCommentSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCommentSession.swift; sourceTree = "<group>"; };
@@ -93,7 +90,6 @@
 		B0010025 /* VoiceEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceEngine.swift; sourceTree = "<group>"; };
 		B0010027 /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
 		B0010029 /* SpeechSynthesizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSynthesizer.swift; sourceTree = "<group>"; };
-		B0010300 /* LiveVoiceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVoiceSession.swift; sourceTree = "<group>"; };
 		B001002B /* WaveformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformView.swift; sourceTree = "<group>"; };
 		B001002D /* WebViewRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewRenderer.swift; sourceTree = "<group>"; };
 		B001002F /* MarkdownRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRenderer.swift; sourceTree = "<group>"; };
@@ -106,7 +102,7 @@
 		B001003D /* macOSViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = macOSViews.swift; sourceTree = "<group>"; };
 		B001003F /* iPadRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadRootView.swift; sourceTree = "<group>"; };
 		B0010041 /* RFCDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCDetailView.swift; sourceTree = "<group>"; };
-		69D51260E6354E01ACC94D55 /* RFCToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCToolbar.swift; sourceTree = "<group>"; };
+		B00100C1 /* RFCToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCToolbar.swift; sourceTree = "<group>"; };
 		B0010043 /* RFCInterviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCInterviewView.swift; sourceTree = "<group>"; };
 		B0010045 /* RFCListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCListView.swift; sourceTree = "<group>"; };
 		B00100B1 /* DiagramPopoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagramPopoutView.swift; sourceTree = "<group>"; };
@@ -234,7 +230,6 @@
 				B0010015 /* AIProvider.swift */,
 				B0010017 /* AppleIntelligenceProvider.swift */,
 				B0010019 /* OpenAIProvider.swift */,
-				B0010303 /* TemplateAIProvider.swift */,
 				B001001B /* RFCInterviewPrompts.swift */,
 			);
 			path = AI;
@@ -258,7 +253,6 @@
 				B0010025 /* VoiceEngine.swift */,
 				B0010027 /* SpeechRecognizer.swift */,
 				B0010029 /* SpeechSynthesizer.swift */,
-				B0010300 /* LiveVoiceSession.swift */,
 				B001002B /* WaveformView.swift */,
 			);
 			path = Voice;
@@ -289,7 +283,7 @@
 				B001003D /* macOSViews.swift */,
 				B001003F /* iPadRootView.swift */,
 				B0010041 /* RFCDetailView.swift */,
-				69D51260E6354E01ACC94D55 /* RFCToolbar.swift */,
+				B00100C1 /* RFCToolbar.swift */,
 				B0010043 /* RFCInterviewView.swift */,
 				B0010045 /* RFCListView.swift */,
 				B00100B1 /* DiagramPopoutView.swift */,
@@ -413,7 +407,6 @@
 				B0010014 /* AIProvider.swift in Sources */,
 				B0010016 /* AppleIntelligenceProvider.swift in Sources */,
 				B0010018 /* OpenAIProvider.swift in Sources */,
-				B0010302 /* TemplateAIProvider.swift in Sources */,
 				B001001A /* RFCInterviewPrompts.swift in Sources */,
 				B001001C /* RFCInterviewSession.swift in Sources */,
 				B001001E /* VoiceCommentSession.swift in Sources */,
@@ -422,8 +415,7 @@
 				B00100A0 /* SubmitForReviewSession.swift in Sources */,
 				B0010024 /* VoiceEngine.swift in Sources */,
 				B0010026 /* SpeechRecognizer.swift in Sources */,
-			B0010028 /* SpeechSynthesizer.swift in Sources */,
-				B0010301 /* LiveVoiceSession.swift in Sources */,
+				B0010028 /* SpeechSynthesizer.swift in Sources */,
 				B001002A /* WaveformView.swift in Sources */,
 				B001002C /* WebViewRenderer.swift in Sources */,
 				B001002E /* MarkdownRenderer.swift in Sources */,
@@ -440,7 +432,7 @@
 				B001003C /* macOSViews.swift in Sources */,
 				B001003E /* iPadRootView.swift in Sources */,
 				B0010040 /* RFCDetailView.swift in Sources */,
-				50858936184142FB86D944B5 /* RFCToolbar.swift in Sources */,
+				B00100C0 /* RFCToolbar.swift in Sources */,
 				B0010042 /* RFCInterviewView.swift in Sources */,
 				B0010044 /* RFCListView.swift in Sources */,
 				B00100B0 /* DiagramPopoutView.swift in Sources */,
@@ -587,9 +579,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "HermitNative/HermitNative-Debug.entitlements";
-				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "HermitNative/HermitNative-iOS.entitlements";
-				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "HermitNative/HermitNative-iOS.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "HermitNative/HermitNative-Debug.entitlements";
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -643,9 +633,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = HermitNative/HermitNative.entitlements;
-				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "HermitNative/HermitNative-iOS.entitlements";
-				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "HermitNative/HermitNative-iOS.entitlements";
+				CODE_SIGN_ENTITLEMENTS = HermitNative/HermitNative.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
