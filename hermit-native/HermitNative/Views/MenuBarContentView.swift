@@ -150,9 +150,9 @@ private struct RFCStatusGroup {
             rfcs.filter { statuses.contains($0.lifecycleStatus ?? "unknown") }
         }
         return [
-            RFCStatusGroup(header: "Implemented",  systemImage: "checkmark.seal.fill",           rfcs: pick(["implemented"])),
             RFCStatusGroup(header: "Accepted",      systemImage: "checkmark.circle",              rfcs: pick(["accepted"])),
             RFCStatusGroup(header: "Draft",         systemImage: "pencil.circle",                 rfcs: pick(["draft"])),
+            RFCStatusGroup(header: "Implemented",   systemImage: "checkmark.seal.fill",           rfcs: pick(["implemented"])),
             RFCStatusGroup(header: "Superseded",    systemImage: "arrow.triangle.2.circlepath",   rfcs: pick(["superseded"])),
             RFCStatusGroup(header: "Rejected",      systemImage: "xmark.circle",                  rfcs: pick(["rejected"])),
             RFCStatusGroup(header: "Other",         systemImage: "doc.text",                      rfcs: pick(["unknown"])),
