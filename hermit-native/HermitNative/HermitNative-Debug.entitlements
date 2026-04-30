@@ -13,8 +13,8 @@
 	<true/>
 	<key>com.apple.security.device.microphone</key>
 	<true/>
-	<!-- hermit-z9j: Handoff/NSUserActivity requires nearby-interaction entitlement -->
-	<key>com.apple.developer.nearby-interaction</key>
-	<true/>
+	<!-- Note: com.apple.developer.nearby-interaction requires a provisioned
+	     development certificate and is only present in HermitNative.entitlements
+	     (Release). Debug builds use ad-hoc signing and cannot include it. -->
 </dict>
 </plist>
