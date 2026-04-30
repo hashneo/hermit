@@ -8,6 +8,9 @@ struct RFC: Identifiable, Hashable {
     let path: String
     let sha: String
     let source: RFCSource
+    /// Normalised lifecycle status from frontmatter: "draft", "accepted",
+    /// "implemented", "superseded", "rejected", "unknown", or nil for PR RFCs.
+    let lifecycleStatus: String?
 
     enum RFCSource { case mainBranch, pullRequest(RFCPullRequest) }
 

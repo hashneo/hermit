@@ -95,12 +95,15 @@ private struct RepoSubmenu: View {
                 Text("No RFCs")
             } else {
                 if !sections.mainBranch.isEmpty {
-                    // Published RFCs
-                    ForEach(sections.mainBranch) { rfc in
-                        Button {
-                            open(rfc)
-                        } label: {
-                            Label(rfc.title, systemImage: "doc.text")
+                    let grouped = RFCStatusGroup.group(sections.mainBranch)
+                    ForEach(grouped, id: \.header) { group in
+                        if !group.rfcs.isEmpty {
+                            Text(group.header)
+                            ForEach(group.rfcs) { rfc in
+                                Button { open(rfc) } label: {
+                                    Label(rfc.title, systemImage: group.systemImage)
+                                }
+                            }
                         }
                     }
                 }
@@ -131,6 +134,29 @@ private struct RepoSubmenu: View {
     private func open(_ rfc: RFC) {
         RecentRFCStore.shared.record(rfc, repoID: repo.id)
         RFCViewerWindowManager.shared.open(rfc: rfc, repo: repo, appState: appState)
+    }
+}
+
+// MARK: - Status grouping
+
+private struct RFCStatusGroup {
+    let header: String
+    let systemImage: String
+    let rfcs: [RFC]
+
+    /// Ordered groups: Implemented → Accepted → Draft → Superseded → Rejected → Unknown
+    static func group(_ rfcs: [RFC]) -> [RFCStatusGroup] {
+        func pick(_ statuses: [String]) -> [RFC] {
+            rfcs.filter { statuses.contains($0.lifecycleStatus ?? "unknown") }
+        }
+        return [
+            RFCStatusGroup(header: "Implemented",  systemImage: "checkmark.seal.fill",           rfcs: pick(["implemented"])),
+            RFCStatusGroup(header: "Accepted",      systemImage: "checkmark.circle",              rfcs: pick(["accepted"])),
+            RFCStatusGroup(header: "Draft",         systemImage: "pencil.circle",                 rfcs: pick(["draft"])),
+            RFCStatusGroup(header: "Superseded",    systemImage: "arrow.triangle.2.circlepath",   rfcs: pick(["superseded"])),
+            RFCStatusGroup(header: "Rejected",      systemImage: "xmark.circle",                  rfcs: pick(["rejected"])),
+            RFCStatusGroup(header: "Other",         systemImage: "doc.text",                      rfcs: pick(["unknown"])),
+        ]
     }
 }
 
@@ -181,11 +207,12 @@ final class RepoRFCLoader: ObservableObject {
             do {
                 let (mainFiles, prs) = try await client.discoverRFCs()
                 let mainRFCs = mainFiles.map {
-                    RFC(id: $0.id, title: $0.name, path: $0.path, sha: $0.sha, source: .mainBranch)
+                    RFC(id: $0.id, title: $0.name, path: $0.path, sha: $0.sha,
+                        source: .mainBranch, lifecycleStatus: $0.lifecycleStatus)
                 }.sorted { $0.title < $1.title }
                 let prRFCs = prs.map {
                     RFC(id: "pr-\($0.id)", title: $0.title, path: $0.headRef, sha: $0.headSHA,
-                        source: .pullRequest($0))
+                        source: .pullRequest($0), lifecycleStatus: nil)
                 }.sorted { $0.title < $1.title }
 
                 let sections = RFCLoader.RFCSections(mainBranch: mainRFCs, pullRequests: prRFCs)

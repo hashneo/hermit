@@ -660,7 +660,7 @@ func normalizeRFCTitle(title, filePath string) string {
 
 func normalizeLifecycleStatus(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "draft", "accepted", "implemented":
+	case "draft", "accepted", "implemented", "superseded", "rejected":
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return "unknown"
