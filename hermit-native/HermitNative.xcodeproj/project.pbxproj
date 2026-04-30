@@ -44,6 +44,7 @@
 		B0010040 /* RFCDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010041 /* RFCDetailView.swift */; };
 		B0010042 /* RFCInterviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010043 /* RFCInterviewView.swift */; };
 		B0010044 /* RFCListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010045 /* RFCListView.swift */; };
+		B00100B0 /* DiagramPopoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100B1 /* DiagramPopoutView.swift */; };
 		B0010046 /* RFCPreviewPublishingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010047 /* RFCPreviewPublishingView.swift */; };
 		B0010048 /* ThreadPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010049 /* ThreadPanelView.swift */; };
 		B001004B /* GiteaAutoConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001004C /* GiteaAutoConfig.swift */; };
@@ -102,6 +103,7 @@
 		B0010041 /* RFCDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCDetailView.swift; sourceTree = "<group>"; };
 		B0010043 /* RFCInterviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCInterviewView.swift; sourceTree = "<group>"; };
 		B0010045 /* RFCListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCListView.swift; sourceTree = "<group>"; };
+		B00100B1 /* DiagramPopoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagramPopoutView.swift; sourceTree = "<group>"; };
 		B0010047 /* RFCPreviewPublishingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCPreviewPublishingView.swift; sourceTree = "<group>"; };
 		B0010049 /* ThreadPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadPanelView.swift; sourceTree = "<group>"; };
 		B001004A /* HermitNative.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HermitNative.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -281,6 +283,7 @@
 				B0010041 /* RFCDetailView.swift */,
 				B0010043 /* RFCInterviewView.swift */,
 				B0010045 /* RFCListView.swift */,
+				B00100B1 /* DiagramPopoutView.swift */,
 				B0010047 /* RFCPreviewPublishingView.swift */,
 				B0010049 /* ThreadPanelView.swift */,
 				B001D00A /* ThreadPopoverView.swift */,
@@ -428,6 +431,7 @@
 				B0010040 /* RFCDetailView.swift in Sources */,
 				B0010042 /* RFCInterviewView.swift in Sources */,
 				B0010044 /* RFCListView.swift in Sources */,
+				B00100B0 /* DiagramPopoutView.swift in Sources */,
 				B0010046 /* RFCPreviewPublishingView.swift in Sources */,
 				B0010048 /* ThreadPanelView.swift in Sources */,
 				B001D009 /* ThreadPopoverView.swift in Sources */,

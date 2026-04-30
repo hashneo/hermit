@@ -7,20 +7,55 @@ struct MermaidView: View {
     let source: String
     @State private var image: PlatformImage? = nil
     @State private var failed = false
+    @State private var showPopout = false   // iOS/iPadOS sheet
 
     var body: some View {
         Group {
             if let img = image {
+                ZStack(alignment: .bottomTrailing) {
 #if os(macOS)
-                Image(nsImage: img)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity)
+                    Image(nsImage: img)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity)
 #else
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity)
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity)
+#endif
+                    // Expand button
+                    Button {
+#if os(macOS)
+                        DiagramWindowManager.shared.open(image: img, title: "Diagram")
+#else
+                        showPopout = true
+#endif
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.white)
+                            .padding(6)
+                            .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(6)
+                    .help("Open diagram in viewer")
+                }
+#if !os(macOS)
+                .sheet(isPresented: $showPopout) {
+                    NavigationStack {
+                        DiagramPopoutView(image: img) {
+                            showPopout = false
+                        }
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Close") { showPopout = false }
+                            }
+                        }
+                    }
+                }
 #endif
             } else if failed {
                 Text("Diagram unavailable")
