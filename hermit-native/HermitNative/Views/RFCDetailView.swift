@@ -72,6 +72,8 @@ struct RFCDetailView: View {
         }
         .navigationTitle(currentRFC.title)
         .toolbar {
+            // hermit-8q5 / hermit-d42: reading-mode toggle — labelled so macOS
+            // toolbar can render it as text+icon in customised toolbar layouts.
             RFCLifecycleToolbar(
                 rfc: rfc,
                 fileURL: resolvedFileURL,
@@ -89,21 +91,19 @@ struct RFCDetailView: View {
                         return AcceptRFCResult(merged: false, blockedByCI: false, commitSHA: "")
                     }
                     if result.merged {
-                        // RFC merged — trigger list reload in parent
                         reloadToken = UUID()
                     }
                     return result
                 },
                 onPollCI: { sha in
                     guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient() else { return false }
-                    // Poll every 15 seconds, max ~10 minutes.
                     for _ in 0..<40 {
                         try? await Task.sleep(for: .seconds(15))
                         let status = (try? await client.getCIStatus(commitSHA: sha)) ?? "pending"
                         if status == "success" { return true }
                         if status == "failure" { return false }
                     }
-                    return false // timed out
+                    return false
                 },
                 allThreadsResolved: liveStore.visibleComments.isEmpty,
                 isBehind: isBehind,
@@ -111,7 +111,6 @@ struct RFCDetailView: View {
                     guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient(),
                           case .pullRequest(let pr) = rfc.source else { return }
                     try? await client.updateBranch(prNumber: pr.number)
-                    // Re-check status after update — branch should no longer be behind.
                     if let status = try? await client.getMergeStatus(prNumber: pr.number) {
                         isBehind = status
                     }
@@ -120,37 +119,31 @@ struct RFCDetailView: View {
             )
             ToolbarItem(placement: .automatic) {
                 HStack(spacing: 4) {
-                    Button { scrollToPrev() } label: {
-                        Image(systemName: "chevron.up")
-                    }
-                    .disabled(liveStore.commentedLines(blockRanges: blockRanges).isEmpty)
-                    .help("Previous comment")
-                    Button { scrollToNext() } label: {
-                        Image(systemName: "chevron.down")
-                    }
-                    .disabled(liveStore.commentedLines(blockRanges: blockRanges).isEmpty)
-                    .help("Next comment")
+                    Button { scrollToPrev() } label: { Image(systemName: "chevron.up") }
+                        .disabled(liveStore.commentedLines(blockRanges: blockRanges).isEmpty)
+                        .help("Previous comment")
+                    Button { scrollToNext() } label: { Image(systemName: "chevron.down") }
+                        .disabled(liveStore.commentedLines(blockRanges: blockRanges).isEmpty)
+                        .help("Next comment")
                 }
             }
             ToolbarItem(placement: .automatic) {
-                Button {
-                    reloadToken = UUID()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .disabled(isLoading)
-                .help("Reload this RFC")
+                Button { reloadToken = UUID() } label: { Image(systemName: "arrow.clockwise") }
+                    .disabled(isLoading)
+                    .help("Reload this RFC")
             }
-            // hermit-8q5: reading-mode toggle (existing)
             ToolbarItem(placement: .automatic) {
                 Button {
                     withAnimation { isReadingMode.toggle() }
                 } label: {
-                    Image(systemName: isReadingMode
-                          ? "sidebar.left"
-                          : "arrow.up.left.and.arrow.down.right")
+                    Label(
+                        isReadingMode ? "Show Sidebar" : "Reading Mode",
+                        systemImage: isReadingMode ? "sidebar.left" : "book.pages"
+                    )
                 }
-                .help(isReadingMode ? "Restore sidebar" : "Reading mode")
+                .help(isReadingMode
+                      ? "Show sidebar (or swipe right)"
+                      : "Reading Mode — expand RFC to full window")
             }
 
             // hermit-ec7: export/print/share + lifecycle toolbar
