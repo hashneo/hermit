@@ -28,7 +28,7 @@ struct HermitNativeApp: App {
             MenuBarContentView()
                 .environmentObject(appState)
         }
-        .menuBarExtraStyle(.window)
+        .menuBarExtraStyle(.menu)
 
         Settings {
             SettingsView()
@@ -72,6 +72,7 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             guard self?.serverStarted == true else { return }
             Task { @MainActor in
+                RepoRFCCache.shared.invalidateAll()
                 EmbeddedServerManager.shared.restart(appState: AppState.shared)
                 if let port = EmbeddedServerManager.shared.port {
                     ConfigStore.shared.serverBaseURL = "http://127.0.0.1:\(port)"
