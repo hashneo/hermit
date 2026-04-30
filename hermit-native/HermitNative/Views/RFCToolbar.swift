@@ -27,6 +27,12 @@ struct RFCLifecycleToolbar: ToolbarContent {
     var callerPermission: String = "none"
     var onApprove: (() async -> Void)?        = nil
     var onMarkImplemented: (() async -> Void)? = nil
+    /// hermit-cns: for PR RFCs, called when the Approve PR button is tapped.
+    var onApprovePR: (() async -> Void)? = nil
+    /// hermit-cns: true when all review threads on the PR are resolved.
+    var allThreadsResolved: Bool = false
+    /// hermit-cns: true when the PR already has an approval review.
+    var prApproved: Bool = false
     /// Populated once markdown loads, used for export/print.
     var markdownSource: String = ""
 
@@ -39,6 +45,11 @@ struct RFCLifecycleToolbar: ToolbarContent {
         return false
     }
 
+    private var isPullRequest: Bool {
+        if case .pullRequest = rfc.source { return true }
+        return false
+    }
+
     private var status: String { rfc.lifecycleStatus ?? "unknown" }
 
     private var canApprove: Bool {
@@ -47,6 +58,13 @@ struct RFCLifecycleToolbar: ToolbarContent {
 
     private var canMarkImplemented: Bool {
         isMainBranch && status == "accepted" && isPrivilegedPermission(callerPermission)
+    }
+
+    /// hermit-cns: Approve PR is available when the caller has admin/maintain,
+    /// all review threads are resolved, and the PR has not already been approved.
+    private var canApprovePR: Bool {
+        isPullRequest && isPrivilegedPermission(callerPermission) &&
+        allThreadsResolved && !prApproved
     }
 
     /// Terminal states — no transitions permitted from any role.
@@ -76,8 +94,9 @@ struct RFCLifecycleToolbar: ToolbarContent {
             .help("Export or print this RFC")
         }
 
-        // Lifecycle transition buttons — main-branch only, non-terminal only
+        // Lifecycle transition buttons
         ToolbarItemGroup(placement: .automatic) {
+            // Main-branch RFCs: draft → accepted → implemented
             if isMainBranch && !isTerminal {
                 if status == "draft" {
                     Button {
@@ -110,6 +129,31 @@ struct RFCLifecycleToolbar: ToolbarContent {
                           ? "Mark this RFC as Implemented"
                           : "Requires admin or maintain permission on this repository")
                 }
+            }
+
+            // hermit-cns: PR RFCs — Approve PR button.
+            // Shown when: caller has admin/maintain, all threads are resolved,
+            // and the PR has not already been approved.
+            if isPullRequest {
+                Button {
+                    Task { await runAction(onApprovePR) }
+                } label: {
+                    if isActioning {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Approve PR", systemImage: "checkmark.seal.fill")
+                    }
+                }
+                .disabled(!canApprovePR || isActioning)
+                .help(
+                    prApproved
+                        ? "You have already approved this PR"
+                        : !allThreadsResolved
+                            ? "Resolve all review comments before approving"
+                            : !isPrivilegedPermission(callerPermission)
+                                ? "Requires admin or maintain permission"
+                                : "Approve and mark this RFC PR ready to merge"
+                )
             }
         }
 

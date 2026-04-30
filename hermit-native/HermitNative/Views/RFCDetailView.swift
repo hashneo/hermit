@@ -58,6 +58,8 @@ struct RFCDetailView: View {
     @State private var callerPermission: String = "none"
     @State private var lifecycleError: String? = nil
     @State private var currentRFC: RFC         // mutable copy so status refreshes after transition
+    // hermit-cns: PR RFC approval state
+    @State private var prApproved: Bool = false
 
     init(rfc: RFC, repo: Repository? = nil,
          commentStore: CommentStore? = nil,
@@ -168,6 +170,9 @@ struct RFCDetailView: View {
                 callerPermission: callerPermission,
                 onApprove: handleApprove,
                 onMarkImplemented: handleMarkImplemented,
+                onApprovePR: handleApprovePR,
+                allThreadsResolved: commentStore?.comments.allSatisfy(\.resolved) ?? true,
+                prApproved: prApproved,
                 markdownSource: markdown
             )
         }
@@ -348,16 +353,22 @@ struct RFCDetailView: View {
     // MARK: - Permission fetch
 
     private func fetchCallerPermission(client: any HermitClientProtocol) async {
-        guard case .mainBranch = rfc.source else {
-            // PR RFCs don't expose lifecycle transitions; no need to check.
-            callerPermission = "none"
-            return
-        }
+        // hermit-cns: fetch permission for both main-branch and PR RFCs so
+        // the Approve PR button can be gated on admin/maintain.
         do {
             callerPermission = try await client.getCallerPermission()
         } catch {
-            // Non-fatal — toolbar buttons will be disabled (safest default).
             callerPermission = "none"
+        }
+
+        // For PR RFCs also fetch the current review state.
+        if case .pullRequest(let pr) = rfc.source {
+            do {
+                let state = try await client.getReviewState(prNumber: pr.number)
+                prApproved = state.approved
+            } catch {
+                prApproved = false
+            }
         }
     }
 
@@ -433,5 +444,19 @@ struct RFCDetailView: View {
 #else
         UIApplication.shared.open(url)
 #endif
+    }
+
+    // hermit-cns: Approve the GitHub PR for a PR RFC.
+    // Uses the existing review/approve endpoint which submits a GitHub approval
+    // review.  On success, updates prApproved so the button disables itself.
+    private func handleApprovePR() async {
+        guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient() else { return }
+        guard case .pullRequest(let pr) = rfc.source else { return }
+        do {
+            try await client.approve(prNumber: pr.number)
+            prApproved = true
+        } catch {
+            lifecycleError = error.localizedDescription
+        }
     }
 }
