@@ -248,6 +248,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 			meta, _ := parseFrontmatter(view.MarkdownSource)
 			lifecycleStatus = normalizeLifecycleStatus(meta["status"])
 		}
+		title = normalizeRFCTitle(title, item.Path)
 
 		items = append(items, CatalogItem{
 			ID:              item.ID,
@@ -622,6 +623,33 @@ func writeMetaField(b *strings.Builder, label, value string) {
 
 func isDocuchangoRFCFilename(name string) bool {
 	return docuchangoRFCFilenamePattern.MatchString(name)
+}
+
+// rfcFilenameNumberPattern matches rfc-NNN- at the start of a filename.
+var rfcFilenameNumberPattern = regexp.MustCompile(`^rfc-(\d{3})-`)
+
+// rfcTitlePrefixPattern matches an existing RFC-NNN prefix (any separator) in a title.
+var rfcTitlePrefixPattern = regexp.MustCompile(`(?i)^rfc[-\s]?\d{3}`)
+
+// normalizeRFCTitle ensures the display title starts with "RFC-NNN: <rest>".
+// If the title already contains the RFC number it is returned unchanged.
+// Otherwise the number is extracted from the filename (rfc-NNN-slug.md) and prepended.
+func normalizeRFCTitle(title, filePath string) string {
+	if rfcTitlePrefixPattern.MatchString(title) {
+		return title
+	}
+	base := filepath.Base(filePath)
+	m := rfcFilenameNumberPattern.FindStringSubmatch(base)
+	if m == nil {
+		return title
+	}
+	num := m[1]
+	// Parse to strip leading zeros for display: "001" → "1", but keep 3 digits to match convention.
+	n, err := strconv.Atoi(num)
+	if err != nil {
+		return title
+	}
+	return fmt.Sprintf("RFC-%03d: %s", n, title)
 }
 
 func normalizeLifecycleStatus(value string) string {
