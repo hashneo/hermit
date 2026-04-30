@@ -39,7 +39,10 @@ func (c *InMemoryGitHubClient) ValidatePAT(_ context.Context, owner, name, token
 		}
 	}
 
-	isValid := strings.HasPrefix(token, "ghp_") && len(token) >= 20
+	// Accept any non-empty token: GitHub PATs (ghp_…), Gitea hex tokens,
+	// and other registry formats are all valid as far as the stub is concerned.
+	// Real token scope validation happens at the registry API level.
+	isValid := strings.TrimSpace(token) != "" && len(token) >= 10
 	if !isValid {
 		return ValidationResult{
 			Healthy: false,

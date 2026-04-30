@@ -27,15 +27,32 @@ import (
 
 // StartConfig is the JSON structure accepted by Start.
 // All fields map directly to hermit config concepts.
+//
+// Repos is the preferred multi-repo field. The legacy single-repo fields
+// (BaseURL/PAT/Owner/Repo/DocsPath/RFCLabel) are still accepted for
+// backwards compatibility and are promoted into Repos when Repos is empty.
 type StartConfig struct {
-	BaseURL       string `json:"baseURL"`
-	PAT           string `json:"pat"`
-	Owner         string `json:"owner"`
-	Repo          string `json:"repo"`
-	DocsPath      string `json:"docsPath"`
-	RFCLabel      string `json:"rfcLabel"`
-	DataDir       string `json:"dataDir"`      // app sandbox Application Support dir
-	ConfigFile    string `json:"configFile"`   // optional: path to hermit.yaml override
+	// Multi-repo (preferred)
+	Repos   []RepoConfig `json:"repos"`
+	DataDir string       `json:"dataDir"`    // app sandbox Application Support dir
+
+	// Legacy single-repo fields (promoted to Repos when Repos is empty)
+	BaseURL  string `json:"baseURL"`
+	PAT      string `json:"pat"`
+	Owner    string `json:"owner"`
+	Repo     string `json:"repo"`
+	DocsPath string `json:"docsPath"`
+	RFCLabel string `json:"rfcLabel"`
+}
+
+// RepoConfig describes one repository to register with the server.
+type RepoConfig struct {
+	BaseURL  string `json:"baseURL"`
+	PAT      string `json:"pat"`
+	Owner    string `json:"owner"`
+	Repo     string `json:"repo"`
+	DocsPath string `json:"docsPath"`
+	RFCLabel string `json:"rfcLabel"`
 }
 
 var (
@@ -115,23 +132,23 @@ func Stop() {
 }
 
 // buildConfig constructs a hermit config.Config from a StartConfig.
-// It writes a minimal in-memory YAML config so config.Load() isn't needed;
-// instead we populate config.Config directly.
 func buildConfig(sc StartConfig) (config.Config, error) {
-	if sc.PAT == "" {
-		return config.Config{}, errors.New("pat is required")
-	}
-	if sc.Owner == "" || sc.Repo == "" {
-		return config.Config{}, errors.New("owner and repo are required")
-	}
-	if sc.BaseURL == "" {
-		sc.BaseURL = "https://api.github.com"
-	}
-	if sc.DocsPath == "" {
-		sc.DocsPath = "docs-cms/rfcs/"
-	}
-	if sc.RFCLabel == "" {
-		sc.RFCLabel = "hermit:rfc-ready"
+	// Promote legacy single-repo fields when Repos is empty.
+	if len(sc.Repos) == 0 {
+		if sc.PAT == "" {
+			return config.Config{}, errors.New("pat is required")
+		}
+		if sc.Owner == "" || sc.Repo == "" {
+			return config.Config{}, errors.New("owner and repo are required")
+		}
+		sc.Repos = []RepoConfig{{
+			BaseURL:  sc.BaseURL,
+			PAT:      sc.PAT,
+			Owner:    sc.Owner,
+			Repo:     sc.Repo,
+			DocsPath: sc.DocsPath,
+			RFCLabel: sc.RFCLabel,
+		}}
 	}
 
 	dataDir := sc.DataDir
@@ -139,28 +156,61 @@ func buildConfig(sc StartConfig) (config.Config, error) {
 		dataDir = "."
 	}
 
-	cfg := config.Config{
-		Environment:   "production",
-		ListenAddress: "127.0.0.1:0", // overridden by Start()
-		Registries: []config.Registry{
-			{
-				Name:    "github",
+	// Build a registry per unique base URL so repos on different hosts work.
+	type registryKey struct{ baseURL string }
+	registryNames := map[registryKey]string{}
+	var registries []config.Registry
+	registrySeq := 0
+
+	for i := range sc.Repos {
+		r := &sc.Repos[i]
+		if r.BaseURL == "" {
+			r.BaseURL = "https://api.github.com"
+		}
+		if r.DocsPath == "" {
+			r.DocsPath = "docs-cms/rfcs/"
+		}
+		if r.RFCLabel == "" {
+			r.RFCLabel = "hermit:rfc-ready"
+		}
+		key := registryKey{r.BaseURL}
+		if _, ok := registryNames[key]; !ok {
+			name := fmt.Sprintf("registry-%d", registrySeq)
+			registrySeq++
+			registryNames[key] = name
+			registries = append(registries, config.Registry{
+				Name:    name,
 				Kind:    "github",
-				BaseURL: sc.BaseURL,
-			},
-		},
-		Repositories: []config.Repository{
-			{
-				Owner:          sc.Owner,
-				Name:           sc.Repo,
-				Registry:       "github",
-				DefaultBranch:  "main",
-				DocsPathPolicy: sc.DocsPath,
-				Token:          sc.PAT,
-			},
-		},
-		DataDir: filepath.Join(dataDir, "hermit"),
+				BaseURL: r.BaseURL,
+			})
+		}
 	}
 
-	return cfg, nil
+	var repositories []config.Repository
+	for _, r := range sc.Repos {
+		if r.PAT == "" || r.Owner == "" || r.Repo == "" {
+			continue // skip incomplete entries
+		}
+		registryName := registryNames[registryKey{r.BaseURL}]
+		repositories = append(repositories, config.Repository{
+			Owner:          r.Owner,
+			Name:           r.Repo,
+			Registry:       registryName,
+			DefaultBranch:  "main",
+			DocsPathPolicy: r.DocsPath,
+			Token:          r.PAT,
+		})
+	}
+
+	if len(repositories) == 0 {
+		return config.Config{}, errors.New("no valid repositories configured")
+	}
+
+	return config.Config{
+		Environment:   "production",
+		ListenAddress: "127.0.0.1:0", // overridden by Start()
+		Registries:    registries,
+		Repositories:  repositories,
+		DataDir:       filepath.Join(dataDir, "hermit"),
+	}, nil
 }

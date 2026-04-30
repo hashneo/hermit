@@ -192,8 +192,12 @@ struct SetupView: View {
                 ConfigStore.shared.apply(repoConfig)
                 ConfigStore.shared.serverBaseURL = url
                 ConfigStore.shared.serverMode    = .embeddedLocal
-                if let active = AccountStore.shared.active {
-                    AccountStore.shared.update(active, token: token)
+                // Find an existing connection for this endpoint or create a new one.
+                let store = AccountStore.shared
+                if let existing = store.connections.first(where: { $0.endpoint == url }) {
+                    store.update(existing, token: token)
+                } else {
+                    store.add(name: url, endpoint: url, token: token)
                 }
                 await MainActor.run {
                     appState.applyConfig()

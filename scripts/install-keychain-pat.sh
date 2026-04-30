@@ -93,6 +93,11 @@ for r in registries:
 PY
 )
 GITEA_BASE_URL="${GITEA_BASE_URL:-http://localhost:3000/api/v1}"
+# Strip /api/v1 suffix — the account endpoint is the bare host.
+# EmbeddedServerManager.resolvedAPIBase() appends /api/v1 at server start time
+# for any non-GitHub host, so storing the bare URL keeps the two in sync.
+GITEA_ENDPOINT="${GITEA_BASE_URL%/api/v1}"
+GITEA_ENDPOINT="${GITEA_ENDPOINT%/}"
 
 # Extract the Hermit server listen address
 HERMIT_SERVER_URL=$(python3 - "${HERMIT_YAML}" <<'PY'
@@ -207,10 +212,93 @@ fi
 #
 # macOS does NOT reliably sync `defaults write <bundleID>` into the sandbox
 # container before app launch, so we write the plist file directly to be safe.
+#
+# Accounts and repositories are ONLY seeded on first run (when the key is absent).
+# On subsequent runs we only refresh the PAT on the fixed dev account UUID so that
+# Gitea token rotation is picked up without overwriting any accounts/repos the user
+# has added at runtime.
 
 SANDBOX_PLIST="${HOME}/Library/Containers/${BUNDLE_ID}/Data/Library/Preferences/${BUNDLE_ID}.plist"
 
-write_defaults() {
+ACCOUNT_UUID="00000000-0000-0000-0000-000000000001"
+REPO_UUID="00000000-0000-0000-0000-000000000002"
+
+# Returns 0 (true) if hermit.accounts is already set in the given domain.
+accounts_exist() {
+    local domain="$1"
+    defaults read "${domain}" hermit.accounts &>/dev/null
+}
+
+# Patch the PAT on the fixed dev account UUID inside an existing hermit.accounts JSON.
+# Handles both string-stored (from this script) and data-stored (from Swift app) formats.
+# Leaves any user-added accounts untouched.
+patch_dev_pat() {
+    local domain="$1"
+    # Export the full plist so we can read the raw bytes regardless of storage format.
+    local tmp_plist
+    tmp_plist=$(mktemp /tmp/hermit-patch-XXXXXX.plist)
+    if [[ "${domain}" == *.plist ]]; then
+        cp "${domain}" "${tmp_plist}"
+    else
+        defaults export "${domain}" "${tmp_plist}" 2>/dev/null || { rm -f "${tmp_plist}"; return 1; }
+    fi
+
+    local patched_plist
+    patched_plist=$(mktemp /tmp/hermit-patched-XXXXXX.plist)
+
+    python3 - "${tmp_plist}" "${patched_plist}" "${ACCOUNT_UUID}" "${PAT}" <<'PY'
+import sys, json, plistlib
+
+src, dst, target_id, pat = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+with open(src, 'rb') as f:
+    d = plistlib.load(f)
+
+raw = d.get('hermit.accounts')
+if raw is None:
+    sys.exit(1)
+
+# raw may be bytes (Data) or str depending on how it was written
+if isinstance(raw, bytes):
+    accounts = json.loads(raw.decode())
+elif isinstance(raw, str):
+    accounts = json.loads(raw)
+else:
+    sys.exit(1)
+
+changed = False
+for a in accounts:
+    if a.get('id') == target_id:
+        a['token'] = pat
+        changed = True
+
+if not changed:
+    sys.exit(1)
+
+# Write back in the same format as the original
+if isinstance(d['hermit.accounts'], bytes):
+    d['hermit.accounts'] = json.dumps(accounts).encode()
+else:
+    d['hermit.accounts'] = json.dumps(accounts)
+
+with open(dst, 'wb') as f:
+    plistlib.dump(d, f)
+PY
+    local py_status=$?
+    rm -f "${tmp_plist}"
+    if [ $py_status -ne 0 ]; then
+        rm -f "${patched_plist}"
+        return 1
+    fi
+
+    if [[ "${domain}" == *.plist ]]; then
+        cp "${patched_plist}" "${domain}"
+    else
+        defaults import "${domain}" "${patched_plist}"
+    fi
+    rm -f "${patched_plist}"
+}
+
+write_invariants() {
     local domain="$1"
     defaults write "${domain}" hermit.baseURL       "${GITEA_BASE_URL}"
     defaults write "${domain}" hermit.serverBaseURL "${HERMIT_SERVER_URL}"
@@ -219,37 +307,49 @@ write_defaults() {
     defaults write "${domain}" hermit.docsPath      "${DOCS_PATH}"
     defaults write "${domain}" hermit.rfcLabel      "${RFC_LABEL}"
     defaults write "${domain}" hermit.serverMode    -string '{"type":"embeddedLocal"}'
+}
 
-    # Seed AccountStore with the default dev connection so the Account tab
-    # shows a row without needing a runtime migration.
-    # Use a fixed UUID so repeated runs are idempotent.
-    # token is included here — DEBUG builds read it directly from UserDefaults
-    # (no Keychain needed). Release builds ignore the token field in JSON.
-    local ACCOUNT_UUID="00000000-0000-0000-0000-000000000001"
-    local ACCOUNTS_JSON="[{\"id\":\"${ACCOUNT_UUID}\",\"name\":\"Default (Gitea)\",\"endpoint\":\"${HERMIT_SERVER_URL}\",\"token\":\"${PAT}\"}]"
-    defaults write "${domain}" hermit.accounts         -string "${ACCOUNTS_JSON}"
+seed_accounts() {
+    local domain="$1"
+    local ACCOUNTS_JSON="[{\"id\":\"${ACCOUNT_UUID}\",\"name\":\"Default (Gitea)\",\"endpoint\":\"${GITEA_ENDPOINT}\",\"token\":\"${PAT}\"}]"
+    defaults write "${domain}" hermit.accounts          -string "${ACCOUNTS_JSON}"
     defaults write "${domain}" hermit.accounts.activeID -string "${ACCOUNT_UUID}"
 
-    # Seed RepositoryStore with the default dev repo linked to the account above.
-    local REPO_UUID="00000000-0000-0000-0000-000000000002"
     local REPOS_JSON="[{\"id\":\"${REPO_UUID}\",\"accountID\":\"${ACCOUNT_UUID}\",\"owner\":\"${REPO_OWNER}\",\"name\":\"${REPO_NAME}\",\"docsPath\":\"${DOCS_PATH}\",\"rfcLabel\":\"${RFC_LABEL}\"}]"
-    defaults write "${domain}" hermit.repositories         -string "${REPOS_JSON}"
+    defaults write "${domain}" hermit.repositories          -string "${REPOS_JSON}"
     defaults write "${domain}" hermit.repositories.activeID -string "${REPO_UUID}"
 }
 
+apply_to_domain() {
+    local domain="$1"
+    write_invariants "${domain}"
+    if accounts_exist "${domain}"; then
+        # Accounts already seeded — just refresh the PAT on the dev account.
+        if patch_dev_pat "${domain}"; then
+            printf '  accounts already present — refreshed dev PAT only\n'
+        else
+            printf '  accounts already present — dev account UUID not found, PAT not refreshed\n'
+        fi
+    else
+        printf '  seeding accounts and repositories for the first time\n'
+        seed_accounts "${domain}"
+    fi
+}
+
 printf 'Writing config to UserDefaults (global: %s)...\n' "${BUNDLE_ID}"
-write_defaults "${BUNDLE_ID}"
+apply_to_domain "${BUNDLE_ID}"
 
 if [ -f "${SANDBOX_PLIST}" ]; then
     printf 'Writing config to sandboxed plist: %s\n' "${SANDBOX_PLIST}"
-    write_defaults "${SANDBOX_PLIST}"
+    apply_to_domain "${SANDBOX_PLIST}"
 else
     printf 'Sandbox container not found yet (%s) — global write only.\n' "${SANDBOX_PLIST}"
     printf 'The app will pick up values on first launch.\n'
 fi
 
 printf '  server-base-url → %s\n' "${HERMIT_SERVER_URL}"
-printf '  base-url        → %s\n' "${GITEA_BASE_URL}"
+printf '  gitea-endpoint  → %s\n' "${GITEA_ENDPOINT}"
+printf '  gitea-api-base  → %s\n' "${GITEA_BASE_URL}"
 printf '  repo            → %s/%s\n' "${REPO_OWNER}" "${REPO_NAME}"
 printf '  docs-path       → %s\n' "${DOCS_PATH}"
 printf '  rfc-label       → %s\n' "${RFC_LABEL}"

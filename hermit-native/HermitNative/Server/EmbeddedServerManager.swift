@@ -84,9 +84,11 @@ final class EmbeddedServerManager: ObservableObject {
         port = nil
     }
 
-    /// Stop the server and restart it with fresh AppState.
-    /// Used when the repo root bookmark changes.
+    /// Stop the server and restart it with fresh config from AccountStore/RepositoryStore.
+    /// No-op if the server has not started yet (port == nil) — avoids triggering
+    /// re-entrant access to AppState.shared during singleton initialisation.
     func restart() {
+        guard port != nil else { return }
         let appState = AppState.shared
         stop()
         Task { @MainActor in
@@ -264,48 +266,40 @@ final class EmbeddedServerManager: ObservableObject {
 
     private func buildConfigJSON(appState: AppState) -> String {
         let dataDir = Self.appSupportDirectory()
-
-        // Prefer live AccountStore/RepositoryStore over the stale AppState snapshot so
-        // that a setActive() call immediately takes effect without requiring a full
-        // AppState.applyConfig() pass first.
         let accountStore = AccountStore.shared
         let repoStore    = RepositoryStore.shared
 
-        let endpoint: String
-        let pat: String
-        if let conn = accountStore.active {
-            endpoint = conn.endpoint
-            pat      = AccountStore.shared.token(for: conn) ?? ""
-        } else {
-            // Fall back to legacy AppState values during first-launch migration.
-            endpoint = appState.giteaBaseURL.isEmpty ? appState.baseURL : appState.giteaBaseURL
-            pat      = appState.pat
+        // Build one RepoConfig entry per repository, resolving its account's PAT.
+        // All repos are sent — the Go server registers them all simultaneously.
+        var repos: [[String: String]] = []
+        for repo in repoStore.repositories {
+            guard let account = accountStore.connections.first(where: { $0.id == repo.accountID }),
+                  let pat = accountStore.token(for: account), !pat.isEmpty else { continue }
+            repos.append([
+                "baseURL":  Self.resolvedAPIBase(for: account.endpoint),
+                "pat":      pat,
+                "owner":    repo.owner,
+                "repo":     repo.name,
+                "docsPath": repo.docsPath,
+                "rfcLabel": repo.rfcLabel,
+            ])
         }
 
-        let owner:    String
-        let repoName: String
-        let docsPath: String
-        let rfcLabel: String
-        if let repo = repoStore.active {
-            owner    = repo.owner
-            repoName = repo.name
-            docsPath = repo.docsPath
-            rfcLabel = repo.rfcLabel
-        } else {
-            owner    = appState.repoOwner
-            repoName = appState.repoName
-            docsPath = appState.docsPath
-            rfcLabel = appState.rfcLabel
+        // Legacy fallback for first-launch migration before any stores are populated.
+        if repos.isEmpty && !appState.pat.isEmpty && !appState.repoOwner.isEmpty {
+            repos.append([
+                "baseURL":  Self.resolvedAPIBase(for: appState.giteaBaseURL.isEmpty ? appState.baseURL : appState.giteaBaseURL),
+                "pat":      appState.pat,
+                "owner":    appState.repoOwner,
+                "repo":     appState.repoName,
+                "docsPath": appState.docsPath,
+                "rfcLabel": appState.rfcLabel,
+            ])
         }
 
-        let payload: [String: String] = [
-            "baseURL":  endpoint,
-            "pat":      pat,
-            "owner":    owner,
-            "repo":     repoName,
-            "docsPath": docsPath,
-            "rfcLabel": rfcLabel,
-            "dataDir":  dataDir,
+        let payload: [String: Any] = [
+            "repos":   repos,
+            "dataDir": dataDir,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let str  = String(data: data, encoding: .utf8) else {
@@ -317,6 +311,20 @@ final class EmbeddedServerManager: ObservableObject {
     private static func appSupportDirectory() -> String {
         let urls = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
         return urls.first?.appendingPathComponent("Hermit").path ?? NSHomeDirectory()
+    }
+
+    /// Returns the correct API base URL for a registry endpoint.
+    ///
+    /// The Go server's github_client constructs paths as `{baseURL}/repos/…`
+    /// which is the GitHub REST API layout.  Gitea exposes the same layout
+    /// under `/api/v1`, so any endpoint that is not a github.com host gets
+    /// `/api/v1` appended (unless it is already present).
+    static func resolvedAPIBase(for rawEndpoint: String) -> String {
+        let trimmed = rawEndpoint.trimmingCharacters(in: .init(charactersIn: "/"))
+        guard let host = URL(string: trimmed)?.host else { return trimmed }
+        if host == "github.com" || host == "api.github.com" { return trimmed }
+        if trimmed.hasSuffix("/api/v1") { return trimmed }
+        return trimmed + "/api/v1"
     }
 }
 #endif

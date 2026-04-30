@@ -138,8 +138,8 @@ final class AppState: ObservableObject {
                 rfcLabel: detected.rfcLabel
             ))
             if !detected.pat.isEmpty {
-                if let active = AccountStore.shared.active {
-                    AccountStore.shared.update(active, token: detected.pat)
+                if let conn = AccountStore.shared.connections.first {
+                    AccountStore.shared.update(conn, token: detected.pat)
                 }
             }
             debugLog("loaded from bundled config — \(detected.owner)/\(detected.repo) @ \(detected.baseURL)")
@@ -153,7 +153,7 @@ final class AppState: ObservableObject {
         // Non-secret config lives in UserDefaults (ConfigStore); PAT in Keychain (release)
         // or UserDefaults via the Connection struct (debug).
         let cs = ConfigStore.shared
-        let resolvedPAT   = AccountStore.shared.active.flatMap {
+        let resolvedPAT   = AccountStore.shared.connections.first.flatMap {
             AccountStore.shared.token(for: $0)
         } ?? ""
         pat               = resolvedPAT
@@ -177,7 +177,7 @@ final class AppState: ObservableObject {
     /// Refreshes published state from ConfigStore + Keychain/UserDefaults (call after saving settings).
     func applyConfig() {
         let cs = ConfigStore.shared
-        pat           = AccountStore.shared.active.flatMap {
+        pat           = AccountStore.shared.connections.first.flatMap {
             AccountStore.shared.token(for: $0)
         } ?? ""
         baseURL       = cs.baseURL   ?? ""
@@ -210,16 +210,24 @@ final class AppState: ObservableObject {
             guard !localNetworkToken.isEmpty else { return nil }
             bearer = localNetworkToken
         } else {
-            guard isAuthenticated, !pat.isEmpty else { return nil }
-            bearer = pat
+            // Read the PAT from the live AccountStore so we always use the token
+            // for the first/matching account, not a potentially stale AppState snapshot.
+            let livePAT = AccountStore.shared.connections.first.flatMap {
+                AccountStore.shared.token(for: $0)
+            } ?? pat
+            guard !livePAT.isEmpty else { return nil }
+            bearer = livePAT
         }
 
+        // Read owner/repo/docsPath from the live RepositoryStore so that switching
+        // repos is reflected immediately without waiting for applyConfig().
+        let activeRepo = RepositoryStore.shared.repositories.first
         let cfg = HermitAPIClient.Config(
             baseURL:  serverBaseURL,
-            owner:    repoOwner,
-            repo:     repoName,
-            docsPath: docsPath,
-            rfcLabel: rfcLabel,
+            owner:    activeRepo?.owner    ?? repoOwner,
+            repo:     activeRepo?.name     ?? repoName,
+            docsPath: activeRepo?.docsPath ?? docsPath,
+            rfcLabel: activeRepo?.rfcLabel ?? rfcLabel,
             pat:      bearer
         )
         return HermitAPIClient(config: cfg)

@@ -143,8 +143,8 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
                     ))
                     ConfigStore.shared.serverBaseURL = detected.baseURL
                     if !detected.pat.isEmpty {
-                        if let active = AccountStore.shared.active {
-                            AccountStore.shared.update(active, token: detected.pat)
+                        if let conn = AccountStore.shared.connections.first {
+                            AccountStore.shared.update(conn, token: detected.pat)
                         }
                     }
                 } else {

@@ -54,13 +54,7 @@ private struct AccountSettingsTab: View {
             Table(store.connections, selection: $selection) {
                 TableColumn("Name") { conn in
                     HStack(spacing: 6) {
-                        if store.activeID == conn.id {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(Color.accentColor)
-                                .help("Active connection")
-                        }
                         Text(conn.name)
-                            .fontWeight(store.activeID == conn.id ? .semibold : .regular)
                     }
                 }
                 .width(min: 120, ideal: 160)
@@ -80,8 +74,6 @@ private struct AccountSettingsTab: View {
                 TableColumn("Actions") { conn in
                     HStack(spacing: 4) {
                         Menu {
-                            Button("Set Active") { store.setActive(conn) }
-                            Divider()
                             Button("Edit…") { editTarget = conn }
                             Button("Revoke", role: .destructive) { revokeTarget = conn }
                         } label: {
@@ -274,9 +266,12 @@ private struct EditAccountSheet: View {
 private struct RepositorySettingsTab: View {
     @ObservedObject private var accountStore = AccountStore.shared
     @ObservedObject private var repoStore    = RepositoryStore.shared
-    @State private var showAddSheet  = false
-    @State private var editTarget:   Repository? = nil
-    @State private var deleteTarget: Repository? = nil
+    @State private var showAddSheet   = false
+    @State private var editTarget:    Repository? = nil
+    @State private var deleteTarget:  Repository? = nil
+    @State private var validating:    UUID?        = nil   // repo ID currently being validated
+    @State private var validationError: String?    = nil   // error message to show
+    @State private var errorRepo:     Repository?  = nil   // repo that failed, offered for edit
     @State private var selection:    Set<UUID>   = []
 
     var body: some View {
@@ -297,14 +292,8 @@ private struct RepositorySettingsTab: View {
                 TableColumn("Account") { repo in
                     let acct = accountStore.connections.first { $0.id == repo.accountID }
                     HStack(spacing: 6) {
-                        if repoStore.activeID == repo.id {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(Color.accentColor)
-                                .help("Active repository")
-                        }
                         Text(acct?.name ?? "—")
                             .foregroundStyle(acct == nil ? .secondary : .primary)
-                            .fontWeight(repoStore.activeID == repo.id ? .semibold : .regular)
                     }
                 }
                 .width(min: 120, ideal: 160)
@@ -319,13 +308,20 @@ private struct RepositorySettingsTab: View {
 
                 TableColumn("Actions") { repo in
                     Menu {
-                        Button("Set Active") { repoStore.setActive(repo) }
+                        Button("Set Active") {
+                            Task { await validateAndActivate(repo) }
+                        }
+                        .disabled(validating != nil)
                         Divider()
                         Button("Edit…") { editTarget = repo }
                         Button("Delete", role: .destructive) { deleteTarget = repo }
                     } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .foregroundStyle(.secondary)
+                        if validating == repo.id {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "ellipsis.circle")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
@@ -342,6 +338,27 @@ private struct RepositorySettingsTab: View {
                 set: { if !$0 { editTarget = nil } }
             ))
         }
+        .sheet(item: $errorRepo) { repo in
+            EditRepoSheet(repo: repo, isPresented: Binding(
+                get: { errorRepo != nil },
+                set: { if !$0 { errorRepo = nil } }
+            ))
+        }
+        .alert("Cannot activate repository", isPresented: Binding(
+            get: { validationError != nil },
+            set: { if !$0 { validationError = nil } }
+        )) {
+            Button("Edit Repository") {
+                editTarget = errorRepo
+                validationError = nil
+            }
+            Button("Cancel", role: .cancel) {
+                validationError = nil
+                errorRepo = nil
+            }
+        } message: {
+            Text(validationError ?? "")
+        }
         .confirmationDialog(
             "Delete \"\(deleteTarget?.fullName ?? "")\"?",
             isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } }),
@@ -352,6 +369,74 @@ private struct RepositorySettingsTab: View {
                 deleteTarget = nil
             }
         }
+    }
+
+    // MARK: - Validation
+
+    private func validateAndActivate(_ repo: Repository) async {
+        // Pre-flight: account + token must exist before we touch anything.
+        guard let account = accountStore.connections.first(where: { $0.id == repo.accountID }) else {
+            errorRepo = repo
+            validationError = "No account found for this repository. Edit the repository and select a valid account."
+            return
+        }
+        guard let token = AccountStore.shared.token(for: account), !token.isEmpty else {
+            errorRepo = repo
+            validationError = "No PAT configured for account \"\(account.name)\". Edit the account and add a token."
+            return
+        }
+        guard !AppState.shared.serverBaseURL.isEmpty else {
+            errorRepo = repo
+            validationError = "No server running. Start the app before switching repositories."
+            return
+        }
+
+        validating = repo.id
+
+        // All repos are always registered with the server simultaneously.
+        // Just verify the repo is reachable — no restart needed.
+        let error = await waitForRepo(repo, token: token)
+
+        validating = nil
+
+        if let error {
+            errorRepo = repo
+            validationError = error
+        }
+    }
+
+    /// Polls the server (up to 10 s) until the repo appears in its registered list.
+    /// Returns nil on success or an error string on failure.
+    private func waitForRepo(_ repo: Repository, token: String) async -> String? {
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            // Wait briefly between polls — server needs ~300 ms to restart.
+            try? await Task.sleep(nanoseconds: 500_000_000)
+
+            let serverURL = AppState.shared.serverBaseURL
+            guard !serverURL.isEmpty,
+                  let base = URL(string: serverURL) else { continue }
+
+            var req = URLRequest(url: base.appendingPathComponent("api/v1/repositories"))
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.timeoutInterval = 3
+
+            guard let (data, resp) = try? await URLSession.shared.data(for: req),
+                  let http = resp as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode) else { continue }
+
+            struct Item: Decodable { let owner: String; let name: String }
+            struct Page: Decodable { let items: [Item] }
+            guard let page = try? JSONDecoder().decode(Page.self, from: data) else { continue }
+
+            if page.items.contains(where: {
+                $0.owner.lowercased() == repo.owner.lowercased() &&
+                $0.name.lowercased()  == repo.name.lowercased()
+            }) {
+                return nil  // success
+            }
+        }
+        return "\(repo.fullName) did not appear on the server after restart. Check the owner and repository name are correct."
     }
 }
 
@@ -441,7 +526,7 @@ private struct AddRepoSheet: View {
             }
             .onAppear {
                 if selectedAccountID == nil {
-                    selectedAccountID = accountStore.activeID ?? accountStore.connections.first?.id
+                    selectedAccountID = accountStore.connections.first?.id
                 }
             }
         }

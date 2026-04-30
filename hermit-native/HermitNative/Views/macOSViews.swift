@@ -12,8 +12,20 @@ import AppKit
 
 struct MenuBarRFCBrowserView: View {
     @EnvironmentObject private var appState: AppState
+    @ObservedObject private var repoStore    = RepositoryStore.shared
+    @ObservedObject private var accountStore = AccountStore.shared
+    @ObservedObject private var serverMgr    = EmbeddedServerManager.shared
     @StateObject private var store = RFCStore()
     @State private var selectedRFC: RFC? = nil
+
+    /// Stable identity for the current (account, repo, server-port) triple.
+    /// Changing any of these fires a new `.task`, reconfigures the client, and reloads.
+    private var activeKey: String {
+        let acct = accountStore.connections.first?.id.uuidString ?? "none"
+        let repo = repoStore.repositories.first?.id.uuidString ?? "none"
+        let port = serverMgr.port.map(String.init) ?? "down"
+        return "\(acct)-\(repo)-\(port)"
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -46,9 +58,12 @@ struct MenuBarRFCBrowserView: View {
             }
         }
         .frame(width: 780, height: 540)
-        .task {
+        .task(id: activeKey) {
+            selectedRFC = nil
+            guard serverMgr.port != nil else { return }  // server still restarting
+            let docsPath = repoStore.repositories.first?.docsPath ?? appState.docsPath
             if let client = appState.makeAPIClient() {
-                store.configure(client: client, docsPath: appState.docsPath)
+                store.configure(client: client, docsPath: docsPath)
             }
             await store.load()
         }

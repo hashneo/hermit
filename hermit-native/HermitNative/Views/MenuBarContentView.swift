@@ -91,9 +91,9 @@ struct MenuBarPATPromptView: View {
         Task {
             do {
                 try await HermitServerValidator.validate(serverURL: serverURL, pat: enteredPAT)
-                // Write the PAT into the active account (Keychain in release, UserDefaults in debug).
-                if let active = AccountStore.shared.active {
-                    AccountStore.shared.update(active, token: enteredPAT)
+                // Write the PAT into the first account (Keychain in release, UserDefaults in debug).
+                if let conn = AccountStore.shared.connections.first {
+                    AccountStore.shared.update(conn, token: enteredPAT)
                 }
                 await MainActor.run {
                     appState.pat = enteredPAT
