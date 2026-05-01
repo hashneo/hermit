@@ -462,7 +462,7 @@ struct RFCLifecycleToolbar: ToolbarContent {
         let host = NSHostingView(rootView: content)
         host.frame = NSRect(x: 0, y: 0,
                             width: Self.printableWidth,
-                            height: 100_000)   // generous initial height
+                            height: 100_000)
         host.layout()
         let contentHeight = max(host.fittingSize.height, 1)
         host.frame = NSRect(x: 0, y: 0,
@@ -471,6 +471,25 @@ struct RFCLifecycleToolbar: ToolbarContent {
         host.layout()
 
         // 2. Slice the content into pages and draw via CGContext PDF.
+        //
+        // Coordinate notes:
+        //   • CGContext PDF uses a bottom-left origin (Quartz).
+        //   • NSView / AppKit uses a bottom-left origin too, BUT NSHostingView
+        //     with a flipped coordinate system (isFlipped = true on NSHostingView)
+        //     places its content starting at the TOP of the view frame.
+        //   • For each page we need to show rows [yOffset … yOffset+printableHeight]
+        //     of the hosting view, placed inside the page margin box.
+        //
+        // Transform applied each page (all in Quartz bottom-left space):
+        //   1. Translate to the margin origin (pageMargin, pageMargin).
+        //   2. Flip the Y axis around the centre of the printable area so that
+        //      AppKit's top-down content renders right-way-up on the page.
+        //   3. Translate upward by the page's yOffset so the correct slice of
+        //      the tall view lands in the printable area.
+        //
+        // Clipping is applied BEFORE the transform in view-local coordinates:
+        //   clip to (0, yOffset, printableWidth, printableHeight).
+
         let pdfData = NSMutableData()
         guard let consumer = CGDataConsumer(data: pdfData as CFMutableData) else { return nil }
 
@@ -481,7 +500,6 @@ struct RFCLifecycleToolbar: ToolbarContent {
         guard let ctx = CGContext(consumer: consumer,
                                   mediaBox: &mediaBox,
                                   nil) else { return nil }
-        let nsCtx = NSGraphicsContext(cgContext: ctx, flipped: false)
 
         let printableHeight = Self.pageHeight - 2 * Self.pageMargin
         let pageCount = Int(ceil(contentHeight / printableHeight))
@@ -489,32 +507,30 @@ struct RFCLifecycleToolbar: ToolbarContent {
         for page in 0 ..< max(pageCount, 1) {
             ctx.beginPDFPage(nil)
 
-            // Translate so the current page's slice of the content appears
-            // within the margin box, with the coordinate system flipped to
-            // match AppKit's top-left origin.
             let yOffset = CGFloat(page) * printableHeight
 
             NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = nsCtx
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
 
+            // Step 1 & 2: place origin at top-left of the printable margin box.
+            // In Quartz the bottom of the printable area is pageMargin from the
+            // bottom of the page, so the top is (pageMargin + printableHeight).
             let transform = NSAffineTransform()
-            // Move to top-left margin corner
             transform.translateX(by: Self.pageMargin,
-                                  yBy: Self.pageMargin)
-            // Flip vertically so AppKit draws top-down
-            transform.translateX(by: 0,
-                                  yBy: printableHeight)
+                                  yBy: Self.pageMargin + printableHeight)
+            // Flip Y so AppKit's top-down content is right-way-up.
             transform.scaleX(by: 1, yBy: -1)
-            // Scroll to the correct vertical slice
+            // Step 3: scroll to the correct vertical slice of the tall view.
             transform.translateX(by: 0, yBy: -yOffset)
             transform.concat()
 
-            // Clip to the printable area so content doesn't bleed between pages
-            NSBezierPath.clip(NSRect(x: 0, y: yOffset,
+            // Clip to exactly one page's worth of content in view-local coords.
+            NSBezierPath.clip(NSRect(x: 0,
+                                     y: yOffset,
                                      width: Self.printableWidth,
                                      height: printableHeight))
 
-            host.displayIgnoringOpacity(host.bounds, in: nsCtx)
+            host.displayIgnoringOpacity(host.bounds, in: NSGraphicsContext.current!)
 
             NSGraphicsContext.restoreGraphicsState()
             ctx.endPDFPage()
