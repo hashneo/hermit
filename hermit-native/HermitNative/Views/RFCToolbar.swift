@@ -134,7 +134,7 @@ struct RFCLifecycleToolbar: ToolbarContent {
                 // closure does not guarantee the run-loop is in the right state
                 // for modal presentation on macOS.
                 Button("Export as PDF…")  { Task { @MainActor in exportPDF()  } }
-                Button("Export as DOCX…") { Task { @MainActor in exportDOCX() } }
+                Button("Export as RTF…")  { Task { @MainActor in exportRTF()  } }
                 Divider()
                 Button("Print…") { Task { @MainActor in printRFC() } }
             } label: {
@@ -278,18 +278,161 @@ struct RFCLifecycleToolbar: ToolbarContent {
     }
 
     @MainActor
-    private func exportDOCX() {
+    private func exportRTF() {
         let panel = NSSavePanel()
-        if let docxType = UTType(filenameExtension: "docx") {
-            panel.allowedContentTypes = [docxType]
-        }
-        panel.nameFieldStringValue = docxFilename()
+        panel.allowedContentTypes = [.rtf]
+        panel.nameFieldStringValue = rtfFilename()
         let response = panel.runModal()
         guard response == .OK, let dest = panel.url else { return }
-        // Full OOXML generation is out of scope; write raw markdown so the
-        // file is at minimum openable and contains the RFC content.
-        let data = markdownSource.data(using: .utf8) ?? Data()
+        guard let data = renderToRTF() else { return }
         try? data.write(to: dest)
+    }
+
+    /// Build a single NSAttributedString from all parsed blocks and export as RTF.
+    private func renderToRTF() -> Data? {
+        guard !markdownSource.isEmpty else { return nil }
+        let blocks = MarkdownParser.parse(markdownSource)
+        guard !blocks.isEmpty else { return nil }
+
+        let doc = NSMutableAttributedString()
+        let newline = NSAttributedString(string: "\n")
+
+        for (i, block) in blocks.enumerated() {
+            if i > 0 { doc.append(newline) }
+            doc.append(attributedString(for: block))
+            doc.append(newline)
+        }
+
+        return try? doc.data(
+            from: NSRange(location: 0, length: doc.length),
+            documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
+        )
+    }
+
+    /// Convert a single MarkdownBlock to an NSAttributedString suitable for RTF export.
+    private func attributedString(for block: MarkdownBlock) -> NSAttributedString {
+        let bodyFont   = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let monoFont   = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize - 1,
+                                                     weight: .regular)
+
+        switch block {
+
+        case .heading(let level, let inlines, _, _):
+            let sizes: [Int: CGFloat] = [1: 28, 2: 22, 3: 18, 4: 16]
+            let sz = sizes[level] ?? 14
+            let wt: NSFont.Weight = level <= 2 ? .semibold : .medium
+            let font = NSFont.systemFont(ofSize: sz, weight: wt)
+            let str = NSMutableAttributedString(attributedString: inlines.nsAttributedString(font: font))
+            if level == 1 || level == 2 {
+                // Underline heading 1/2 to mimic the divider in the viewer
+                str.addAttribute(.underlineStyle,
+                                 value: NSUnderlineStyle.single.rawValue,
+                                 range: NSRange(location: 0, length: str.length))
+            }
+            return str
+
+        case .paragraph(let inlines, _, _):
+            return inlines.nsAttributedString(font: bodyFont)
+
+        case .codeBlock(_, let code, _, _):
+            let para = NSMutableParagraphStyle()
+            para.firstLineHeadIndent = 12
+            para.headIndent = 12
+            return NSAttributedString(string: code, attributes: [
+                .font: monoFont,
+                .foregroundColor: NSColor.labelColor,
+                .paragraphStyle: para,
+                .backgroundColor: NSColor(red: 0.92, green: 0.98, blue: 0.92, alpha: 1)
+            ])
+
+        case .mermaidBlock(let source, _, _):
+            // Mermaid diagrams can't be rendered to RTF — include the source as a code block
+            return NSAttributedString(string: source, attributes: [
+                .font: monoFont,
+                .foregroundColor: NSColor.secondaryLabelColor
+            ])
+
+        case .bulletList(let items, _, _):
+            return listAttributedString(items: items, ordered: false)
+
+        case .orderedList(let items, _, _):
+            return listAttributedString(items: items, ordered: true)
+
+        case .blockquote(let inlines, _, _):
+            let attr = inlines.nsAttributedString(font: bodyFont)
+            let str = NSMutableAttributedString(attributedString: attr)
+            str.addAttributes([
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .obliqueness: 0.15
+            ], range: NSRange(location: 0, length: str.length))
+            return str
+
+        case .horizontalRule(_):
+            return NSAttributedString(string: "────────────────────────────────────────",
+                                      attributes: [
+                                          .font: bodyFont,
+                                          .foregroundColor: NSColor.separatorColor
+                                      ])
+
+        case .table(let headers, let rows, _, _):
+            return tableAttributedString(headers: headers, rows: rows)
+        }
+    }
+
+    private func listAttributedString(items: [[MarkdownInline]], ordered: Bool) -> NSAttributedString {
+        let bodyFont = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let indent: CGFloat = 20
+        let para = NSMutableParagraphStyle()
+        para.firstLineHeadIndent = 0
+        para.headIndent = indent
+        para.tabStops = [NSTextTab(textAlignment: .left, location: indent)]
+
+        let result = NSMutableAttributedString()
+        for (i, inlines) in items.enumerated() {
+            if i > 0 { result.append(NSAttributedString(string: "\n")) }
+            let marker = ordered ? "\(i + 1).\t" : "•\t"
+            result.append(NSAttributedString(string: marker, attributes: [
+                .font: bodyFont,
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: para
+            ]))
+            let body = NSMutableAttributedString(attributedString: inlines.nsAttributedString(font: bodyFont))
+            body.addAttribute(.paragraphStyle, value: para,
+                              range: NSRange(location: 0, length: body.length))
+            result.append(body)
+        }
+        return result
+    }
+
+    private func tableAttributedString(headers: [[MarkdownInline]],
+                                       rows: [[[MarkdownInline]]]) -> NSAttributedString {
+        let headerFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        let bodyFont   = NSFont.systemFont(ofSize: 13, weight: .regular)
+        let sep = "  |  "
+        let result = NSMutableAttributedString()
+
+        // Header row
+        for (i, cell) in headers.enumerated() {
+            if i > 0 { result.append(NSAttributedString(string: sep, attributes: [.font: headerFont])) }
+            result.append(cell.nsAttributedString(font: headerFont))
+        }
+        result.append(NSAttributedString(string: "\n"))
+
+        // Divider
+        let divider = String(repeating: "─", count: 40)
+        result.append(NSAttributedString(string: divider + "\n", attributes: [
+            .font: bodyFont, .foregroundColor: NSColor.separatorColor
+        ]))
+
+        // Data rows
+        for row in rows {
+            for (i, cell) in row.enumerated() {
+                if i > 0 { result.append(NSAttributedString(string: sep, attributes: [.font: bodyFont])) }
+                result.append(cell.nsAttributedString(font: bodyFont))
+            }
+            result.append(NSAttributedString(string: "\n"))
+        }
+        return result
     }
 
     // MARK: - Print / PDF using NSHostingView + PDFKit
@@ -448,10 +591,10 @@ struct RFCLifecycleToolbar: ToolbarContent {
         return base.isEmpty ? "rfc.pdf" : "\(base).pdf"
     }
 
-    private func docxFilename() -> String {
+    private func rtfFilename() -> String {
         let base = URL(fileURLWithPath: rfc.path)
             .deletingPathExtension().lastPathComponent
-        return base.isEmpty ? "rfc.docx" : "\(base).docx"
+        return base.isEmpty ? "rfc.rtf" : "\(base).rtf"
     }
 }
 
