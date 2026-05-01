@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import PDFKit
 
 // MARK: - hermit-ec7: RFC window toolbar — export/print/share + lifecycle transitions
 
@@ -291,50 +292,130 @@ struct RFCLifecycleToolbar: ToolbarContent {
         try? data.write(to: dest)
     }
 
-    // MARK: - Print / PDF using NSHostingView
+    // MARK: - Print / PDF using NSHostingView + PDFKit
     //
-    // Previous approach used a detached NSTextView holding raw markdownSource text —
-    // this produced unformatted plain-text output.  The correct approach is to render
-    // the same MarkdownBlockView blocks used by GutterMarkdownView into an NSHostingView
-    // (no gutter, no comment UI), lay it out at US Letter width, then hand that view
-    // to NSPrintOperation / dataWithPDF(inside:).
+    // Strategy: render the RFC into a single tall NSHostingView (no ScrollView,
+    // so fittingSize is accurate), then slice it into US Letter pages using
+    // CGContext PDF drawing.  Print reuses the same PDF bytes via a PDFDocument
+    // so both paths share one render.
 
-    /// US Letter printable width in points (72 pt/in × 8.5in − 2×54pt margins).
-    private static let printWidth: CGFloat = 504
+    /// US Letter page dimensions in points.
+    private static let pageWidth:  CGFloat = 612   // 8.5 in
+    private static let pageHeight: CGFloat = 792   // 11 in
+    private static let pageMargin: CGFloat = 54    // 0.75 in
+    private static let printableWidth: CGFloat = pageWidth - 2 * pageMargin   // 504 pt
 
-    /// Build the off-screen host view containing the rendered RFC content.
+    /// Render the RFC to PDF data.  Returns nil if markdownSource is empty or
+    /// the view produces zero content height.
     @MainActor
-    private func makeHostingView(width: CGFloat = printWidth) -> NSView? {
+    private func renderToPDF() -> Data? {
         guard !markdownSource.isEmpty else { return nil }
         let blocks = MarkdownParser.parse(markdownSource)
         guard !blocks.isEmpty else { return nil }
 
-        let content = PrintableRFCView(blocks: blocks, width: width)
+        // 1. Build a tall off-screen NSHostingView with no ScrollView so that
+        //    fittingSize returns the true content height.
+        let content = PrintableRFCView(blocks: blocks, width: Self.printableWidth)
         let host = NSHostingView(rootView: content)
-        // Size the host view to fit its ideal content at the given width.
-        let fittingSize = host.fittingSize
-        let height = max(fittingSize.height, 1)
-        host.frame = NSRect(x: 0, y: 0, width: width, height: height)
-        // Force AppKit layout so the frame is accurate before PDF capture.
+        host.frame = NSRect(x: 0, y: 0,
+                            width: Self.printableWidth,
+                            height: 100_000)   // generous initial height
         host.layout()
-        return host
+        let contentHeight = max(host.fittingSize.height, 1)
+        host.frame = NSRect(x: 0, y: 0,
+                            width: Self.printableWidth,
+                            height: contentHeight)
+        host.layout()
+
+        // 2. Slice the content into pages and draw via CGContext PDF.
+        let pdfData = NSMutableData()
+        guard let consumer = CGDataConsumer(data: pdfData as CFMutableData) else { return nil }
+
+        let pageRect = CGRect(x: 0, y: 0,
+                              width: Self.pageWidth,
+                              height: Self.pageHeight)
+        var mediaBox = pageRect
+        guard let ctx = CGContext(consumer: consumer,
+                                  mediaBox: &mediaBox,
+                                  nil) else { return nil }
+        let nsCtx = NSGraphicsContext(cgContext: ctx, flipped: false)
+
+        let printableHeight = Self.pageHeight - 2 * Self.pageMargin
+        let pageCount = Int(ceil(contentHeight / printableHeight))
+
+        for page in 0 ..< max(pageCount, 1) {
+            ctx.beginPDFPage(nil)
+
+            // Translate so the current page's slice of the content appears
+            // within the margin box, with the coordinate system flipped to
+            // match AppKit's top-left origin.
+            let yOffset = CGFloat(page) * printableHeight
+
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = nsCtx
+
+            let transform = NSAffineTransform()
+            // Move to top-left margin corner
+            transform.translateX(by: Self.pageMargin,
+                                  yBy: Self.pageMargin)
+            // Flip vertically so AppKit draws top-down
+            transform.translateX(by: 0,
+                                  yBy: printableHeight)
+            transform.scaleX(by: 1, yBy: -1)
+            // Scroll to the correct vertical slice
+            transform.translateX(by: 0, yBy: -yOffset)
+            transform.concat()
+
+            // Clip to the printable area so content doesn't bleed between pages
+            NSBezierPath.clip(NSRect(x: 0, y: yOffset,
+                                     width: Self.printableWidth,
+                                     height: printableHeight))
+
+            host.displayIgnoringOpacity(host.bounds, in: nsCtx)
+
+            NSGraphicsContext.restoreGraphicsState()
+            ctx.endPDFPage()
+        }
+
+        ctx.closePDF()
+        return pdfData as Data
     }
 
+    /// Generate PDF then send it to the system print dialog.
+    /// This avoids a second render pass and guarantees print output matches export.
     @MainActor
     private func printRFC() {
-        guard let view = makeHostingView() else { return }
+        guard let data = renderToPDF() else { return }
+
+        // Write to a temp file so PDFDocument can load it.
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent(pdfFilename())
+        do {
+            try data.write(to: tmp)
+        } catch {
+            return
+        }
+
+        guard let pdfDoc = PDFDocument(url: tmp) else { return }
+        let pdfView = PDFView()
+        pdfView.document = pdfDoc
+        pdfView.autoScales = true
+        // Give the view a sensible frame so AppKit has something to print.
+        pdfView.frame = NSRect(x: 0, y: 0,
+                               width: Self.pageWidth,
+                               height: Self.pageHeight)
 
         let printInfo = NSPrintInfo.shared.copy() as! NSPrintInfo
-        printInfo.topMargin    = 54
-        printInfo.bottomMargin = 54
-        printInfo.leftMargin   = 54
-        printInfo.rightMargin  = 54
+        printInfo.topMargin    = 0
+        printInfo.bottomMargin = 0
+        printInfo.leftMargin   = 0
+        printInfo.rightMargin  = 0
         printInfo.horizontalPagination = .fit
         printInfo.verticalPagination   = .automatic
-        printInfo.isHorizontallyCentered = true
+        printInfo.isHorizontallyCentered = false
         printInfo.isVerticallyCentered   = false
 
-        let op = NSPrintOperation(view: view, printInfo: printInfo)
+        let op = NSPrintOperation(view: pdfView, printInfo: printInfo)
         op.showsPrintPanel    = true
         op.showsProgressPanel = true
         if let window = NSApp.keyWindow {
@@ -343,12 +424,6 @@ struct RFCLifecycleToolbar: ToolbarContent {
         } else {
             op.run()
         }
-    }
-
-    @MainActor
-    private func renderToPDF() -> Data? {
-        guard let view = makeHostingView() else { return nil }
-        return view.dataWithPDF(inside: view.bounds)
     }
 
     // hermit-ixk: share the real GitHub/Gitea web URL so recipients can open
@@ -385,19 +460,20 @@ struct RFCLifecycleToolbar: ToolbarContent {
 /// A gutter-free, comment-free SwiftUI view that renders a parsed RFC for
 /// printing or PDF export.  Uses the same `MarkdownBlockView` blocks as
 /// `GutterMarkdownView` but omits the 28pt gutter column and all comment UI.
+///
+/// No ScrollView wrapper — this view must expand to its full content height
+/// so that NSHostingView.fittingSize returns an accurate value for PDF slicing.
 private struct PrintableRFCView: View {
     let blocks: [MarkdownBlock]
     let width: CGFloat
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                    MarkdownBlockView(block: block)
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                MarkdownBlockView(block: block)
             }
-            .padding(16)
-            .frame(width: width, alignment: .leading)
         }
+        .padding(16)
+        .frame(width: width, alignment: .leading)
     }
 }
