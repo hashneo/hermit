@@ -16,5 +16,8 @@
 	<!-- Note: com.apple.developer.nearby-interaction requires a provisioned
 	     development certificate and is only present in HermitNative.entitlements
 	     (Release). Debug builds use ad-hoc signing and cannot include it. -->
+	<!-- hermit-fdq: print support — required for sandboxed apps -->
+	<key>com.apple.security.print</key>
+	<true/>
 </dict>
 </plist>
