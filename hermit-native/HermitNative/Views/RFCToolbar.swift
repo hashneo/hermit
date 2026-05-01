@@ -177,12 +177,7 @@ struct RFCLifecycleToolbar: ToolbarContent {
 
     // hermit-1mg: NSSavePanel must run modally on the main thread with an
     // explicit window context.  Using runModal() is the safest approach when
-    // the calling site may not have a key-window available (e.g. SwiftUI
-    // toolbar actions dispatched off the main run-loop phase).
-    // renderToPDF was also broken: the detached NSTextView had zero height
-    // because its layout manager had never been asked to lay out the glyphs.
-    // Fix: force a full glyph-layout pass, read the used rect, resize the
-    // view to match, then capture with dataWithPDF(inside:).
+    // the calling site may not have a key-window available.
 
     @MainActor
     private func exportPDF() {
@@ -210,19 +205,49 @@ struct RFCLifecycleToolbar: ToolbarContent {
         try? data.write(to: dest)
     }
 
-    // hermit-fdq: NSPrintOperation.run() is a no-op when the view has no
-    // window context (Ventura+ silently drops it).  Fix: use runModal(for:)
-    // targeting NSApp.keyWindow so the print panel has a proper parent; fall
-    // back to run() when no key window is available (e.g. in unit tests).
+    // MARK: - Print / PDF using NSHostingView
+    //
+    // Previous approach used a detached NSTextView holding raw markdownSource text —
+    // this produced unformatted plain-text output.  The correct approach is to render
+    // the same MarkdownBlockView blocks used by GutterMarkdownView into an NSHostingView
+    // (no gutter, no comment UI), lay it out at US Letter width, then hand that view
+    // to NSPrintOperation / dataWithPDF(inside:).
+
+    /// US Letter printable width in points (72 pt/in × 8.5in − 2×54pt margins).
+    private static let printWidth: CGFloat = 504
+
+    /// Build the off-screen host view containing the rendered RFC content.
+    @MainActor
+    private func makeHostingView(width: CGFloat = printWidth) -> NSView? {
+        guard !markdownSource.isEmpty else { return nil }
+        let blocks = MarkdownParser.parse(markdownSource)
+        guard !blocks.isEmpty else { return nil }
+
+        let content = PrintableRFCView(blocks: blocks, width: width)
+        let host = NSHostingView(rootView: content)
+        // Size the host view to fit its ideal content at the given width.
+        let fittingSize = host.fittingSize
+        let height = max(fittingSize.height, 1)
+        host.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        // Force AppKit layout so the frame is accurate before PDF capture.
+        host.layout()
+        return host
+    }
+
     @MainActor
     private func printRFC() {
+        guard let view = makeHostingView() else { return }
+
         let printInfo = NSPrintInfo.shared.copy() as! NSPrintInfo
-        printInfo.horizontalPagination = .automatic
+        printInfo.topMargin    = 54
+        printInfo.bottomMargin = 54
+        printInfo.leftMargin   = 54
+        printInfo.rightMargin  = 54
+        printInfo.horizontalPagination = .fit
         printInfo.verticalPagination   = .automatic
         printInfo.isHorizontallyCentered = true
         printInfo.isVerticallyCentered   = false
 
-        guard let view = layoutedTextView(width: 522) else { return }
         let op = NSPrintOperation(view: view, printInfo: printInfo)
         op.showsPrintPanel    = true
         op.showsProgressPanel = true
@@ -234,41 +259,10 @@ struct RFCLifecycleToolbar: ToolbarContent {
         }
     }
 
-    /// Builds a fully laid-out NSTextView from `markdownSource` and returns
-    /// its PDF representation.  Forces a layout pass so the view has non-zero
-    /// height before capturing — the original implementation skipped this step
-    /// and produced an empty document.
     @MainActor
     private func renderToPDF() -> Data? {
-        guard let view = layoutedTextView(width: 522) else { return nil }
+        guard let view = makeHostingView() else { return nil }
         return view.dataWithPDF(inside: view.bounds)
-    }
-
-    /// Returns a fully laid-out, off-screen NSTextView whose height matches
-    /// the content of `markdownSource` at the given `width` in points.
-    @MainActor
-    private func layoutedTextView(width: CGFloat) -> NSTextView? {
-        guard !markdownSource.isEmpty else { return nil }
-
-        let textStorage = NSTextStorage(string: markdownSource)
-        let layoutMgr   = NSLayoutManager()
-        textStorage.addLayoutManager(layoutMgr)
-
-        let container = NSTextContainer(
-            containerSize: NSSize(width: width, height: CGFloat.greatestFiniteMagnitude))
-        container.lineFragmentPadding = 0
-        layoutMgr.addTextContainer(container)
-
-        // Force a complete glyph-layout pass so usedRect is accurate.
-        layoutMgr.ensureLayout(for: container)
-        let usedRect = layoutMgr.usedRect(for: container)
-        let height   = max(usedRect.height, 1)
-
-        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: width, height: height),
-                                  textContainer: container)
-        textView.isEditable    = false
-        textView.isSelectable  = false
-        return textView
     }
 
     // hermit-ixk: share the real GitHub/Gitea web URL so recipients can open
@@ -297,5 +291,27 @@ struct RFCLifecycleToolbar: ToolbarContent {
         let base = URL(fileURLWithPath: rfc.path)
             .deletingPathExtension().lastPathComponent
         return base.isEmpty ? "rfc.docx" : "\(base).docx"
+    }
+}
+
+// MARK: - PrintableRFCView
+
+/// A gutter-free, comment-free SwiftUI view that renders a parsed RFC for
+/// printing or PDF export.  Uses the same `MarkdownBlockView` blocks as
+/// `GutterMarkdownView` but omits the 28pt gutter column and all comment UI.
+private struct PrintableRFCView: View {
+    let blocks: [MarkdownBlock]
+    let width: CGFloat
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                    MarkdownBlockView(block: block)
+                }
+            }
+            .padding(16)
+            .frame(width: width, alignment: .leading)
+        }
     }
 }
