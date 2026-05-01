@@ -262,30 +262,40 @@ struct RFCLifecycleToolbar: ToolbarContent {
         isActioning = false
     }
 
-    // hermit-1mg: NSSavePanel must run modally on the main thread with an
-    // explicit window context.  Using runModal() is the safest approach when
-    // the calling site may not have a key-window available.
+    // hermit-1mg: NSSavePanel presented as a window sheet so it attaches to
+    // the RFC window.  directoryURL defaults to ~/Downloads so users find
+    // their exports without hunting through the filesystem.
 
     @MainActor
     private func exportPDF() {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.pdf]
-        panel.nameFieldStringValue = pdfFilename()
-        let response = panel.runModal()
-        guard response == .OK, let dest = panel.url else { return }
         guard let data = renderToPDF() else { return }
-        try? data.write(to: dest)
+        savePanel(filename: pdfFilename(), contentType: .pdf, data: data)
     }
 
     @MainActor
     private func exportRTF() {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.rtf]
-        panel.nameFieldStringValue = rtfFilename()
-        let response = panel.runModal()
-        guard response == .OK, let dest = panel.url else { return }
         guard let data = renderToRTF() else { return }
-        try? data.write(to: dest)
+        savePanel(filename: rtfFilename(), contentType: .rtf, data: data)
+    }
+
+    @MainActor
+    private func savePanel(filename: String, contentType: UTType, data: Data) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [contentType]
+        panel.nameFieldStringValue = filename
+        panel.directoryURL = FileManager.default.urls(
+            for: .downloadsDirectory, in: .userDomainMask).first
+
+        if let window = NSApp.keyWindow {
+            panel.beginSheetModal(for: window) { response in
+                guard response == .OK, let dest = panel.url else { return }
+                try? data.write(to: dest)
+            }
+        } else {
+            // Fallback: no key window — run modally
+            guard panel.runModal() == .OK, let dest = panel.url else { return }
+            try? data.write(to: dest)
+        }
     }
 
     /// Build a single NSAttributedString from all parsed blocks and export as RTF.
