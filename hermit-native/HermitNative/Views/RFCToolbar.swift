@@ -37,6 +37,54 @@ struct RFCLifecycleToolbar: ToolbarContent {
     var markdownSource: String = ""
 
     @State private var isActioning = false
+    @State private var pendingAction: LifecycleAction? = nil
+
+    // MARK: - Lifecycle action model
+
+    /// Represents a lifecycle state change awaiting user confirmation.
+    enum LifecycleAction: Identifiable {
+        case approve
+        case markImplemented
+        case approvePR
+
+        var id: String {
+            switch self {
+            case .approve:          return "approve"
+            case .markImplemented:  return "markImplemented"
+            case .approvePR:        return "approvePR"
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .approve:          return "Approve RFC"
+            case .markImplemented:  return "Mark as Implemented"
+            case .approvePR:        return "Approve Pull Request"
+            }
+        }
+
+        var message: String {
+            switch self {
+            case .approve:
+                return "Approving this RFC will move it from Draft to Accepted. " +
+                       "This signals community consensus and cannot be undone without admin intervention."
+            case .markImplemented:
+                return "Marking this RFC as Implemented indicates the described work is complete. " +
+                       "This is a terminal state and cannot be undone without admin intervention."
+            case .approvePR:
+                return "Approving this pull request will submit a GitHub approval review on your behalf, " +
+                       "marking the RFC PR as ready to merge."
+            }
+        }
+
+        var confirmLabel: String {
+            switch self {
+            case .approve:          return "Approve"
+            case .markImplemented:  return "Mark Implemented"
+            case .approvePR:        return "Approve PR"
+            }
+        }
+    }
 
     // MARK: - Derived state
 
@@ -100,7 +148,7 @@ struct RFCLifecycleToolbar: ToolbarContent {
             if isMainBranch && !isTerminal {
                 if status == "draft" {
                     Button {
-                        Task { await runAction(onApprove) }
+                        pendingAction = .approve
                     } label: {
                         if isActioning {
                             ProgressView().controlSize(.small)
@@ -116,7 +164,7 @@ struct RFCLifecycleToolbar: ToolbarContent {
 
                 if status == "accepted" {
                     Button {
-                        Task { await runAction(onMarkImplemented) }
+                        pendingAction = .markImplemented
                     } label: {
                         if isActioning {
                             ProgressView().controlSize(.small)
@@ -136,7 +184,7 @@ struct RFCLifecycleToolbar: ToolbarContent {
             // and the PR has not already been approved.
             if isPullRequest {
                 Button {
-                    Task { await runAction(onApprovePR) }
+                    pendingAction = .approvePR
                 } label: {
                     if isActioning {
                         ProgressView().controlSize(.small)
@@ -155,6 +203,44 @@ struct RFCLifecycleToolbar: ToolbarContent {
                                 : "Approve and mark this RFC PR ready to merge"
                 )
             }
+        }
+
+        // Confirmation dialog anchor — hidden view that carries the lifecycle
+        // confirmation dialog, since .confirmationDialog cannot be applied
+        // directly to ToolbarItemGroup on macOS.
+        ToolbarItem(placement: .automatic) {
+            Text("")
+                .frame(width: 0, height: 0)
+                .hidden()
+                .confirmationDialog(
+                    pendingAction?.title ?? "",
+                    isPresented: Binding(
+                        get: { pendingAction != nil },
+                        set: { if !$0 { pendingAction = nil } }
+                    ),
+                    titleVisibility: .visible
+                ) {
+                    if let action = pendingAction {
+                        Button(action.confirmLabel, role: .destructive) {
+                            let captured = action
+                            pendingAction = nil
+                            Task {
+                                switch captured {
+                                case .approve:         await runAction(onApprove)
+                                case .markImplemented: await runAction(onMarkImplemented)
+                                case .approvePR:       await runAction(onApprovePR)
+                                }
+                            }
+                        }
+                        Button("Cancel", role: .cancel) {
+                            pendingAction = nil
+                        }
+                    }
+                } message: {
+                    if let action = pendingAction {
+                        Text(action.message)
+                    }
+                }
         }
 
         // Share button
