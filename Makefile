@@ -260,10 +260,12 @@ ipad-deploy: ## Build and push to connected iPad (requires Developer Mode enable
 		-configuration Debug \
 		-derivedDataPath $(NATIVE_BUILD_DIR) \
 		-allowProvisioningUpdates \
+		-destination-timeout 30 \
 		build
 	@echo "Installing on iPad..."
 	DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl device install app \
-		--device $(IPAD_DEVICE_ID) \
+		--device $(IPAD_UDID) \
+		--timeout 60 \
 		$(IPAD_APP_BUNDLE)
 
 # ── gomobile xcframework ───────────────────────────────────────────────────────

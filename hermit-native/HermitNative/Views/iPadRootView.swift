@@ -85,6 +85,7 @@ struct iPadRootView: View {
 #endif
     @StateObject private var store = RFCStore()
     @StateObject private var commentStore = CommentStore()
+    @ObservedObject private var repoStore = RepositoryStore.shared
     // hermit-olq: selectedRFC and selectedLine promoted to AppState for NSUserActivity access
     @State private var showSettings = false
     @State private var showRFCPicker = false   // portrait: RFC menu popover
@@ -247,6 +248,10 @@ struct iPadRootView: View {
                             Label("RFCs", systemImage: "list.bullet.rectangle")
                         }
                     }
+                    // Repo switcher — also left side
+                    ToolbarItem(placement: .topBarLeading) {
+                        repoSwitcherMenu
+                    }
                     // Right side
                     ToolbarItemGroup(placement: .topBarTrailing) {
                         if store.isLoading { ProgressView().controlSize(.small) }
@@ -297,6 +302,9 @@ struct iPadRootView: View {
         ToolbarItem(placement: .automatic) {
             if store.isLoading { ProgressView().controlSize(.small) }
         }
+        ToolbarItem(placement: .principal) {
+            repoSwitcherMenu
+        }
         ToolbarItem(placement: .automatic) {
             Button { showSettings = true } label: {
                 Image(systemName: "gear")
@@ -307,6 +315,48 @@ struct iPadRootView: View {
     private func rfcIcon(_ rfc: RFC) -> String {
         if case .pullRequest = rfc.source { return "arrow.triangle.pull" }
         return "doc.text"
+    }
+
+    /// Switches the active repository and reloads the RFC list.
+    private func switchRepo(_ repo: Repository) {
+        RepositoryStore.shared.setActive(repo)
+        guard let client = appState.makeAPIClient() else { return }
+        store.configure(client: client, docsPath: repo.docsPath)
+        appState.selectedRFC = nil
+        Task { await store.load() }
+    }
+
+    /// A Menu that lists all repos and lets the user switch between them.
+    @ViewBuilder
+    private var repoSwitcherMenu: some View {
+        let repos = repoStore.repositories
+        let active = repos.first
+        Menu {
+            ForEach(repos) { repo in
+                Button {
+                    switchRepo(repo)
+                } label: {
+                    if repo.id == active?.id {
+                        Label(repo.fullName, systemImage: "checkmark")
+                    } else {
+                        Text(repo.fullName)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(active?.fullName ?? "No Repository")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+                if repos.count > 1 {
+                    Image(systemName: "chevron.up.chevron.down")
+                        .imageScale(.small)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .disabled(repos.count <= 1)
     }
 
     // MARK: - Detail view (shared; showInlineThread controls landscape thread panel)

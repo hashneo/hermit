@@ -88,13 +88,35 @@ final class PairingAdvertiser: NSObject, ObservableObject {
         advertiser?.stopAdvertisingPeer()
         let port = AppState.shared.serverBaseURL
             .split(separator: ":").last.flatMap { String($0) } ?? "8080"
-        let info: [String: String] = [
+
+        // Encode the full repository list as compact JSON so the iPad can
+        // populate its repo switcher without needing the Settings screen.
+        // Each entry: {"o":"owner","n":"name","d":"docsPath","l":"rfcLabel"}
+        struct RepoEntry: Encodable {
+            let o: String   // owner
+            let n: String   // name
+            let d: String   // docsPath
+            let l: String   // rfcLabel
+        }
+        let repoEntries = RepositoryStore.shared.repositories.map {
+            RepoEntry(o: $0.owner, n: $0.name, d: $0.docsPath, l: $0.rfcLabel)
+        }
+        let reposJSON = (try? String(data: JSONEncoder().encode(repoEntries), encoding: .utf8)) ?? "[]"
+
+        let active = RepositoryStore.shared.repositories.first
+        var info: [String: String] = [
             "port":     port,
-            "owner":    AppState.shared.repoOwner,
-            "repo":     AppState.shared.repoName,
-            "docsPath": AppState.shared.docsPath,
-            "rfcLabel": AppState.shared.rfcLabel,
+            "owner":    active?.owner    ?? AppState.shared.repoOwner,
+            "repo":     active?.name     ?? AppState.shared.repoName,
+            "docsPath": active?.docsPath ?? AppState.shared.docsPath,
+            "rfcLabel": active?.rfcLabel ?? AppState.shared.rfcLabel,
+            "repos":    reposJSON,
         ]
+        // mDNS TXT records have per-value size limits; drop the repos list if it
+        // would make the record too large (fall back to single-repo legacy keys).
+        if let data = reposJSON.data(using: .utf8), data.count > 900 {
+            info.removeValue(forKey: "repos")
+        }
         let adv = MCNearbyServiceAdvertiser(peer: myPeerID,
                                             discoveryInfo: info,
                                             serviceType: pairingServiceType)
@@ -268,6 +290,24 @@ extension PairingBrowser: MCNearbyServiceBrowserDelegate {
             ConfigStore.shared.repoName      = repo
             ConfigStore.shared.docsPath      = docsPath
             ConfigStore.shared.rfcLabel      = rfcLabel
+
+            // Populate RepositoryStore from the full repo list broadcast by the Mac.
+            // This drives the repo switcher in the iPad's left pane.
+            if let reposJSON = info?["repos"],
+               let data = reposJSON.data(using: .utf8) {
+                struct RepoEntry: Decodable {
+                    let o: String   // owner
+                    let n: String   // name
+                    let d: String   // docsPath
+                    let l: String   // rfcLabel
+                }
+                if let entries = try? JSONDecoder().decode([RepoEntry].self, from: data), !entries.isEmpty {
+                    RepositoryStore.shared.replaceAll(fromMDNS: entries.map {
+                        Repository(accountID: UUID(), owner: $0.o, name: $0.n,
+                                   docsPath: $0.d, rfcLabel: $0.l)
+                    })
+                }
+            }
         }
     }
 

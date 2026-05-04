@@ -304,8 +304,14 @@ final class RFCViewerWindowManager {
                     appState.persistLastViewedRFC(nil)
                 }
                 // Return to accessory (menu-bar only) mode when all viewer windows are closed.
+                // Defer the policy change by one run-loop tick so the MenuBarExtra scene
+                // is not torn down while SwiftUI is still reconciling window state.
+                // Immediate setActivationPolicy(.accessory) is a known cause of MenuBarExtra
+                // disappearing on macOS when called synchronously during a window-close event.
                 if self?.controllers.isEmpty == true {
-                    NSApp.setActivationPolicy(.accessory)
+                    DispatchQueue.main.async {
+                        NSApp.setActivationPolicy(.accessory)
+                    }
                 }
             }
         }
@@ -313,7 +319,12 @@ final class RFCViewerWindowManager {
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         // Switch to regular app so the viewer appears in the Dock and Cmd+Tab switcher.
-        NSApp.setActivationPolicy(.regular)
+        // Defer by one run-loop tick — calling setActivationPolicy synchronously here
+        // causes the MenuBarExtra to disappear on macOS when an RFC window is opened
+        // while the app is in .accessory mode (e.g. triggered by an iPad Handoff).
+        DispatchQueue.main.async {
+            NSApp.setActivationPolicy(.regular)
+        }
     }
 }
 #endif

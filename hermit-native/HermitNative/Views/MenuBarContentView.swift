@@ -6,9 +6,11 @@ import SwiftUI
 
 struct MenuBarContentView: View {
     @EnvironmentObject private var appState: AppState
+#if os(macOS)
     @ObservedObject private var serverMgr  = EmbeddedServerManager.shared
     @ObservedObject private var repoStore  = RepositoryStore.shared
     @ObservedObject private var advertiser = PairingAdvertiser.shared
+#endif
 
 #if os(macOS)
     var body: some View {
@@ -59,6 +61,8 @@ struct MenuBarContentView: View {
         }
         .keyboardShortcut("q")
     }
+#else
+    var body: some View { EmptyView() }
 #endif
 }
 

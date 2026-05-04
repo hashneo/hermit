@@ -30,10 +30,12 @@ struct SettingsView: View {
             }
 
             TabView {
+#if os(macOS)
                 AccountSettingsTab()
                     .tabItem { Label("Account", systemImage: "person.circle") }
                 RepositorySettingsTab()
                     .tabItem { Label("Repository", systemImage: "arrow.triangle.branch") }
+#endif
                 ServerSettingsTab()
                     .tabItem { Label("Server", systemImage: "server.rack") }
                 AISettingsTab()
@@ -48,9 +50,12 @@ struct SettingsView: View {
             showRestartBanner = true
         }
         // Dismiss banner once the server has restarted and has a port again.
+        // EmbeddedServerManager only exists on macOS; on iOS the banner never shows.
+#if os(macOS)
         .onReceive(EmbeddedServerManager.shared.$port) { port in
             if port != nil { showRestartBanner = false }
         }
+#endif
     }
 }
 
@@ -430,6 +435,14 @@ private struct RepositorySettingsTab: View {
         if let error {
             errorRepo = repo
             validationError = error
+        } else {
+            // Move this repo to the front so makeAPIClient() picks it up as active,
+            // then update AppState so iPadRootView's onChange triggers a fresh load.
+            RepositoryStore.shared.setActive(repo)
+            AppState.shared.docsPath = repo.docsPath
+            AppState.shared.rfcLabel = repo.rfcLabel
+            AppState.shared.repoOwner = repo.owner
+            AppState.shared.repoName  = repo.name
         }
     }
 

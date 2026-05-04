@@ -83,14 +83,16 @@ func Start(configJSON string) string {
 		return fmt.Sprintf("error: build config: %s", err)
 	}
 
-	// Find a free port and bind it before handing off to the app so we can
-	// return the port immediately without a race.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	// Find a free port by binding on all interfaces (0.0.0.0) so that both
+	// the local Mac (127.0.0.1) and iPad clients on the LAN can reach the
+	// server. Binding only to 127.0.0.1 would block iPad → Mac connections
+	// because the iPad reaches the Mac via its LAN IP, not loopback.
+	ln, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
 		return fmt.Sprintf("error: bind port: %s", err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
-	cfg.ListenAddress = fmt.Sprintf("127.0.0.1:%d", port)
+	cfg.ListenAddress = fmt.Sprintf("0.0.0.0:%d", port)
 
 	// Close our listener — app.New will re-bind to the same address.
 	// We hold the mutex so nothing else can race here.
@@ -209,7 +211,7 @@ func buildConfig(sc StartConfig) (config.Config, error) {
 
 	return config.Config{
 		Environment:   "production",
-		ListenAddress: "127.0.0.1:0", // overridden by Start()
+		ListenAddress: "0.0.0.0:0", // overridden by Start()
 		Registries:    registries,
 		Repositories:  repositories,
 		DataDir:       filepath.Join(dataDir, "hermit"),

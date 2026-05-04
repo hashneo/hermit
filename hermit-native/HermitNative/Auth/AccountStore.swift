@@ -274,6 +274,39 @@ final class RepositoryStore: ObservableObject {
         NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
     }
 
+    /// Moves `repo` to index 0 so that `makeAPIClient()` (which uses `.first`)
+    /// treats it as the active repository. Does not trigger a server restart —
+    /// all repos are always registered with the server simultaneously.
+    func setActive(_ repo: Repository) {
+        guard let idx = repositories.firstIndex(where: { $0.id == repo.id }),
+              idx != 0 else { return }
+        repositories.remove(at: idx)
+        repositories.insert(repo, at: 0)
+        save()
+    }
+
+    /// Replaces the stored list with repos received over mDNS from the Mac.
+    /// Preserves UUIDs for repos already known (matched by owner+name) so that
+    /// any in-flight references remain valid. Order is preserved (first = active).
+    /// Does NOT post .hermitRestartRequired — no server restart needed on iPad.
+    func replaceAll(fromMDNS incoming: [Repository]) {
+        let merged: [Repository] = incoming.map { inbound in
+            if let existing = repositories.first(where: {
+                $0.owner.lowercased() == inbound.owner.lowercased() &&
+                $0.name.lowercased()  == inbound.name.lowercased()
+            }) {
+                // Preserve the existing UUID; update mutable fields.
+                return Repository(id: existing.id, accountID: existing.accountID,
+                                  owner: inbound.owner, name: inbound.name,
+                                  docsPath: inbound.docsPath, rfcLabel: inbound.rfcLabel)
+            }
+            return inbound
+        }
+        guard merged != repositories else { return }
+        repositories = merged
+        save()
+    }
+
     // MARK: - Private
 
     private init() {
