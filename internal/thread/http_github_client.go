@@ -302,20 +302,30 @@ func (c *HTTPGitHubClient) postIssueComment(ctx context.Context, baseURL, owner,
 }
 
 func (c *HTTPGitHubClient) postPullRequestInlineComment(ctx context.Context, baseURL, owner, repo string, prNumber int, token, filePath string, bodyLine int, body string) (string, error) {
-	// Gitea uses the review API for inline PR comments.
-	// POST /repos/{owner}/{repo}/pulls/{index}/reviews
-	// with event="COMMENT" and a single entry in comments[].
-	// new_position is the line number in the new (right-side) file.
 	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews", strings.TrimRight(baseURL, "/"), owner, repo, prNumber)
+
+	// GitHub and Gitea use different field names for the line position.
+	// GitHub: "line" + "side" (REST API for DraftPullRequestReviewComment).
+	// Gitea:  "new_position" (Gitea review API).
+	var comment map[string]any
+	if strings.Contains(baseURL, "api.github.com") {
+		comment = map[string]any{
+			"path": strings.TrimPrefix(filePath, "/"),
+			"line": bodyLine,
+			"side": "RIGHT",
+			"body": body,
+		}
+	} else {
+		comment = map[string]any{
+			"path":         strings.TrimPrefix(filePath, "/"),
+			"new_position": bodyLine,
+			"body":         body,
+		}
+	}
+
 	payload, err := json.Marshal(map[string]any{
-		"event": "COMMENT",
-		"comments": []map[string]any{
-			{
-				"path":         strings.TrimPrefix(filePath, "/"),
-				"new_position": bodyLine,
-				"body":         body,
-			},
-		},
+		"event":    "COMMENT",
+		"comments": []map[string]any{comment},
 	})
 	if err != nil {
 		return "", err
