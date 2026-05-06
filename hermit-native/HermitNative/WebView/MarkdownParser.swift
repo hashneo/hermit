@@ -16,11 +16,17 @@ enum MarkdownBlock {
     case paragraph(inlines: [MarkdownInline], sourceLine: Int, sourceLineEnd: Int)
     case codeBlock(language: String, code: String, sourceLine: Int, sourceLineEnd: Int)
     case mermaidBlock(source: String, sourceLine: Int, sourceLineEnd: Int)
-    case bulletList(items: [[MarkdownInline]], sourceLine: Int, sourceLineEnd: Int)
-    case orderedList(items: [[MarkdownInline]], sourceLine: Int, sourceLineEnd: Int)
+    case bulletList(items: [ListItem], sourceLine: Int, sourceLineEnd: Int)
+    case orderedList(items: [ListItem], sourceLine: Int, sourceLineEnd: Int)
     case blockquote(inlines: [MarkdownInline], sourceLine: Int, sourceLineEnd: Int)
     case horizontalRule(sourceLine: Int)
     case table(headers: [[MarkdownInline]], rows: [[[MarkdownInline]]], sourceLine: Int, sourceLineEnd: Int)
+
+    /// A single list item with its nesting depth (0 = top level, 1 = one indent, etc.)
+    struct ListItem {
+        let depth: Int
+        let inlines: [MarkdownInline]
+    }
 
     var sourceLine: Int {
         switch self {
@@ -130,11 +136,14 @@ enum MarkdownParser {
             // Bullet list
             if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
                 let blockStart = i
-                var items: [[MarkdownInline]] = []
+                var items: [MarkdownBlock.ListItem] = []
                 while i < lines.count {
-                    let bl = lines[i].trimmingCharacters(in: .whitespaces)
+                    let raw = lines[i]
+                    let bl = raw.trimmingCharacters(in: .whitespaces)
                     if bl.hasPrefix("- ") || bl.hasPrefix("* ") {
-                        items.append(parseInline(String(bl.dropFirst(2))))
+                        let indent = raw.prefix(while: { $0 == " " }).count
+                        let depth = indent / 2
+                        items.append(MarkdownBlock.ListItem(depth: depth, inlines: parseInline(String(bl.dropFirst(2)))))
                         i += 1
                     } else if bl.isEmpty {
                         i += 1; break
@@ -150,12 +159,15 @@ enum MarkdownParser {
             let olPattern = #"^\d+\.\s"#
             if trimmed.range(of: olPattern, options: .regularExpression) != nil {
                 let blockStart = i
-                var items: [[MarkdownInline]] = []
+                var items: [MarkdownBlock.ListItem] = []
                 while i < lines.count {
-                    let bl = lines[i].trimmingCharacters(in: .whitespaces)
+                    let raw = lines[i]
+                    let bl = raw.trimmingCharacters(in: .whitespaces)
                     if bl.range(of: olPattern, options: .regularExpression) != nil {
+                        let indent = raw.prefix(while: { $0 == " " }).count
+                        let depth = indent / 2
                         let text = bl.replacingOccurrences(of: olPattern, with: "", options: .regularExpression)
-                        items.append(parseInline(text))
+                        items.append(MarkdownBlock.ListItem(depth: depth, inlines: parseInline(text)))
                         i += 1
                     } else if bl.isEmpty {
                         i += 1; break

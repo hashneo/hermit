@@ -75,8 +75,11 @@ struct MarkdownRendererView: View {
                 Divider()
             }
         case 2:
-            text.font(.system(size: 22, weight: .semibold))
-                .padding(.top, 8)
+            VStack(alignment: .leading, spacing: 4) {
+                text.font(.system(size: 22, weight: .semibold))
+                    .padding(.top, 8)
+                Divider()
+            }
         case 3:
             text.font(.system(size: 18, weight: .semibold))
                 .padding(.top, 4)
@@ -121,29 +124,41 @@ struct MarkdownRendererView: View {
 
     // MARK: - Lists
 
-    private func bulletListView(items: [[MarkdownInline]]) -> some View {
+    private func bulletListView(items: [MarkdownBlock.ListItem]) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(items.enumerated()), id: \.offset) { _, inlines in
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("•")
                         .foregroundStyle(.secondary)
-                    Text(attributedString(inlines))
+                    Text(attributedString(item.inlines))
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(.leading, CGFloat(item.depth) * 20)
             }
         }
     }
 
-    private func orderedListView(items: [[MarkdownInline]]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(items.enumerated()), id: \.offset) { index, inlines in
+    private func orderedListView(items: [MarkdownBlock.ListItem]) -> some View {
+        // Re-number items per depth level so nested lists restart at 1.
+        var counters: [Int: Int] = [:]
+        return VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                let count: Int = {
+                    counters[item.depth, default: 0] += 1
+                    // Reset deeper levels when we step back up
+                    for key in counters.keys where key > item.depth {
+                        counters[key] = 0
+                    }
+                    return counters[item.depth]!
+                }()
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("\(index + 1).")
+                    Text("\(count).")
                         .foregroundStyle(.secondary)
                         .frame(minWidth: 20, alignment: .trailing)
-                    Text(attributedString(inlines))
+                    Text(attributedString(item.inlines))
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(.leading, CGFloat(item.depth) * 20)
             }
         }
     }

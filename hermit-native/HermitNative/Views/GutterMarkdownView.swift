@@ -313,7 +313,7 @@ struct GutterMarkdownView: View {
         case .codeBlock(_, let code, _, _), .mermaidBlock(let code, _, _):
             return code
         case .bulletList(let items, _, _), .orderedList(let items, _, _):
-            return items.flatMap { $0 }.map { inlineText($0) }.joined(separator: " ")
+            return items.map { $0.inlines }.flatMap { $0 }.map { inlineText($0) }.joined(separator: " ")
         case .table(let headers, _, _, _):
             return headers.flatMap { $0 }.map { inlineText($0) }.joined(separator: " ")
         case .horizontalRule:
@@ -411,9 +411,15 @@ struct MarkdownBlockView: View {
                 selectable(attrStr)
                 Divider()
             }
+        } else if level == 2 {
+            VStack(alignment: .leading, spacing: 4) {
+                selectable(attrStr)
+                    .padding(.top, 8)
+                Divider()
+            }
         } else {
             selectable(attrStr)
-                .padding(.top, level == 2 ? 8 : level == 3 ? 4 : 0)
+                .padding(.top, level == 3 ? 4 : 0)
         }
     }
 
@@ -443,19 +449,25 @@ struct MarkdownBlockView: View {
     // MARK: Lists — each item built as a single NSAttributedString with paragraph indent
     // so the marker and text are typeset together and align correctly regardless of wrapping.
 
-    private func bulletListView(items: [[MarkdownInline]]) -> some View {
+    private func bulletListView(items: [MarkdownBlock.ListItem]) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            ForEach(Array(items.enumerated()), id: \.offset) { _, inlines in
-                selectable(listItemString(marker: "•", inlines: inlines))
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                selectable(listItemString(marker: "•", inlines: item.inlines, depth: item.depth))
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
-    private func orderedListView(items: [[MarkdownInline]]) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(Array(items.enumerated()), id: \.offset) { index, inlines in
-                selectable(listItemString(marker: "\(index + 1).", inlines: inlines))
+    private func orderedListView(items: [MarkdownBlock.ListItem]) -> some View {
+        var counters: [Int: Int] = [:]
+        return VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                let count: Int = {
+                    counters[item.depth, default: 0] += 1
+                    for key in counters.keys where key > item.depth { counters[key] = 0 }
+                    return counters[item.depth]!
+                }()
+                selectable(listItemString(marker: "\(count).", inlines: item.inlines, depth: item.depth))
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -463,7 +475,7 @@ struct MarkdownBlockView: View {
 
     /// Builds a single NSAttributedString for a list item using paragraph tab stops
     /// so the marker sits at column 0 and the body text indents consistently.
-    private func listItemString(marker: String, inlines: [MarkdownInline]) -> NSAttributedString {
+    private func listItemString(marker: String, inlines: [MarkdownInline], depth: Int = 0) -> NSAttributedString {
 #if os(macOS)
         let bodyFont = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         let markerColor = NSColor.secondaryLabelColor
@@ -471,9 +483,11 @@ struct MarkdownBlockView: View {
         let bodyFont = UIFont.preferredFont(forTextStyle: .body)
         let markerColor = UIColor.secondaryLabel
 #endif
-        let indent: CGFloat = 20
+        let baseIndent: CGFloat = 20
+        let depthOffset = CGFloat(depth) * 20
+        let indent: CGFloat = baseIndent + depthOffset
         let para = NSMutableParagraphStyle()
-        para.firstLineHeadIndent = 0
+        para.firstLineHeadIndent = depthOffset
         para.headIndent = indent
         para.tabStops = [NSTextTab(textAlignment: .left, location: indent)]
 
