@@ -38,7 +38,13 @@ final class RFCStore: ObservableObject {
                                   source: .pullRequest(pr),
                                   lifecycleStatus: nil))
             }
-            rfcs = result.sorted { $0.title < $1.title }
+            rfcs = result.sorted {
+                // In-review (PR) RFCs sort before main-branch RFCs, then alphabetically within each group.
+                let aIsPR = if case .pullRequest = $0.source { true } else { false }
+                let bIsPR = if case .pullRequest = $1.source { true } else { false }
+                if aIsPR != bIsPR { return aIsPR }
+                return $0.title < $1.title
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
