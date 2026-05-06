@@ -110,7 +110,11 @@ final class MermaidRenderer: NSObject {
         prefs.allowsContentJavaScript = true
         config.defaultWebpagePreferences = prefs
 
-        let wv = WKWebView(frame: CGRect(x: 0, y: 0, width: 900, height: 600), configuration: config)
+        // Render at 2x width so the rasterised snapshot has enough pixels to
+        // stay sharp when the image is expanded. SwiftUI's .scaledToFit()
+        // scales it back down for the inline display.
+        let renderWidth: CGFloat = 1800
+        let wv = WKWebView(frame: CGRect(x: 0, y: 0, width: renderWidth, height: 600), configuration: config)
         wv.navigationDelegate = self
 #if os(macOS)
         wv.setValue(false, forKey: "drawsBackground")
@@ -147,6 +151,11 @@ final class MermaidRenderer: NSObject {
 
         let config = WKSnapshotConfiguration()
         config.rect = CGRect(origin: .zero, size: wv.frame.size)
+        // Request snapshot at 2x the logical width so the raster image has
+        // enough pixels to remain sharp when the user expands the diagram.
+        if #available(macOS 14.0, iOS 17.0, *) {
+            config.snapshotWidth = NSNumber(value: Double(wv.frame.size.width) * 2)
+        }
 
         do {
             let img = try await wv.takeSnapshot(configuration: config)
