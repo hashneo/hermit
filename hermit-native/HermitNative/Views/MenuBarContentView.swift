@@ -98,7 +98,18 @@ private struct RepoSubmenu: View {
             if sections.mainBranch.isEmpty && sections.pullRequests.isEmpty {
                 Text("No RFCs")
             } else {
+                if !sections.pullRequests.isEmpty {
+                    Text("In Review")
+                    ForEach(sections.pullRequests) { rfc in
+                        Button {
+                            open(rfc)
+                        } label: {
+                            Label(rfc.title, systemImage: "arrow.triangle.pull")
+                        }
+                    }
+                }
                 if !sections.mainBranch.isEmpty {
+                    if !sections.pullRequests.isEmpty { Divider() }
                     let grouped = RFCStatusGroup.group(sections.mainBranch)
                     ForEach(grouped, id: \.header) { group in
                         if !group.rfcs.isEmpty {
@@ -108,17 +119,6 @@ private struct RepoSubmenu: View {
                                     Label(rfc.title, systemImage: group.systemImage)
                                 }
                             }
-                        }
-                    }
-                }
-                if !sections.pullRequests.isEmpty {
-                    if !sections.mainBranch.isEmpty { Divider() }
-                    Text("In Review")
-                    ForEach(sections.pullRequests) { rfc in
-                        Button {
-                            open(rfc)
-                        } label: {
-                            Label(rfc.title, systemImage: "arrow.triangle.pull")
                         }
                     }
                 }
