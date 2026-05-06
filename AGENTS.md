@@ -11,6 +11,7 @@ cat AGENTS.md
 ls -la skills/
 git status
 docuchango validate --verbose
+make dev
 ```
 
 ## Core Principles
