@@ -212,11 +212,11 @@ final class RepoRFCLoader: ObservableObject {
                 let (mainFiles, prs) = try await client.discoverRFCs()
                 let mainRFCs = mainFiles.map {
                     RFC(id: $0.id, title: $0.name, path: $0.path, sha: $0.sha,
-                        source: .mainBranch, lifecycleStatus: $0.lifecycleStatus)
+                        source: .mainBranch, lifecycleStatus: $0.lifecycleStatus, htmlURL: $0.htmlURL)
                 }.sorted { $0.title < $1.title }
                 let prRFCs = prs.map {
                     RFC(id: "pr-\($0.id)", title: $0.title, path: $0.headRef, sha: $0.headSHA,
-                        source: .pullRequest($0), lifecycleStatus: nil)
+                        source: .pullRequest($0), lifecycleStatus: nil, htmlURL: $0.htmlURL)
                 }.sorted { $0.title < $1.title }
 
                 let sections = RFCLoader.RFCSections(mainBranch: mainRFCs, pullRequests: prRFCs)

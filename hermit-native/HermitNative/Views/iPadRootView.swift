@@ -29,14 +29,14 @@ final class RFCStore: ObservableObject {
             var result: [RFC] = mainFiles.map {
                 RFC(id: $0.id, title: $0.name,
                     path: $0.path, sha: $0.sha, source: .mainBranch,
-                    lifecycleStatus: $0.lifecycleStatus)
+                    lifecycleStatus: $0.lifecycleStatus, htmlURL: $0.htmlURL)
             }
             for pr in prs {
                 result.append(RFC(id: "pr-\(pr.id)", title: pr.title,
                                   path: pr.headRef,   // unused for PR RFCs — fetchPRRFCContent uses prNumber
                                   sha: pr.headSHA,
                                   source: .pullRequest(pr),
-                                  lifecycleStatus: nil))
+                                  lifecycleStatus: nil, htmlURL: pr.htmlURL))
             }
             rfcs = result.sorted {
                 // In-review (PR) RFCs sort before main-branch RFCs, then alphabetically within each group.

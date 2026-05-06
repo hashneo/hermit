@@ -14,6 +14,12 @@ struct RFC: Identifiable, Hashable {
 
     enum RFCSource { case mainBranch, pullRequest(RFCPullRequest) }
 
+    /// The web URL for this RFC on GitHub/Gitea.
+    /// For main-branch RFCs this is sourced from RFCFile.htmlURL.
+    /// For PR RFCs this is sourced from RFCPullRequest.htmlURL.
+    /// Empty string when not available.
+    let htmlURL: String
+
     static func == (lhs: RFC, rhs: RFC) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }

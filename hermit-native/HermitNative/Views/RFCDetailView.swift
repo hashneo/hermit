@@ -29,6 +29,7 @@ struct RFCDetailView: View {
         }
         .navigationTitle(rfc.title)
         .toolbar {
+            RFCLifecycleToolbar(rfc: rfc, markdownSource: markdown)
             ToolbarItem(placement: .automatic) {
                 Button {
                     withAnimation { isReadingMode.toggle() }
