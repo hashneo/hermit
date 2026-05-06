@@ -70,7 +70,7 @@ struct MermaidView: View {
             }
         }
         .task(id: source) {
-            image = await MermaidRenderer.shared.render(source: source)
+            image = await MermaidRenderQueue.shared.render(source: source)
             failed = image == nil
         }
     }
@@ -84,20 +84,32 @@ typealias PlatformImage = NSImage
 typealias PlatformImage = UIImage
 #endif
 
+// MARK: - Serial render queue
+//
+// Multiple MermaidViews on the same page each call render() concurrently.
+// The old shared singleton cancelled the previous render whenever a new one
+// arrived, leaving all but the last diagram as "unavailable".
+//
+// This actor serialises renders: each diagram waits its turn, then gets its
+// own dedicated WKWebView instance that is never shared with another render.
+
+actor MermaidRenderQueue {
+    static let shared = MermaidRenderQueue()
+
+    func render(source: String) async -> PlatformImage? {
+        // Each call gets its own renderer — no shared state, no cancellation.
+        let renderer = await MermaidRenderer()
+        return await renderer.render(source: source)
+    }
+}
+
 @MainActor
 final class MermaidRenderer: NSObject {
-    static let shared = MermaidRenderer()
-
     private var webView: WKWebView?
     private var continuation: CheckedContinuation<PlatformImage?, Never>?
     private var pollTask: Task<Void, Never>?
 
     func render(source: String) async -> PlatformImage? {
-        // Cancel any in-flight render
-        pollTask?.cancel()
-        continuation?.resume(returning: nil)
-        continuation = nil
-
         return await withCheckedContinuation { cont in
             self.continuation = cont
             self.startRender(source: source)
@@ -133,13 +145,13 @@ final class MermaidRenderer: NSObject {
             for _ in 0..<40 {
                 if Task.isCancelled { return }
                 if let ready = try? await wv.evaluateJavaScript("document.querySelector('.mermaid svg') !== null") as? Bool, ready {
-                    await snapshot(wv: wv)
+                    await self.snapshot(wv: wv)
                     return
                 }
                 try? await Task.sleep(for: .milliseconds(150))
             }
             // Timeout — snapshot whatever is there
-            await snapshot(wv: wv)
+            await self.snapshot(wv: wv)
         }
     }
 
@@ -159,11 +171,7 @@ final class MermaidRenderer: NSObject {
 
         do {
             let img = try await wv.takeSnapshot(configuration: config)
-#if os(macOS)
             finish(image: img)
-#else
-            finish(image: img)
-#endif
         } catch {
             finish(image: nil)
         }
@@ -210,8 +218,9 @@ private func mermaidHTML(source: String) -> String {
     <meta charset="utf-8">
     <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: white; display: flex; justify-content: center; padding: 16px; }
-    .mermaid svg { max-width: 100%; height: auto; display: block; }
+    body { background: white; }
+    .mermaid { width: 100%; }
+    .mermaid svg { width: 100% !important; height: auto !important; display: block; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     </head>
