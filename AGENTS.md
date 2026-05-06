@@ -11,7 +11,6 @@ cat AGENTS.md
 ls -la skills/
 git status
 docuchango validate --verbose
-make dev
 ```
 
 ## Core Principles
@@ -111,6 +110,7 @@ Before ending a work session:
 3. Commit with a clear conventional message.
 4. Push feature branch.
 5. Open/update PR and summarize what changed.
+6. Run `make dev` to build and deploy to iPad if any native code changed.
 
 ---
 
