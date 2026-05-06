@@ -248,6 +248,23 @@ struct RFCLifecycleToolbar: ToolbarContent {
                 }
         }
 
+        // Open in browser
+        ToolbarItem(placement: .automatic) {
+            Button {
+                if let url = URL(string: rfc.htmlURL), !rfc.htmlURL.isEmpty {
+#if os(macOS)
+                    NSWorkspace.shared.open(url)
+#else
+                    UIApplication.shared.open(url)
+#endif
+                }
+            } label: {
+                Label("Open in Browser", systemImage: "safari")
+            }
+            .disabled(rfc.htmlURL.isEmpty)
+            .help("Open this RFC in your browser")
+        }
+
         // Share button
         ToolbarItem(placement: .automatic) {
             ShareLink(item: rfcShareURL()) {

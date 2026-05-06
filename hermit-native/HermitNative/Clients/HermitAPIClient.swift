@@ -84,6 +84,7 @@ actor HermitAPIClient: HermitClientProtocol {
             let pr_number: Int?
             let head_sha: String?
             let commentable: Bool?
+            let html_url: String?
         }
 
         struct RFCPage: Decodable { let items: [RFCItem] }
@@ -100,7 +101,7 @@ actor HermitAPIClient: HermitClientProtocol {
                     body: "",
                     headSHA: item.head_sha ?? "",
                     headRef: "",
-                    htmlURL: "",
+                    htmlURL: item.html_url ?? "",
                     state: "open",
                     draft: false,
                     labels: []
@@ -108,7 +109,7 @@ actor HermitAPIClient: HermitClientProtocol {
             } else {
                 files.append(RFCFile(id: item.id, name: item.title,
                                      path: item.path, sha: item.head_sha ?? "",
-                                     htmlURL: "", lifecycleStatus: item.lifecycle_status))
+                                     htmlURL: item.html_url ?? "", lifecycleStatus: item.lifecycle_status))
             }
         }
         return (files, prs)
