@@ -59,6 +59,7 @@ type CatalogItem struct {
 	HeadSHA         string   `json:"head_sha,omitempty"`
 	Commentable     bool     `json:"commentable"`
 	StatusMutable   bool     `json:"status_mutable"`
+	HTMLURL         string   `json:"html_url,omitempty"`
 }
 
 type DocumentView struct {
@@ -261,6 +262,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 			LifecycleStatus: lifecycleStatus,
 			Commentable:     false,
 			StatusMutable:   true,
+			HTMLURL:         item.HTMLURL,
 		})
 	}
 
@@ -280,6 +282,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 			HeadSHA:        prItem.HeadSHA,
 			Commentable:    true,
 			StatusMutable:  false,
+			HTMLURL:        prItem.HTMLURL,
 		})
 	}
 

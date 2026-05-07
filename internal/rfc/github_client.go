@@ -39,6 +39,7 @@ const RFCReadyLabel = "hermit:rfc-ready"
 type ReviewReadyRFCItem struct {
 	PRNumber int
 	HeadSHA  string
+	HTMLURL  string
 	Title    string
 	Path     string
 	Labels   []string
@@ -78,9 +79,10 @@ func (c *HTTPGitHubRFCClient) ListRFCs(ctx context.Context, baseURL, owner, name
 	}
 
 	var payload []struct {
-		Name string `json:"name"`
-		Path string `json:"path"`
-		Type string `json:"type"`
+		Name    string `json:"name"`
+		Path    string `json:"path"`
+		Type    string `json:"type"`
+		HTMLURL string `json:"html_url"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, err
@@ -92,9 +94,10 @@ func (c *HTTPGitHubRFCClient) ListRFCs(ctx context.Context, baseURL, owner, name
 			continue
 		}
 		items = append(items, CatalogItem{
-			ID:    item.Path,
-			Title: strings.TrimSuffix(item.Name, ".md"),
-			Path:  item.Path,
+			ID:      item.Path,
+			Title:   strings.TrimSuffix(item.Name, ".md"),
+			Path:    item.Path,
+			HTMLURL: item.HTMLURL,
 		})
 	}
 
@@ -184,9 +187,10 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 	}
 
 	var pulls []struct {
-		Number int  `json:"number"`
-		Draft  bool `json:"draft"`
-		Head   struct {
+		Number  int    `json:"number"`
+		HTMLURL string `json:"html_url"`
+		Draft   bool   `json:"draft"`
+		Head    struct {
 			SHA string `json:"sha"`
 		} `json:"head"`
 		Labels []struct {
@@ -232,6 +236,7 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 			items = append(items, ReviewReadyRFCItem{
 				PRNumber: pr.Number,
 				HeadSHA:  pr.Head.SHA,
+				HTMLURL:  pr.HTMLURL,
 				Title:    title,
 				Path:     prFile.Filename,
 				Labels:   labelNames,
