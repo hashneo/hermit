@@ -86,3 +86,26 @@ func (c *InMemoryGitHubClient) ResolveThread(_ context.Context, githubThreadID s
 
 	return nil
 }
+
+func (c *InMemoryGitHubClient) DeleteComment(_ context.Context, githubCommentID string) error {
+	if githubCommentID == "" {
+		return fmt.Errorf("github comment id is required")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// The threadID IS the comment ID in the in-memory store (see CreateThread).
+	// Delete by matching GitHubThreadID or the root comment ID.
+	for key, t := range c.threads {
+		if t.GitHubThreadID == githubCommentID {
+			delete(c.threads, key)
+			return nil
+		}
+		if len(t.Messages) > 0 && t.Messages[0].GitHubCommentID == githubCommentID {
+			delete(c.threads, key)
+			return nil
+		}
+	}
+	return fmt.Errorf("thread not found")
+}

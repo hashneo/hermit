@@ -116,6 +116,28 @@ func (h *Handler) ReplyThread(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, thread)
 }
 
+func (h *Handler) DeleteThread(w http.ResponseWriter, r *http.Request) {
+	repositoryID, prNumber, threadID, ok := parseThreadPathParams(w, r)
+	if !ok {
+		return
+	}
+
+	if err := h.service.Delete(r.Context(), DeleteRequest{
+		RepositoryID: repositoryID,
+		PRNumber:     prNumber,
+		ThreadID:     threadID,
+	}); err != nil {
+		if err.Error() == "thread not found" {
+			writeError(w, http.StatusNotFound, "thread_not_found", err.Error())
+			return
+		}
+		writeError(w, http.StatusBadGateway, "github_sync_failed", err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) ResolveThread(w http.ResponseWriter, r *http.Request) {
 	repositoryID, prNumber, threadID, ok := parseThreadPathParams(w, r)
 	if !ok {
@@ -195,6 +217,10 @@ func ThreadReplyPath() string {
 
 func ThreadResolvePath() string {
 	return fmt.Sprintf("%s/{threadId}/resolve", ThreadsPath())
+}
+
+func ThreadDeletePath() string {
+	return fmt.Sprintf("%s/{threadId}", ThreadsPath())
 }
 
 func decodeOptionalJSONBody(r *http.Request, payload any) error {

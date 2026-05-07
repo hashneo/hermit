@@ -2,10 +2,13 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"hermit/internal/config"
@@ -107,6 +110,7 @@ func newMux(cfg config.Config) *http.ServeMux {
 	mux.HandleFunc("POST "+thread.ThreadsPath(), threadHandler.CreateThread)
 	mux.HandleFunc("POST "+thread.ThreadReplyPath(), threadHandler.ReplyThread)
 	mux.HandleFunc("POST "+thread.ThreadResolvePath(), threadHandler.ResolveThread)
+	mux.HandleFunc("DELETE "+thread.ThreadDeletePath(), threadHandler.DeleteThread)
 
 	syncHandler := syncstatus.NewHandler()
 	mux.HandleFunc("GET "+syncstatus.Path(), syncHandler.GetSyncStatus)
@@ -122,7 +126,67 @@ func newMux(cfg config.Config) *http.ServeMux {
 		_, _ = w.Write([]byte(`{"status":"ok","service":"hermit-api","version":"1.0.0"}`))
 	})
 
+	mux.HandleFunc("GET /api/v1/me", meHandler(cfg))
+
 	mux.Handle("GET /", ui.Handler())
 
 	return mux
+}
+
+// meHandler proxies the authenticated user's identity from GitHub/Gitea.
+// The Swift client sends Authorization: Bearer <PAT>; this handler forwards
+// that token to the configured registry base URL's /user endpoint and returns
+// { "login": "...", "name": "...", "avatar_url": "..." }.
+func meHandler(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if token == "" {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+
+		// Use the first configured registry base URL, defaulting to GitHub.
+		baseURL := "https://api.github.com"
+		for _, reg := range cfg.Registries {
+			if strings.TrimSpace(reg.BaseURL) != "" {
+				baseURL = strings.TrimRight(reg.BaseURL, "/")
+				break
+			}
+		}
+
+		userURL := baseURL + "/user"
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, userURL, nil)
+		if err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			http.Error(w, `{"error":"upstream_error"}`, http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+
+		var upstream struct {
+			Login     string `json:"login"`
+			Name      string `json:"name"`
+			AvatarURL string `json:"avatar_url"`
+		}
+		if err := json.Unmarshal(body, &upstream); err != nil || upstream.Login == "" {
+			http.Error(w, `{"error":"invalid_upstream_response"}`, http.StatusBadGateway)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"login":      upstream.Login,
+			"name":       upstream.Name,
+			"avatar_url": upstream.AvatarURL,
+		})
+	}
 }

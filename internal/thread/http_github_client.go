@@ -364,6 +364,50 @@ func (c *HTTPGitHubClient) postPullRequestInlineComment(ctx context.Context, bas
 	return strconv.FormatInt(result.ID, 10), nil
 }
 
+// DeleteComment deletes a pull request review comment by its GitHub comment ID.
+// The githubCommentID is the numeric comment ID extracted from the thread handle.
+// GitHub API: DELETE /repos/{owner}/{repo}/pulls/comments/{comment_id}
+// Gitea API:  DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}  (same path structure)
+func (c *HTTPGitHubClient) DeleteComment(ctx context.Context, githubCommentID string) error {
+	repositoryID, _, commentID, ok := parseThreadHandle(githubCommentID)
+	if !ok || commentID == "" {
+		return fmt.Errorf("invalid thread handle for delete: %q", githubCommentID)
+	}
+
+	owner, repo, baseURL, token, err := c.resolve(repositoryID)
+	if err != nil {
+		return err
+	}
+
+	var deleteURL string
+	if strings.Contains(baseURL, "api.github.com") {
+		deleteURL = fmt.Sprintf("%s/repos/%s/%s/pulls/comments/%s", strings.TrimRight(baseURL, "/"), owner, repo, commentID)
+	} else {
+		// Gitea uses the issues/comments endpoint for PR review comments too.
+		deleteURL = fmt.Sprintf("%s/repos/%s/%s/issues/comments/%s", strings.TrimRight(baseURL, "/"), owner, repo, commentID)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, deleteURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("thread not found")
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("delete comment failed: %d %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	return nil
+}
 
 func (c *HTTPGitHubClient) resolve(repositoryID string) (owner, repo, baseURL, token string, err error) {
 	if c.repoResolver == nil {

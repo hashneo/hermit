@@ -24,8 +24,12 @@ protocol HermitClientProtocol: Actor {
                               lineStart: Int, lineEnd: Int,
                               textFingerprint: String) async throws -> ReviewThread
     func replyToReviewComment(prNumber: Int, threadId: String, body: String) async throws -> ReviewThread
+    func deleteReviewComment(prNumber: Int, threadId: String) async throws
     func getReviewState(prNumber: Int) async throws -> ReviewState
     func approve(prNumber: Int) async throws
+
+    // Current authenticated user
+    func fetchCurrentUser() async throws -> String   // returns GitHub login
 
     // Publishing (branch → commit → PR)
     func getMainBranchSHA() async throws -> String
@@ -209,6 +213,23 @@ actor HermitAPIClient: HermitClientProtocol {
         return thread.toReviewThread()
     }
 
+    // MARK: - deleteReviewComment
+
+    func deleteReviewComment(prNumber: Int, threadId: String) async throws {
+        let repoID = try await repoID()
+        let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/threads/\(threadId)")
+        try await delete(u)
+    }
+
+    // MARK: - fetchCurrentUser
+
+    func fetchCurrentUser() async throws -> String {
+        let u = url("/api/v1/me")
+        let data = try await get(u)
+        struct Me: Decodable { let login: String }
+        return try JSONDecoder().decode(Me.self, from: data).login
+    }
+
     private static let iso8601Decoder: JSONDecoder = {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601
@@ -360,6 +381,16 @@ actor HermitAPIClient: HermitClientProtocol {
         let (data, resp) = try await session.data(for: req)
         try checkResponse(resp, data: data)
         return data
+    }
+
+    private func delete(_ url: URL) async throws {
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        req.setValue("Bearer \(config.pat)", forHTTPHeaderField: "Authorization")
+        let (data, resp) = try await session.data(for: req)
+        // 204 No Content is success; checkResponse handles errors
+        if let http = resp as? HTTPURLResponse, http.statusCode == 204 { return }
+        try checkResponse(resp, data: data)
     }
 
     private func checkResponse(_ response: URLResponse, data: Data) throws {

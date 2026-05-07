@@ -107,6 +107,7 @@ struct ThreadPopoverView: View {
     @State private var replyText: [String: String] = [:]
     @State private var submitting: [String: Bool]  = [:]
     @State private var errors:     [String: String] = [:]
+    @State private var deleting:   [String: Bool]  = [:]
     @FocusState private var replyFocused: Bool
 
     private let lineHeight: CGFloat = 20   // approx .subheadline line height
@@ -122,8 +123,8 @@ struct ThreadPopoverView: View {
 
     private var rootThread: ReviewThread? { threads.first }
 
-    private var allMessages: [(message: ThreadMessage, resolved: Bool)] {
-        threads.flatMap { thread in thread.messages.map { ($0, thread.resolved) } }
+    private var allMessages: [(message: ThreadMessage, resolved: Bool, threadId: String)] {
+        threads.flatMap { thread in thread.messages.map { ($0, thread.resolved, thread.id) } }
     }
 
     var body: some View {
@@ -158,7 +159,7 @@ struct ThreadPopoverView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(allMessages, id: \.message.id) { item in
-                            messageRow(item.message, resolved: item.resolved)
+                            messageRow(item.message, resolved: item.resolved, threadId: item.threadId)
                             if item.message.id != allMessages.last?.message.id {
                                 Divider().padding(.horizontal, 14)
                             }
@@ -194,8 +195,13 @@ struct ThreadPopoverView: View {
 
     // MARK: - Message row
 
-    private func messageRow(_ message: ThreadMessage, resolved: Bool) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+    private func messageRow(_ message: ThreadMessage, resolved: Bool, threadId: String) -> some View {
+        let isMyComment = !commentStore.currentUserLogin.isEmpty &&
+                          message.author == commentStore.currentUserLogin
+        let canDelete = isMyComment && !resolved
+        let isDeletingThis = deleting[threadId] == true
+
+        return HStack(alignment: .top, spacing: 8) {
             Circle()
                 .fill(Color.accentColor.opacity(0.2))
                 .frame(width: 26, height: 26)
@@ -213,6 +219,22 @@ struct ThreadPopoverView: View {
                     Text(formatMessageDate(message.createdAt))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                    if canDelete {
+                        Button {
+                            Task { await deleteComment(threadId: threadId) }
+                        } label: {
+                            if isDeletingThis {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: "trash")
+                                    .font(.caption2)
+                                    .foregroundStyle(.red.opacity(0.7))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isDeletingThis)
+                        .help("Delete your comment")
+                    }
                 }
                 CommentBodyView(text: message.body)
                     .foregroundStyle(resolved ? .secondary : .primary)
@@ -220,6 +242,18 @@ struct ThreadPopoverView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
+    }
+
+    // MARK: - Delete comment
+
+    private func deleteComment(threadId: String) async {
+        deleting[threadId] = true
+        do {
+            try await commentStore.deleteComment(threadId: threadId)
+        } catch {
+            errors[threadId] = error.localizedDescription
+        }
+        deleting[threadId] = false
     }
 
     // MARK: - Reply field

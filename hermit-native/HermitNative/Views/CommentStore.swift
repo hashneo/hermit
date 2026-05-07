@@ -10,6 +10,8 @@ final class CommentStore: ObservableObject {
     @Published private(set) var comments: [ReviewThread] = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String? = nil
+    /// The GitHub login of the authenticated user. Populated on first load.
+    @Published private(set) var currentUserLogin: String = ""
 
     // Context set when a PR RFC is selected
     private(set) var prNumber: Int?
@@ -36,6 +38,7 @@ final class CommentStore: ObservableObject {
         filePath  = nil
         comments  = []
         errorMessage = nil
+        currentUserLogin = ""
     }
 
     func load() async {
@@ -46,6 +49,12 @@ final class CommentStore: ObservableObject {
             comments = try await client.listReviewComments(prNumber: prNumber)
         } catch {
             errorMessage = error.localizedDescription
+        }
+        // Fetch current user identity if not yet known (best-effort; failures are silent).
+        if currentUserLogin.isEmpty {
+            if let login = try? await client.fetchCurrentUser(), !login.isEmpty {
+                currentUserLogin = login
+            }
         }
         isLoading = false
     }
@@ -98,6 +107,18 @@ final class CommentStore: ObservableObject {
             throw CommentStoreError.notConfigured
         }
         _ = try await client.replyToReviewComment(prNumber: prNumber, threadId: threadId, body: body)
+        await load()
+    }
+
+    /// Delete the root comment of a thread (only allowed for comments by the current user
+    /// on open, unresolved threads — enforced in the UI, not re-checked here).
+    func deleteComment(threadId: String) async throws {
+        guard let client, let prNumber else {
+            throw CommentStoreError.notConfigured
+        }
+        try await client.deleteReviewComment(prNumber: prNumber, threadId: threadId)
+        // Optimistically remove from local state; reload will sync any discrepancy.
+        comments.removeAll { $0.id == threadId }
         await load()
     }
 }

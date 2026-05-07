@@ -78,11 +78,18 @@ type ResolveRequest struct {
 	ThreadID     string
 }
 
+type DeleteRequest struct {
+	RepositoryID string
+	PRNumber     int
+	ThreadID     string
+}
+
 type GitHubClient interface {
 	ListThreads(ctx context.Context, repositoryID string, prNumber int) ([]Thread, error)
 	CreateThread(ctx context.Context, thread Thread) (threadID string, messageID string, err error)
 	ReplyThread(ctx context.Context, githubThreadID string, anchor Anchor, message Message) (commentID string, err error)
 	ResolveThread(ctx context.Context, githubThreadID string) error
+	DeleteComment(ctx context.Context, githubCommentID string) error
 }
 
 // Service is a stateless pass-through to the GitHub client.
@@ -211,8 +218,7 @@ func (s *Service) Reply(ctx context.Context, req ReplyRequest) (Thread, error) {
 	return Thread{}, fmt.Errorf("thread not found after reply")
 }
 
-func (s *Service) Resolve(ctx context.Context, req ResolveRequest) (Thread, error) {
-	if err := s.client.ResolveThread(ctx, req.ThreadID); err != nil {
+func (s *Service) Resolve(ctx context.Context, req ResolveRequest) (Thread, error) {	if err := s.client.ResolveThread(ctx, req.ThreadID); err != nil {
 		return Thread{}, fmt.Errorf("resolve github thread: %w", err)
 	}
 
@@ -234,6 +240,17 @@ func (s *Service) Resolve(ctx context.Context, req ResolveRequest) (Thread, erro
 		Status:       ThreadStatusResolved,
 		Sync:         Sync{State: SyncStateSynced},
 	}, nil
+}
+
+// Delete removes the root comment of a thread from GitHub/Gitea.
+// The threadID is the GitHub thread handle (e.g. "{repoID}:{prNumber}:{commentID}").
+// Only the root comment is deleted — the whole thread disappears when the root
+// review comment is removed from GitHub's perspective.
+func (s *Service) Delete(ctx context.Context, req DeleteRequest) error {
+	if err := s.client.DeleteComment(ctx, req.ThreadID); err != nil {
+		return fmt.Errorf("delete github comment: %w", err)
+	}
+	return nil
 }
 
 func extractSequence(id string) int64 {
