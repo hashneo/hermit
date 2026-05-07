@@ -130,12 +130,9 @@ struct RFCLifecycleToolbar: ToolbarContent {
         #if os(macOS)
         ToolbarItem(placement: .automatic) {
             Menu {
-                // hermit-1mg / hermit-fdq: must dispatch via Task { @MainActor in }
-                // so that NSSavePanel.runModal() / NSPrintOperation.runModal(for:)
-                // are called after the current SwiftUI event has fully unwound.
-                // Calling @MainActor functions directly from a synchronous Button
-                // closure does not guarantee the run-loop is in the right state
-                // for modal presentation on macOS.
+                // Render on the main actor then defer panel presentation via
+                // DispatchQueue.main.async inside savePanel so it runs after the
+                // Menu's event fully unwinds (required on macOS 14+).
                 Button("Export as PDF…")  { Task { @MainActor in exportPDF()  } }
                 Button("Export as RTF…")  { Task { @MainActor in exportRTF()  } }
                 Divider()
@@ -308,20 +305,26 @@ struct RFCLifecycleToolbar: ToolbarContent {
         panel.directoryURL = FileManager.default.urls(
             for: .downloadsDirectory, in: .userDomainMask).first
 
-        // Prefer attaching as a sheet to the RFC window. NSApp.keyWindow may be
-        // nil immediately after a Menu button click, so search by title as well.
-        let targetWindow = NSApp.keyWindow
-            ?? NSApp.windows.first(where: { $0.title == rfc.title && $0.isVisible })
+        // Defer past the current run loop tick so the Menu button's event has
+        // fully unwound before we try to present a modal panel. This is required
+        // on macOS 14+ — calling runModal() synchronously from a SwiftUI Button
+        // action (even via Task { @MainActor }) blocks the event loop too early.
+        DispatchQueue.main.async {
+            // Find the RFC window by title. keyWindow is nil at this point because
+            // clicking a toolbar Menu item resigns key status before the action runs.
+            let targetWindow = NSApp.windows.first(where: {
+                $0.title == self.rfc.title && $0.isVisible && $0.styleMask.contains(.titled)
+            }) ?? NSApp.windows.first(where: { $0.isVisible && $0.styleMask.contains(.titled) })
 
-        if let window = targetWindow {
-            panel.beginSheetModal(for: window) { response in
-                guard response == .OK, let dest = panel.url else { return }
-                try? data.write(to: dest)
-            }
-        } else {
-            // No window context — run as a standalone modal panel.
-            if panel.runModal() == .OK, let dest = panel.url {
-                try? data.write(to: dest)
+            if let window = targetWindow {
+                panel.beginSheetModal(for: window) { response in
+                    guard response == .OK, let dest = panel.url else { return }
+                    try? data.write(to: dest)
+                }
+            } else {
+                if panel.runModal() == .OK, let dest = panel.url {
+                    try? data.write(to: dest)
+                }
             }
         }
     }
@@ -617,11 +620,16 @@ struct RFCLifecycleToolbar: ToolbarContent {
         let op = NSPrintOperation(view: pdfView, printInfo: printInfo)
         op.showsPrintPanel    = true
         op.showsProgressPanel = true
-        if let window = NSApp.keyWindow {
-            op.runModal(for: window, delegate: nil,
-                        didRun: nil, contextInfo: nil)
-        } else {
-            op.run()
+        let rfcTitle = rfc.title
+        DispatchQueue.main.async {
+            let targetWindow = NSApp.windows.first(where: {
+                $0.title == rfcTitle && $0.isVisible && $0.styleMask.contains(.titled)
+            })
+            if let window = targetWindow {
+                op.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+            } else {
+                op.run()
+            }
         }
     }
     #endif // os(macOS)
