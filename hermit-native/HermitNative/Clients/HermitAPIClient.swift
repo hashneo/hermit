@@ -25,6 +25,7 @@ protocol HermitClientProtocol: Actor {
                               textFingerprint: String) async throws -> ReviewThread
     func replyToReviewComment(prNumber: Int, threadId: String, body: String) async throws -> ReviewThread
     func deleteReviewComment(prNumber: Int, threadId: String) async throws
+    func resolveReviewThread(prNumber: Int, threadId: String) async throws
     func getReviewState(prNumber: Int) async throws -> ReviewState
     func approve(prNumber: Int) async throws
 
@@ -219,6 +220,14 @@ actor HermitAPIClient: HermitClientProtocol {
         let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/threads/\(threadId)")
         try await delete(u)
+    }
+
+    // MARK: - resolveReviewThread
+
+    func resolveReviewThread(prNumber: Int, threadId: String) async throws {
+        let repoID = try await repoID()
+        let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/threads/\(threadId)/resolve")
+        _ = try await post(u, body: [:])
     }
 
     // MARK: - fetchCurrentUser

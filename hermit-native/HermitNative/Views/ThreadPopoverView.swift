@@ -108,7 +108,9 @@ struct ThreadPopoverView: View {
     @State private var submitting: [String: Bool]  = [:]
     @State private var errors:     [String: String] = [:]
     @State private var deleting:   [String: Bool]  = [:]
+    @State private var resolving:  [String: Bool]  = [:]
     @State private var pendingDeleteThreadId: String? = nil
+    @State private var pendingResolveThreadId: String? = nil
     @FocusState private var replyFocused: Bool
 
     private let lineHeight: CGFloat = 20   // approx .subheadline line height
@@ -132,6 +134,13 @@ struct ThreadPopoverView: View {
         threadContent
             .modifier(PopoverSizeModifier(containerWidth: containerWidth, containerHeight: containerHeight))
             .task { await commentStore.load() }
+            // Reload every 15 s while the popover is open so new replies appear.
+            .task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(15))
+                    await commentStore.load()
+                }
+            }
             .onChange(of: replyText) { _, _ in isEditing = hasUnsavedText }
             .confirmationDialog(
                 "Delete Comment",
@@ -150,6 +159,24 @@ struct ThreadPopoverView: View {
                 Button("Cancel", role: .cancel) { pendingDeleteThreadId = nil }
             } message: {
                 Text("This will permanently delete your comment. This cannot be undone.")
+            }
+            .confirmationDialog(
+                "Resolve Conversation",
+                isPresented: Binding(
+                    get: { pendingResolveThreadId != nil },
+                    set: { if !$0 { pendingResolveThreadId = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Resolve") {
+                    if let threadId = pendingResolveThreadId {
+                        pendingResolveThreadId = nil
+                        Task { await resolveThread(threadId: threadId) }
+                    }
+                }
+                Button("Cancel", role: .cancel) { pendingResolveThreadId = nil }
+            } message: {
+                Text("Mark this conversation as resolved on GitHub.")
             }
     }
 
@@ -191,6 +218,33 @@ struct ThreadPopoverView: View {
                 Divider()
 
                 if let root = rootThread, !root.resolved {
+                    let isOriginalAuthor = !commentStore.currentUserLogin.isEmpty &&
+                                          root.user == commentStore.currentUserLogin
+                    let isResolvingThis = resolving[root.id] == true
+
+                    // Resolve button — only shown to the original comment author
+                    if isOriginalAuthor {
+                        Divider()
+                        HStack {
+                            Spacer()
+                            Button {
+                                pendingResolveThreadId = root.id
+                            } label: {
+                                if isResolvingThis {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Label("Resolve Conversation", systemImage: "checkmark.circle")
+                                        .font(.subheadline)
+                                }
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.green)
+                            .disabled(isResolvingThis)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                        }
+                    }
+
                     replyField(for: root)
                 }
             }
@@ -273,6 +327,18 @@ struct ThreadPopoverView: View {
             errors[threadId] = error.localizedDescription
         }
         deleting[threadId] = false
+    }
+
+    // MARK: - Resolve thread
+
+    private func resolveThread(threadId: String) async {
+        resolving[threadId] = true
+        do {
+            try await commentStore.resolveThread(threadId: threadId)
+        } catch {
+            errors[threadId] = error.localizedDescription
+        }
+        resolving[threadId] = false
     }
 
     // MARK: - Reply field

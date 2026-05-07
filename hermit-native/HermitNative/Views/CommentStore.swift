@@ -109,6 +109,24 @@ final class CommentStore: ObservableObject {
         let slug = truncated.lowercased().replacingOccurrences(of: " ", with: "-")
         return slug.isEmpty ? "line" : slug
     }
+    /// Resolve a thread on GitHub and refresh.
+    func resolveThread(threadId: String) async throws {
+        guard let client, let prNumber else {
+            throw CommentStoreError.notConfigured
+        }
+        try await client.resolveReviewThread(prNumber: prNumber, threadId: threadId)
+        // Optimistically mark resolved in local state; reload will sync.
+        comments = comments.map { t in
+            guard t.id == threadId else { return t }
+            return ReviewThread(
+                id: t.id, prNumber: t.prNumber, status: "resolved",
+                filePath: t.filePath, lineStart: t.lineStart, lineEnd: t.lineEnd,
+                messages: t.messages
+            )
+        }
+        await load()
+    }
+
     /// Reply to an existing thread and refresh the local thread.
     func replyToThread(threadId: String, body: String) async throws {
         guard let client, let prNumber else {
