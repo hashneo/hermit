@@ -25,6 +25,14 @@ final class CommentStore: ObservableObject {
         self.filePath = filePath
         comments      = []
         errorMessage  = nil
+        currentUserLogin = ""
+        // Fetch the current user's login eagerly so the delete button is ready
+        // before the first popover opens.
+        Task {
+            if let login = try? await client.fetchCurrentUser(), !login.isEmpty {
+                self.currentUserLogin = login
+            }
+        }
     }
 
     // Legacy overload kept for call sites that still pass commitSHA.

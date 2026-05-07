@@ -134,9 +134,9 @@ func newMux(cfg config.Config) *http.ServeMux {
 }
 
 // meHandler proxies the authenticated user's identity from GitHub/Gitea.
-// The Swift client sends Authorization: Bearer <PAT>; this handler forwards
-// that token to the configured registry base URL's /user endpoint and returns
-// { "login": "...", "name": "...", "avatar_url": "..." }.
+// The Swift client sends Authorization: Bearer <PAT>; this handler tries
+// all configured registries in order and returns the first successful
+// { "login": "...", "name": "...", "avatar_url": "..." } response.
 func meHandler(cfg config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -145,48 +145,55 @@ func meHandler(cfg config.Config) http.HandlerFunc {
 			return
 		}
 
-		// Use the first configured registry base URL, defaulting to GitHub.
-		baseURL := "https://api.github.com"
+		// Build candidate base URLs: all configured registries + fallback to GitHub.
+		candidates := make([]string, 0, len(cfg.Registries)+1)
 		for _, reg := range cfg.Registries {
-			if strings.TrimSpace(reg.BaseURL) != "" {
-				baseURL = strings.TrimRight(reg.BaseURL, "/")
-				break
+			if b := strings.TrimSpace(reg.BaseURL); b != "" {
+				candidates = append(candidates, strings.TrimRight(b, "/"))
 			}
 		}
-
-		userURL := baseURL + "/user"
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, userURL, nil)
-		if err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
-			return
+		if len(candidates) == 0 {
+			candidates = append(candidates, "https://api.github.com")
 		}
-		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("Accept", "application/json")
-
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			http.Error(w, `{"error":"upstream_error"}`, http.StatusBadGateway)
-			return
-		}
-		defer resp.Body.Close()
-
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 
 		var upstream struct {
 			Login     string `json:"login"`
 			Name      string `json:"name"`
 			AvatarURL string `json:"avatar_url"`
 		}
-		if err := json.Unmarshal(body, &upstream); err != nil || upstream.Login == "" {
-			http.Error(w, `{"error":"invalid_upstream_response"}`, http.StatusBadGateway)
+
+		for _, baseURL := range candidates {
+			userURL := baseURL + "/user"
+			req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, userURL, nil)
+			if err != nil {
+				continue
+			}
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Accept", "application/json")
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				continue
+			}
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+			resp.Body.Close()
+
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				continue
+			}
+			if err := json.Unmarshal(body, &upstream); err != nil || upstream.Login == "" {
+				continue
+			}
+			// Found a valid response — return it.
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"login":      upstream.Login,
+				"name":       upstream.Name,
+				"avatar_url": upstream.AvatarURL,
+			})
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"login":      upstream.Login,
-			"name":       upstream.Name,
-			"avatar_url": upstream.AvatarURL,
-		})
+		http.Error(w, `{"error":"could_not_resolve_user"}`, http.StatusBadGateway)
 	}
 }
