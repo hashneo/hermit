@@ -108,6 +108,7 @@ struct ThreadPopoverView: View {
     @State private var submitting: [String: Bool]  = [:]
     @State private var errors:     [String: String] = [:]
     @State private var deleting:   [String: Bool]  = [:]
+    @State private var pendingDeleteThreadId: String? = nil
     @FocusState private var replyFocused: Bool
 
     private let lineHeight: CGFloat = 20   // approx .subheadline line height
@@ -132,6 +133,24 @@ struct ThreadPopoverView: View {
             .modifier(PopoverSizeModifier(containerWidth: containerWidth, containerHeight: containerHeight))
             .task { await commentStore.load() }
             .onChange(of: replyText) { _, _ in isEditing = hasUnsavedText }
+            .confirmationDialog(
+                "Delete Comment",
+                isPresented: Binding(
+                    get: { pendingDeleteThreadId != nil },
+                    set: { if !$0 { pendingDeleteThreadId = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    if let threadId = pendingDeleteThreadId {
+                        pendingDeleteThreadId = nil
+                        Task { await deleteComment(threadId: threadId) }
+                    }
+                }
+                Button("Cancel", role: .cancel) { pendingDeleteThreadId = nil }
+            } message: {
+                Text("This will permanently delete your comment. This cannot be undone.")
+            }
     }
 
     private var threadContent: some View {
@@ -221,7 +240,7 @@ struct ThreadPopoverView: View {
                         .foregroundStyle(.secondary)
                     if canDelete {
                         Button {
-                            Task { await deleteComment(threadId: threadId) }
+                            pendingDeleteThreadId = threadId
                         } label: {
                             if isDeletingThis {
                                 ProgressView().controlSize(.mini)
