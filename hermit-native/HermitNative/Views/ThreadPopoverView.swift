@@ -68,6 +68,72 @@ private struct GrowingTextView: UIViewRepresentable {
 }
 #endif
 
+#if os(macOS)
+import AppKit
+
+// MARK: - GrowingTextView (macOS)
+private struct GrowingTextView: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String = "Reply…"
+    var maxLines: Int = 5
+    var isDisabled: Bool = false
+    var onFocusChange: (Bool) -> Void = { _ in }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let tv = NSTextView()
+        tv.delegate = context.coordinator
+        tv.font = .preferredFont(forTextStyle: .body)
+        tv.backgroundColor = .clear
+        tv.isRichText = false
+        tv.isEditable = !isDisabled
+        tv.isSelectable = true
+        tv.textContainerInset = NSSize(width: 4, height: 8)
+        tv.textContainer?.lineFragmentPadding = 0
+
+        // Placeholder
+        let ph = NSTextField(labelWithString: placeholder)
+        ph.font = tv.font
+        ph.textColor = .tertiaryLabelColor
+        ph.tag = 999
+        ph.translatesAutoresizingMaskIntoConstraints = false
+        tv.addSubview(ph)
+        NSLayoutConstraint.activate([
+            ph.topAnchor.constraint(equalTo: tv.topAnchor, constant: 8),
+            ph.leadingAnchor.constraint(equalTo: tv.leadingAnchor, constant: 4),
+        ])
+
+        let scroll = NSScrollView()
+        scroll.documentView = tv
+        scroll.hasVerticalScroller = false
+        scroll.drawsBackground = false
+        context.coordinator.textView = tv
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let tv = scroll.documentView as? NSTextView else { return }
+        if tv.string != text { tv.string = text }
+        tv.isEditable = !isDisabled
+        if let ph = tv.viewWithTag(999) { ph.isHidden = !text.isEmpty }
+    }
+
+    class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: GrowingTextView
+        weak var textView: NSTextView?
+        init(_ parent: GrowingTextView) { self.parent = parent }
+
+        func textDidChange(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView else { return }
+            parent.text = tv.string
+        }
+        func textDidBeginEditing(_ notification: Notification) { parent.onFocusChange(true) }
+        func textDidEndEditing(_ notification: Notification)   { parent.onFocusChange(false) }
+    }
+}
+#endif
+
 // MARK: - ScrollContentHeightKey
 // Measures the natural height of the scroll content so the ScrollView can
 // size itself to fit, capped at a fraction of the window height.
@@ -443,7 +509,6 @@ struct ThreadPopoverView: View {
 
             HStack(alignment: .bottom, spacing: 8) {
                 Group {
-#if canImport(UIKit)
                     GrowingTextView(
                         text: Binding(
                             get: { replyText[threadId] ?? "" },
@@ -453,29 +518,6 @@ struct ThreadPopoverView: View {
                         isDisabled: isSubmitting,
                         onFocusChange: { replyFocused = $0 }
                     )
-#else
-                    ZStack(alignment: .topLeading) {
-                        if text.isEmpty {
-                            Text("Reply…")
-                                .font(.subheadline)
-                                .foregroundStyle(.tertiary)
-                                .padding(.top, 8)
-                                .padding(.leading, 5)
-                                .allowsHitTesting(false)
-                        }
-                        TextEditor(text: Binding(
-                            get: { replyText[threadId] ?? "" },
-                            set: { replyText[threadId] = $0 }
-                        ))
-                        .font(.subheadline)
-                        .frame(maxHeight: CGFloat(maxEditorLines) * 20 + 16)
-                        .scrollContentBackground(.hidden)
-                        .focused($replyFocused)
-                        .disabled(isSubmitting)
-                    }
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-#endif
                 }
                 .background(Color.secondary.opacity(0.07))
                 .cornerRadius(8)
