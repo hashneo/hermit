@@ -91,25 +91,33 @@ final class CommentStore: ObservableObject {
         let end = lineEnd ?? line
         return comments
             .filter {
-                // Standard overlap check
-                ($0.lineStart <= end && $0.lineEnd >= line) ||
-                // Snap orphaned thread to nearest block
-                (!blockRanges.isEmpty && effectiveLine(for: $0, blockRanges: blockRanges) == line)
+                // Outdated threads must go through the snap path — their lineStart
+                // is from the old diff and must not match via normal line overlap.
+                if $0.outdated {
+                    return !blockRanges.isEmpty && effectiveLine(for: $0, blockRanges: blockRanges) == line
+                }
+                // Non-outdated: normal overlap check first, then snap for any that missed all blocks.
+                return ($0.lineStart <= end && $0.lineEnd >= line) ||
+                       (!blockRanges.isEmpty && effectiveLine(for: $0, blockRanges: blockRanges) == line)
             }
             .sorted { $0.createdAt < $1.createdAt }
     }
 
     /// Given a thread, returns the block start line it should be displayed on.
-    /// If the thread overlaps a block normally, returns thread.lineStart.
-    /// Otherwise snaps to the nearest block's start line.
+    /// Outdated threads always snap — their lineStart is from the old diff and
+    /// should never be matched by normal line-range overlap.
+    /// Non-outdated threads use normal overlap first, then snap if unmatched.
     func effectiveLine(for thread: ReviewThread, blockRanges: [(start: Int, end: Int)], fallbackRange: (Int, Int)? = nil) -> Int {
-        // Check normal overlap first
-        for r in blockRanges {
-            if thread.lineStart <= r.end && thread.lineEnd >= r.start {
-                return r.start
+        // Only attempt normal overlap for threads that are not outdated.
+        if !thread.outdated {
+            for r in blockRanges {
+                if thread.lineStart <= r.end && thread.lineEnd >= r.start {
+                    return r.start
+                }
             }
         }
-        // No overlap — snap to nearest block by minimum distance
+        // Outdated threads, or non-outdated threads that missed every block:
+        // snap to the nearest block by minimum distance.
         guard !blockRanges.isEmpty else { return thread.lineStart }
         return blockRanges.min(by: {
             min(abs($0.start - thread.lineStart), abs($0.end - thread.lineStart)) <
