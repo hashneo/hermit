@@ -48,6 +48,7 @@ type Thread struct {
 	RepositoryID   string    `json:"repository_id"`
 	PRNumber       int       `json:"pr_number"`
 	Status         string    `json:"status"`
+	Outdated       bool      `json:"outdated,omitempty"`
 	Anchor         Anchor    `json:"anchor"`
 	Messages       []Message `json:"messages"`
 	GitHubThreadID string    `json:"github_thread_id,omitempty"`

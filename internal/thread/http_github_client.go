@@ -39,6 +39,8 @@ type prComment struct {
 	Body             string    `json:"body"`
 	User             struct{ Login string `json:"login"` } `json:"user"`
 	Path             string    `json:"path"`
+	Line             *int      `json:"line"`           // file line number (null when outdated)
+	OriginalLine     *int      `json:"original_line"`  // file line at time of comment
 	Position         int       `json:"position"`
 	OriginalPosition int       `json:"original_position"`
 	CreatedAt        time.Time `json:"created_at"`
@@ -92,15 +94,27 @@ func (c *HTTPGitHubClient) ListThreads(ctx context.Context, repositoryID string,
 		visibleBody := strings.TrimSpace(anchorRE.ReplaceAllString(root.Body, ""))
 
 		anchor := Anchor{FilePath: root.Path}
+		outdated := false
 		if m := anchorRE.FindStringSubmatch(root.Body); m != nil {
 			if ls, err2 := strconv.Atoi(m[1]); err2 == nil { anchor.LineStart = ls }
 			if le, err2 := strconv.Atoi(m[2]); err2 == nil { anchor.LineEnd   = le }
 			anchor.TextFingerprint = m[3]
 		} else {
-			pos := root.Position
-			if pos == 0 { pos = root.OriginalPosition }
-			anchor.LineStart = pos
-			anchor.LineEnd   = pos
+			// Prefer the current file line number; fall back to original_line for
+			// outdated comments (where line is null because the code was changed).
+			if root.Line != nil && *root.Line > 0 {
+				anchor.LineStart = *root.Line
+				anchor.LineEnd   = *root.Line
+			} else if root.OriginalLine != nil && *root.OriginalLine > 0 {
+				anchor.LineStart = *root.OriginalLine
+				anchor.LineEnd   = *root.OriginalLine
+				outdated = true
+			} else {
+				// Truly unanchored — pin to line 1 so it always appears.
+				anchor.LineStart = 1
+				anchor.LineEnd   = 1
+				outdated = true
+			}
 		}
 
 		msgs := []Message{{
@@ -136,6 +150,7 @@ func (c *HTTPGitHubClient) ListThreads(ctx context.Context, repositoryID string,
 			RepositoryID:   repositoryID,
 			PRNumber:       prNumber,
 			Status:         ThreadStatusOpen,
+			Outdated:       outdated,
 			Anchor:         anchor,
 			GitHubThreadID: threadHandle,
 			Messages:       msgs,

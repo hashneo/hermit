@@ -352,6 +352,14 @@ struct ThreadPopoverView: View {
                     .foregroundStyle(Color.accentColor)
                 Text("Comment")
                     .font(.subheadline).fontWeight(.semibold)
+                if let root = rootThread, root.outdated {
+                    Text("Outdated")
+                        .font(.caption2).fontWeight(.medium)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.18))
+                        .foregroundStyle(.secondary)
+                        .clipShape(Capsule())
+                }
                 Spacer()
             }
             .padding(.horizontal, 14)

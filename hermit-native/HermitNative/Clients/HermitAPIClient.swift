@@ -449,10 +449,11 @@ private struct ServerThread: Decodable {
     let id: String
     let prNumber: Int
     let status: String
+    let outdated: Bool?
     let anchor: ServerAnchor
     let messages: [ServerMessage]
     enum CodingKeys: String, CodingKey {
-        case id, status, anchor, messages
+        case id, status, anchor, messages, outdated
         case prNumber = "pr_number"
     }
 
@@ -461,6 +462,7 @@ private struct ServerThread: Decodable {
             id: id,
             prNumber: prNumber,
             status: status,
+            outdated: outdated ?? false,
             filePath: anchor.filePath ?? "",
             lineStart: anchor.lineStart,
             lineEnd: anchor.lineEnd,

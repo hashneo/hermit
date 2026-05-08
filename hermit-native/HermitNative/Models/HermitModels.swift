@@ -35,6 +35,7 @@ struct ReviewThread: Identifiable, Hashable {
     let id: String
     let prNumber: Int
     let status: String       // "open", "resolved"
+    let outdated: Bool
     let filePath: String
     let lineStart: Int
     let lineEnd: Int

@@ -126,6 +126,7 @@ final class CommentStore: ObservableObject {
             guard t.id == threadId else { return t }
             return ReviewThread(
                 id: t.id, prNumber: t.prNumber, status: "resolved",
+                outdated: t.outdated,
                 filePath: t.filePath, lineStart: t.lineStart, lineEnd: t.lineEnd,
                 messages: t.messages
             )
