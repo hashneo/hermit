@@ -374,22 +374,35 @@ struct ThreadPopoverView: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                TextField("Reply…", text: Binding(
-                    get: { replyText[threadId] ?? "" },
-                    set: { replyText[threadId] = $0 }
-                ), axis: .vertical)
-                .font(.subheadline)
-                .lineLimit(1...maxEditorLines)
-                .focused($replyFocused)
-                .disabled(isSubmitting)
-                .padding(.vertical, 8)
-                .padding(.horizontal, 10)
+                ZStack(alignment: .topLeading) {
+                    if text.isEmpty {
+                        Text("Reply…")
+                            .font(.subheadline)
+                            .foregroundStyle(.tertiary)
+                            // Match TextEditor's internal insets: top ~8, leading ~5
+                            .padding(.top, 8)
+                            .padding(.leading, 5)
+                            .allowsHitTesting(false)
+                    }
+                    TextEditor(text: Binding(
+                        get: { replyText[threadId] ?? "" },
+                        set: { replyText[threadId] = $0 }
+                    ))
+                    .font(.subheadline)
+                    .frame(minHeight: 36, maxHeight: CGFloat(maxEditorLines) * 20 + 16)
+                    .scrollContentBackground(.hidden)
+                    .focused($replyFocused)
+                    .disabled(isSubmitting)
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
                 .background(Color.secondary.opacity(0.07))
                 .cornerRadius(8)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(replyFocused ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.25))
                 )
+                .onTapGesture { replyFocused = true }
 
                 VStack(spacing: 6) {
                     // Clear button
