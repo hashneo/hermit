@@ -11,8 +11,6 @@ private struct PopoverSizeModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .frame(width: max(480, containerWidth * 0.8))
-            // Auto-size to content height, capping at 75% of the window height.
-            .fixedSize(horizontal: false, vertical: true)
             .frame(maxHeight: containerHeight * 0.75)
     }
 }
