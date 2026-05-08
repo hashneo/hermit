@@ -74,13 +74,15 @@ import AppKit
 // NSTextView subclass that reports an intrinsic height so SwiftUI
 // allocates space before the user types.
 private class AutosizingTextView: NSTextView {
-    var minHeight: CGFloat = 36
     override var intrinsicContentSize: NSSize {
         guard let lm = layoutManager, let tc = textContainer else {
-            return NSSize(width: NSView.noIntrinsicMetric, height: minHeight)
+            return NSSize(width: NSView.noIntrinsicMetric, height: 36)
         }
         lm.ensureLayout(for: tc)
-        let h = max(minHeight, lm.usedRect(for: tc).height + textContainerInset.height * 2)
+        let used = lm.usedRect(for: tc).height
+        let lineH = font?.ascender ?? 14 + abs(font?.descender ?? 3) + (font?.leading ?? 0)
+        let insetH = textContainerInset.height * 2
+        let h = max(lineH + insetH, used + insetH)
         return NSSize(width: NSView.noIntrinsicMetric, height: h)
     }
 }
