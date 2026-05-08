@@ -37,7 +37,7 @@ struct RFCLifecycleToolbar: ToolbarContent {
     /// hermit-cns: true when the PR already has an approval review.
     var prApproved: Bool = false
     /// Populated once markdown loads, used for export/print.
-    var markdownSource: String = ""
+    @Binding var markdownSource: String
 
     @State private var isActioning = false
     @State private var pendingAction: LifecycleAction? = nil

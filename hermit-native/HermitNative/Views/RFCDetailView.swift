@@ -40,7 +40,7 @@ struct RFCDetailView: View {
         }
         .navigationTitle(rfc.title)
         .toolbar {
-            RFCLifecycleToolbar(rfc: rfc, markdownSource: markdown)
+            RFCLifecycleToolbar(rfc: rfc, markdownSource: $markdown)
             ToolbarItem(placement: .automatic) {
                 HStack(spacing: 4) {
                     Button { scrollToPrev() } label: {
