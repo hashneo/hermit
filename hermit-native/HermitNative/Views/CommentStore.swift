@@ -171,6 +171,24 @@ final class CommentStore: ObservableObject {
         await load()
     }
 
+    func unresolveThread(threadId: String) async throws {
+        guard let client, let prNumber else {
+            throw CommentStoreError.notConfigured
+        }
+        try await client.unresolveReviewThread(prNumber: prNumber, threadId: threadId)
+        // Optimistically mark open in local state; reload will sync.
+        comments = comments.map { t in
+            guard t.id == threadId else { return t }
+            return ReviewThread(
+                id: t.id, prNumber: t.prNumber, status: "open",
+                outdated: t.outdated,
+                filePath: t.filePath, lineStart: t.lineStart, lineEnd: t.lineEnd,
+                messages: t.messages
+            )
+        }
+        await load()
+    }
+
     /// Reply to an existing thread and refresh the local thread.
     func replyToThread(threadId: String, body: String) async throws {
         guard let client, let prNumber else {

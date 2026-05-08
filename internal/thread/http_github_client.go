@@ -534,6 +534,53 @@ mutation($threadID:ID!) {
 	return nil
 }
 
+// UnresolveThread re-opens a previously resolved review thread on GitHub.
+func (c *HTTPGitHubClient) UnresolveThread(ctx context.Context, githubThreadID string) error {
+	repositoryID, prNumber, commentID, ok := parseThreadHandle(githubThreadID)
+	if !ok {
+		return fmt.Errorf("invalid github thread handle")
+	}
+
+	owner, repo, baseURL, token, err := c.resolve(repositoryID)
+	if err != nil {
+		return err
+	}
+
+	if strings.Contains(baseURL, "api.github.com") {
+		nodeID, err := c.findThreadNodeID(ctx, baseURL, owner, repo, prNumber, commentID, token)
+		if err != nil {
+			return fmt.Errorf("find thread node id: %w", err)
+		}
+		return c.unresolveThreadGraphQL(ctx, baseURL, token, nodeID)
+	}
+
+	// Gitea: no-op at the API level; Service.Unresolve clears local state.
+	return nil
+}
+
+// unresolveThreadGraphQL calls the GitHub GraphQL unresolveReviewThread mutation.
+func (c *HTTPGitHubClient) unresolveThreadGraphQL(ctx context.Context, baseURL, token, threadNodeID string) error {
+	mutation := `
+mutation($threadID:ID!) {
+  unresolveReviewThread(input:{threadId:$threadID}) {
+    thread { id isResolved }
+  }
+}`
+	vars := map[string]any{"threadID": threadNodeID}
+
+	var resp struct {
+		Data   json.RawMessage `json:"data"`
+		Errors []struct{ Message string `json:"message"` } `json:"errors"`
+	}
+	if err := c.graphqlRequest(ctx, baseURL, token, mutation, vars, &resp); err != nil {
+		return err
+	}
+	if len(resp.Errors) > 0 {
+		return fmt.Errorf("graphql unresolveReviewThread: %s", resp.Errors[0].Message)
+	}
+	return nil
+}
+
 // graphqlRequest posts a GraphQL query/mutation to the GitHub GraphQL endpoint
 // derived from the REST baseURL (e.g. https://api.github.com → https://api.github.com/graphql).
 func (c *HTTPGitHubClient) graphqlRequest(ctx context.Context, baseURL, token, query string, variables map[string]any, out any) error {

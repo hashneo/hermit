@@ -96,6 +96,7 @@ type GitHubClient interface {
 	CreateThread(ctx context.Context, thread Thread) (threadID string, messageID string, err error)
 	ReplyThread(ctx context.Context, githubThreadID string, anchor Anchor, message Message) (commentID string, err error)
 	ResolveThread(ctx context.Context, githubThreadID string) error
+	UnresolveThread(ctx context.Context, githubThreadID string) error
 	DeleteComment(ctx context.Context, githubCommentID string) error
 }
 
@@ -271,6 +272,36 @@ func (s *Service) Resolve(ctx context.Context, req ResolveRequest) (Thread, erro
 		RepositoryID: req.RepositoryID,
 		PRNumber:     req.PRNumber,
 		Status:       ThreadStatusResolved,
+		Sync:         Sync{State: SyncStateSynced},
+	}, nil
+}
+
+func (s *Service) Unresolve(ctx context.Context, req ResolveRequest) (Thread, error) {
+	if err := s.client.UnresolveThread(ctx, req.ThreadID); err != nil {
+		return Thread{}, fmt.Errorf("unresolve github thread: %w", err)
+	}
+
+	// Clear local resolved state so the thread shows as open again.
+	if s.resolved != nil {
+		_ = s.resolved.MarkUnresolved(req.ThreadID)
+	}
+
+	threads, err := s.client.ListThreads(ctx, req.RepositoryID, req.PRNumber)
+	if err == nil {
+		now2 := s.now().UTC()
+		for _, t := range threads {
+			if t.GitHubThreadID == req.ThreadID {
+				t.Status = ThreadStatusOpen
+				t.Sync = Sync{State: SyncStateSynced, LastSynced: &now2}
+				return t, nil
+			}
+		}
+	}
+	return Thread{
+		ID:           req.ThreadID,
+		RepositoryID: req.RepositoryID,
+		PRNumber:     req.PRNumber,
+		Status:       ThreadStatusOpen,
 		Sync:         Sync{State: SyncStateSynced},
 	}, nil
 }

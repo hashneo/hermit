@@ -435,6 +435,30 @@ struct ThreadPopoverView: View {
 
                     replyField(for: root)
                 }
+
+                // Re-open button — shown to anyone when the thread is resolved.
+                if let root = rootThread, root.resolved {
+                    let isUnresolvingThis = resolving[root.id] == true
+                    Divider()
+                    HStack {
+                        Spacer()
+                        Button {
+                            Task { await unresolveThread(threadId: root.id) }
+                        } label: {
+                            if isUnresolvingThis {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Label("Re-open Conversation", systemImage: "arrow.uturn.left.circle")
+                                    .font(.subheadline)
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.orange)
+                        .disabled(isUnresolvingThis)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                    }
+                }
             }
         }
     }
@@ -517,12 +541,22 @@ struct ThreadPopoverView: View {
         deleting[threadId] = false
     }
 
-    // MARK: - Resolve thread
+    // MARK: - Resolve / Unresolve thread
 
     private func resolveThread(threadId: String) async {
         resolving[threadId] = true
         do {
             try await commentStore.resolveThread(threadId: threadId)
+        } catch {
+            errors[threadId] = error.localizedDescription
+        }
+        resolving[threadId] = false
+    }
+
+    private func unresolveThread(threadId: String) async {
+        resolving[threadId] = true
+        do {
+            try await commentStore.unresolveThread(threadId: threadId)
         } catch {
             errors[threadId] = error.localizedDescription
         }

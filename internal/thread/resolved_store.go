@@ -44,6 +44,13 @@ func (s *ResolvedStore) MarkResolved(threadID string) error {
 	return s.save()
 }
 
+func (s *ResolvedStore) MarkUnresolved(threadID string) error {
+	s.mu.Lock()
+	delete(s.ids, threadID)
+	s.mu.Unlock()
+	return s.save()
+}
+
 func (s *ResolvedStore) load() error {
 	data, err := os.ReadFile(s.path)
 	if err != nil {

@@ -87,6 +87,21 @@ func (c *InMemoryGitHubClient) ResolveThread(_ context.Context, githubThreadID s
 	return nil
 }
 
+func (c *InMemoryGitHubClient) UnresolveThread(_ context.Context, githubThreadID string) error {
+	if githubThreadID == "" {
+		return fmt.Errorf("github thread id is required")
+	}
+
+	c.mu.Lock()
+	if t, ok := c.threads[githubThreadID]; ok {
+		t.Status = ThreadStatusOpen
+		c.threads[githubThreadID] = t
+	}
+	c.mu.Unlock()
+
+	return nil
+}
+
 func (c *InMemoryGitHubClient) DeleteComment(_ context.Context, githubCommentID string) error {
 	if githubCommentID == "" {
 		return fmt.Errorf("github comment id is required")

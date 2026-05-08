@@ -113,6 +113,7 @@ func newMux(cfg config.Config) *http.ServeMux {
 	mux.HandleFunc("POST "+thread.ThreadsPath(), threadHandler.CreateThread)
 	mux.HandleFunc("POST "+thread.ThreadReplyPath(), threadHandler.ReplyThread)
 	mux.HandleFunc("POST "+thread.ThreadResolvePath(), threadHandler.ResolveThread)
+	mux.HandleFunc("POST "+thread.ThreadUnresolvePath(), threadHandler.UnresolveThread)
 	mux.HandleFunc("DELETE "+thread.ThreadDeletePath(), threadHandler.DeleteThread)
 	mux.HandleFunc("DELETE "+thread.ThreadMessageDeletePath(), threadHandler.DeleteMessage)
 

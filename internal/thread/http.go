@@ -204,6 +204,33 @@ func (h *Handler) ResolveThread(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, thread)
 }
 
+func (h *Handler) UnresolveThread(w http.ResponseWriter, r *http.Request) {
+	repositoryID, prNumber, threadID, ok := parseThreadPathParams(w, r)
+	if !ok {
+		return
+	}
+
+	thread, err := h.service.Unresolve(r.Context(), ResolveRequest{
+		RepositoryID: repositoryID,
+		PRNumber:     prNumber,
+		ThreadID:     threadID,
+	})
+	if err != nil {
+		if err.Error() == "thread not found" {
+			writeError(w, http.StatusNotFound, "thread_not_found", err.Error())
+			return
+		}
+		writeError(w, http.StatusBadGateway, "github_sync_failed", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, thread)
+}
+
+func ThreadUnresolvePath() string {
+	return fmt.Sprintf("%s/{threadId}/unresolve", ThreadsPath())
+}
+
 func parsePRPathParams(w http.ResponseWriter, r *http.Request) (string, int, bool) {
 	repositoryID := r.PathValue("repositoryId")
 	if repositoryID == "" {
