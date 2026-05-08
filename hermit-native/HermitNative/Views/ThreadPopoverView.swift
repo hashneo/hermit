@@ -1,17 +1,24 @@
 import SwiftUI
 
+// MARK: - ScrollContentHeightKey
+// Measures the natural height of the scroll content so the ScrollView can
+// size itself to fit, capped at a fraction of the window height.
+private struct ScrollContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 // MARK: - PopoverSizeModifier
-// Reads the screen size via a background GeometryReader anchored to the root
-// and sizes the popover to half the screen width, 85% of screen height.
+// Sizes the popover width; height is driven by content via ScrollContentHeightKey.
 
 private struct PopoverSizeModifier: ViewModifier {
     let containerWidth: CGFloat
-    let containerHeight: CGFloat
 
     func body(content: Content) -> some View {
         content
             .frame(width: max(480, containerWidth * 0.8))
-            .frame(maxHeight: containerHeight * 0.75)
     }
 }
 
@@ -111,6 +118,7 @@ struct ThreadPopoverView: View {
     @State private var resolving:  [String: Bool]  = [:]
     @State private var pendingDeleteThreadId: String? = nil
     @State private var pendingResolveThreadId: String? = nil
+    @State private var scrollContentHeight: CGFloat = 0
     @FocusState private var replyFocused: Bool
 
     private let lineHeight: CGFloat = 20   // approx .subheadline line height
@@ -132,7 +140,7 @@ struct ThreadPopoverView: View {
 
     var body: some View {
         threadContent
-            .modifier(PopoverSizeModifier(containerWidth: containerWidth, containerHeight: containerHeight))
+            .modifier(PopoverSizeModifier(containerWidth: containerWidth))
             .task { await commentStore.load() }
             // Reload every 15 s while the popover is open so new replies appear.
             .task {
@@ -201,7 +209,7 @@ struct ThreadPopoverView: View {
                     .foregroundStyle(.secondary)
                     .padding(14)
             } else {
-                // Messages scroll — uses remaining space after editor takes its share
+                // Messages scroll — sizes to content, capped at 75% of window height
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(allMessages, id: \.message.id) { item in
@@ -213,8 +221,15 @@ struct ThreadPopoverView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(key: ScrollContentHeightKey.self,
+                                                   value: geo.size.height)
+                        }
+                    )
                 }
-                .layoutPriority(1)
+                .frame(height: min(scrollContentHeight, containerHeight * 0.75))
+                .onPreferenceChange(ScrollContentHeightKey.self) { scrollContentHeight = $0 }
 
                 Divider()
 
@@ -367,8 +382,8 @@ struct ThreadPopoverView: View {
                         Text("Reply…")
                             .font(.subheadline)
                             .foregroundStyle(.tertiary)
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 5)
+                            .padding(.top, 8)
+                            .padding(.leading, 4)
                             .allowsHitTesting(false)
                     }
                     TextEditor(text: Binding(
