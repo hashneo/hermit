@@ -122,11 +122,11 @@ struct RFCLifecycleToolbar: ToolbarContent {
         isMainBranch && status == "accepted" && isPrivilegedPermission(callerPermission)
     }
 
-    /// hermit-cns: Approve PR is available when the caller has admin/maintain,
-    /// all review threads are resolved, and the PR has not already been approved.
+    /// hermit-cns: Approve PR is available to anyone — GitHub will reject
+    /// the request if the caller lacks permission. Gated only on all threads
+    /// being resolved and the PR not already having an approval.
     private var canApprovePR: Bool {
-        isPullRequest && isPrivilegedPermission(callerPermission) &&
-        allThreadsResolved && !prApproved
+        isPullRequest && allThreadsResolved && !prApproved
     }
 
     /// Terminal states — no transitions permitted from any role.
@@ -211,9 +211,7 @@ struct RFCLifecycleToolbar: ToolbarContent {
                         ? "You have already approved this PR"
                         : !allThreadsResolved
                             ? "Resolve all review comments before approving"
-                            : !isPrivilegedPermission(callerPermission)
-                                ? "Requires admin or maintain permission"
-                                : "Approve and mark this RFC PR ready to merge"
+                            : "Approve and mark this RFC PR ready to merge"
                 )
             }
 

@@ -27,6 +27,7 @@ struct RFCDetailView: View {
     @State private var errorMessage: String? = nil
     @State private var isReadingMode = false  // hermit-8q5
     @State private var isBehind = false       // true when PR branch is behind base
+    @State private var prApproved = false     // true when PR already has an approval review
 
     var body: some View {
         Group {
@@ -43,6 +44,14 @@ struct RFCDetailView: View {
         .toolbar {
             RFCLifecycleToolbar(
                 rfc: rfc,
+                onApprovePR: {
+                    guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient(),
+                          case .pullRequest(let pr) = rfc.source else { return }
+                    try? await client.approve(prNumber: pr.number)
+                    prApproved = true
+                },
+                allThreadsResolved: liveStore.comments.isEmpty ? false : liveStore.comments.allSatisfy { $0.resolved },
+                prApproved: prApproved,
                 isBehind: isBehind,
                 onUpdateBranch: {
                     guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient(),
@@ -191,6 +200,10 @@ struct RFCDetailView: View {
             // Check whether this branch is behind the base branch (best-effort; silent on failure).
             if let behind = try? await client.getMergeStatus(prNumber: pr.number) {
                 isBehind = behind
+            }
+            // Check whether the PR already has an approval review.
+            if let reviewState = try? await client.getReviewState(prNumber: pr.number) {
+                prApproved = reviewState.approved
             }
         } else {
             commentStore?.reset()
