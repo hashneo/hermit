@@ -540,7 +540,7 @@ struct ThreadPopoverView: View {
                         isDisabled: isSubmitting,
                         onFocusChange: { replyFocused = $0 }
                     )
-                    .frame(minHeight: 36)
+                    .frame(minHeight: 38)
                 }
                 .background(Color.secondary.opacity(0.07))
                 .cornerRadius(8)
