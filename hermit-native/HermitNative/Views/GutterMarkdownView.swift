@@ -226,7 +226,7 @@ struct GutterMarkdownView: View {
                         get: { popoverLine == line },
                         set: { if !$0 && !popoverIsEditing { popoverLine = nil } }
                     ), arrowEdge: .trailing) {
-                        ThreadPopoverView(line: line, lineEnd: lineEnd, isEditing: $popoverIsEditing, containerWidth: contentWidth, containerHeight: viewportHeight)
+                        ThreadPopoverView(line: line, lineEnd: lineEnd, isEditing: $popoverIsEditing, containerWidth: contentWidth, containerHeight: viewportHeight, blockRanges: blockRanges)
                             .environmentObject(commentStore)
                     }
 #else
@@ -234,7 +234,7 @@ struct GutterMarkdownView: View {
                         get: { popoverLine == line },
                         set: { if !$0 { popoverLine = nil } }
                     )) {
-                        ThreadPopoverView(line: line, lineEnd: lineEnd, isEditing: $popoverIsEditing, containerWidth: contentWidth, containerHeight: viewportHeight)
+                        ThreadPopoverView(line: line, lineEnd: lineEnd, isEditing: $popoverIsEditing, containerWidth: contentWidth, containerHeight: viewportHeight, blockRanges: blockRanges)
                             .environmentObject(commentStore)
                             .presentationDetents([.medium, .large])
                             .presentationDragIndicator(.visible)

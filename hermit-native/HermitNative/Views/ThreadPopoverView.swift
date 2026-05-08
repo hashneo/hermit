@@ -265,6 +265,7 @@ struct ThreadPopoverView: View {
     @Binding var isEditing: Bool
     var containerWidth: CGFloat = 600
     var containerHeight: CGFloat = 800
+    var blockRanges: [(start: Int, end: Int)] = []
     @EnvironmentObject private var commentStore: CommentStore
 
     @State private var replyText: [String: String] = [:]
@@ -285,7 +286,7 @@ struct ThreadPopoverView: View {
     }
 
     private var threads: [ReviewThread] {
-        commentStore.comments(for: line, lineEnd: lineEnd)
+        commentStore.comments(for: line, lineEnd: lineEnd, blockRanges: blockRanges)
     }
 
     private var rootThread: ReviewThread? { threads.first }
