@@ -266,6 +266,9 @@ struct ThreadPopoverView: View {
     var containerWidth: CGFloat = 600
     var containerHeight: CGFloat = 800
     var blockRanges: [(start: Int, end: Int)] = []
+    /// When set, only show threads matching the outdated flag.
+    /// nil = show all (legacy behaviour), true = outdated only, false = current only.
+    var outdatedOnly: Bool? = nil
     @EnvironmentObject private var commentStore: CommentStore
 
     @State private var replyText: [String: String] = [:]
@@ -286,7 +289,9 @@ struct ThreadPopoverView: View {
     }
 
     private var threads: [ReviewThread] {
-        commentStore.comments(for: line, lineEnd: lineEnd, blockRanges: blockRanges)
+        let all = commentStore.comments(for: line, lineEnd: lineEnd, blockRanges: blockRanges)
+        guard let filter = outdatedOnly else { return all }
+        return all.filter { $0.outdated == filter }
     }
 
     private var rootThread: ReviewThread? { threads.first }

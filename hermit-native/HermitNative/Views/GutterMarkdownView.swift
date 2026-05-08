@@ -29,6 +29,7 @@ struct GutterMarkdownView: View {
     // Hover-popover state — which line's thread popover is currently showing (hover-driven)
     @State private var popoverLine: Int? = nil
     @State private var popoverIsEditing: Bool = false
+    @State private var outdatedPopoverLine: Int? = nil
     @State private var contentWidth: CGFloat = 600
     @State private var contentHeight: CGFloat = 800
 
@@ -93,15 +94,19 @@ struct GutterMarkdownView: View {
     private func blockRow(_ block: MarkdownBlock) -> some View {
         let line = block.sourceLine
         let isSelected = selectedLine == line
-        let count = commentStore.count(for: line, lineEnd: block.sourceLineEnd, blockRanges: blockRanges)
         let threads = commentStore.comments(for: line, lineEnd: block.sourceLineEnd, blockRanges: blockRanges)
-        let allResolved = count > 0 && threads.allSatisfy { $0.resolved }
-        let anyOutdated = threads.contains { $0.outdated }
+        let count = threads.count
+        let outdatedThreads = threads.filter { $0.outdated }
+        let currentThreads  = threads.filter { !$0.outdated }
+        let outdatedCount   = outdatedThreads.count
+        let currentCount    = currentThreads.count
+        let allResolved     = count > 0 && threads.allSatisfy { $0.resolved }
+        let anyOutdated     = outdatedCount > 0
         let hasBubble = bubbleLine == line && !bubbleText.isEmpty
 
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 0) {
-                gutterCell(line: line, lineEnd: block.sourceLineEnd, count: count, isSelected: isSelected, allResolved: allResolved, anyOutdated: anyOutdated)
+                gutterCell(line: line, lineEnd: block.sourceLineEnd, count: count, outdatedCount: outdatedCount, currentCount: currentCount, isSelected: isSelected, allResolved: allResolved, anyOutdated: anyOutdated)
 
                 MarkdownBlockView(
                     block: block,
@@ -203,44 +208,25 @@ struct GutterMarkdownView: View {
 
     // MARK: - Gutter cell
 
-    private func gutterCell(line: Int, lineEnd: Int, count: Int, isSelected: Bool, allResolved: Bool = false, anyOutdated: Bool = false) -> some View {
-        ZStack {
+    private func gutterCell(line: Int, lineEnd: Int, count: Int, outdatedCount: Int = 0, currentCount: Int = 0, isSelected: Bool, allResolved: Bool = false, anyOutdated: Bool = false) -> some View {
+        let showSplit = outdatedCount > 0 && currentCount > 0
+        return ZStack {
             Rectangle()
                 .fill(isSelected ? Color.accentColor.opacity(0.08) : Color.clear)
 
             if count > 0 {
-                Text("\(count)")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(allResolved ? Color.green : anyOutdated ? Color.orange : Color.accentColor))
-                    .onTapGesture {
-                        if popoverLine == line {
-                            if !popoverIsEditing { popoverLine = nil }
-                        } else {
-                            popoverLine = line
-                        }
+                VStack(spacing: 2) {
+                    if showSplit {
+                        // Outdated pill — orange
+                        pill(label: "\(outdatedCount)", color: .orange, line: line, lineEnd: lineEnd, outdatedOnly: true)
+                        // Current/resolved pill
+                        let currentResolved = currentCount > 0 && (allResolved || outdatedCount == count)
+                        pill(label: "\(currentCount)", color: currentResolved ? .green : .accentColor, line: line, lineEnd: lineEnd, outdatedOnly: false)
+                    } else {
+                        // Single pill — existing behaviour
+                        pill(label: "\(count)", color: allResolved ? .green : anyOutdated ? .orange : .accentColor, line: line, lineEnd: lineEnd, outdatedOnly: nil)
                     }
-#if os(macOS)
-                    .popover(isPresented: Binding(
-                        get: { popoverLine == line },
-                        set: { if !$0 && !popoverIsEditing { popoverLine = nil } }
-                    ), arrowEdge: .trailing) {
-                        ThreadPopoverView(line: line, lineEnd: lineEnd, isEditing: $popoverIsEditing, containerWidth: contentWidth, containerHeight: viewportHeight, blockRanges: blockRanges)
-                            .environmentObject(commentStore)
-                    }
-#else
-                    .sheet(isPresented: Binding(
-                        get: { popoverLine == line },
-                        set: { if !$0 { popoverLine = nil } }
-                    )) {
-                        ThreadPopoverView(line: line, lineEnd: lineEnd, isEditing: $popoverIsEditing, containerWidth: contentWidth, containerHeight: viewportHeight, blockRanges: blockRanges)
-                            .environmentObject(commentStore)
-                            .presentationDetents([.medium, .large])
-                            .presentationDragIndicator(.visible)
-                    }
-#endif
+                }
             } else if isSelected {
                 Image(systemName: "plus.bubble.fill")
                     .font(.system(size: 11))
@@ -249,6 +235,49 @@ struct GutterMarkdownView: View {
         }
         .frame(width: gutterWidth)
         .frame(maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private func pill(label: String, color: Color, line: Int, lineEnd: Int, outdatedOnly: Bool?) -> some View {
+        let isOutdatedPill = outdatedOnly == true
+        let bindingLine = isOutdatedPill ? outdatedPopoverLine : popoverLine
+        let isPresented  = bindingLine == line
+        Text(label)
+            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(color))
+            .onTapGesture {
+                if isOutdatedPill {
+                    outdatedPopoverLine = (outdatedPopoverLine == line) ? nil : line
+                } else {
+                    if popoverLine == line { if !popoverIsEditing { popoverLine = nil } } else { popoverLine = line }
+                }
+            }
+#if os(macOS)
+            .popover(isPresented: Binding(
+                get: { isOutdatedPill ? outdatedPopoverLine == line : popoverLine == line },
+                set: { if !$0 { if isOutdatedPill { outdatedPopoverLine = nil } else if !popoverIsEditing { popoverLine = nil } } }
+            ), arrowEdge: .trailing) {
+                ThreadPopoverView(line: line, lineEnd: lineEnd, isEditing: $popoverIsEditing,
+                                  containerWidth: contentWidth, containerHeight: viewportHeight,
+                                  blockRanges: blockRanges, outdatedOnly: outdatedOnly)
+                    .environmentObject(commentStore)
+            }
+#else
+            .sheet(isPresented: Binding(
+                get: { isOutdatedPill ? outdatedPopoverLine == line : popoverLine == line },
+                set: { if !$0 { if isOutdatedPill { outdatedPopoverLine = nil } else { popoverLine = nil } } }
+            )) {
+                ThreadPopoverView(line: line, lineEnd: lineEnd, isEditing: $popoverIsEditing,
+                                  containerWidth: contentWidth, containerHeight: viewportHeight,
+                                  blockRanges: blockRanges, outdatedOnly: outdatedOnly)
+                    .environmentObject(commentStore)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+#endif
     }
 
     // MARK: - Inline compose
