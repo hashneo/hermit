@@ -401,10 +401,11 @@ struct ThreadPopoverView: View {
                 if let root = rootThread, !root.resolved {
                     let isOriginalAuthor = !commentStore.currentUserLogin.isEmpty &&
                                           root.user == commentStore.currentUserLogin
-                    let canResolve = isOriginalAuthor || root.outdated
+                    let isBotAuthor = root.user.hasSuffix("[bot]")
+                    let canResolve = isOriginalAuthor || root.outdated || isBotAuthor
                     let isResolvingThis = resolving[root.id] == true
 
-                    // Resolve button — shown to original author always; shown to anyone for outdated threads
+                    // Resolve button — shown to original author always; shown to anyone for outdated or bot-authored threads
                     if canResolve {
                         Divider()
                         HStack {
