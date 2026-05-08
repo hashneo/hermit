@@ -389,7 +389,7 @@ struct ThreadPopoverView: View {
                         set: { replyText[threadId] = $0 }
                     ))
                     .font(.subheadline)
-                    .frame(minHeight: 36, maxHeight: CGFloat(maxEditorLines) * 20 + 16)
+                    .frame(maxHeight: CGFloat(maxEditorLines) * 20 + 16)
                     .scrollContentBackground(.hidden)
                     .focused($replyFocused)
                     .disabled(isSubmitting)
