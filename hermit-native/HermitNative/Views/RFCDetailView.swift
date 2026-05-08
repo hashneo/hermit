@@ -5,11 +5,22 @@ import SwiftUI
 
 struct RFCDetailView: View {
     let rfc: RFC
-    var repo: Repository? = nil     // when set, scopes the API client to this repo
+    var repo: Repository? = nil
     var commentStore: CommentStore? = nil
     var onLineTapped: ((Int, Int) -> Void)? = nil
 
     @EnvironmentObject private var appState: AppState
+
+    // Observed so toolbar re-evaluates when comments load/change.
+    @ObservedObject private var liveStore: CommentStore
+
+    init(rfc: RFC, repo: Repository? = nil, commentStore: CommentStore? = nil, onLineTapped: ((Int, Int) -> Void)? = nil) {
+        self.rfc = rfc
+        self.repo = repo
+        self.commentStore = commentStore
+        self.onLineTapped = onLineTapped
+        self.liveStore = commentStore ?? CommentStore()
+    }
 
     @State private var markdown: String = ""
     @State private var isLoading = true
@@ -31,19 +42,17 @@ struct RFCDetailView: View {
         .toolbar {
             RFCLifecycleToolbar(rfc: rfc, markdownSource: markdown)
             ToolbarItem(placement: .automatic) {
-                let store = commentStore ?? CommentStore()
-                let lines = unresolvedLines(store: store)
                 HStack(spacing: 4) {
-                    Button { scrollToPrev(store: store) } label: {
+                    Button { scrollToPrev() } label: {
                         Image(systemName: "chevron.up")
                     }
-                    .disabled(lines.isEmpty)
-                    .help("Previous unresolved comment")
-                    Button { scrollToNext(store: store) } label: {
+                    .disabled(liveStore.commentedLines.isEmpty)
+                    .help("Previous comment")
+                    Button { scrollToNext() } label: {
                         Image(systemName: "chevron.down")
                     }
-                    .disabled(lines.isEmpty)
-                    .help("Next unresolved comment")
+                    .disabled(liveStore.commentedLines.isEmpty)
+                    .help("Next comment")
                 }
             }
             ToolbarItem(placement: .automatic) {
@@ -69,14 +78,10 @@ struct RFCDetailView: View {
 
     @State private var viewportHeight: CGFloat = 800
     @State private var scrollToLine: Int? = nil
-    @State private var commentStore_: CommentStore? = nil
 
-    private func unresolvedLines(store: CommentStore) -> [Int] { store.commentedLines }
-
-    private func scrollToPrev(store: CommentStore) {
-        let lines = unresolvedLines(store: store)
+    private func scrollToPrev() {
+        let lines = liveStore.commentedLines
         guard !lines.isEmpty else { return }
-        // find the line before current scrollToLine, wrap around
         if let current = scrollToLine, let idx = lines.firstIndex(of: current), idx > 0 {
             scrollToLine = lines[idx - 1]
         } else {
@@ -84,8 +89,8 @@ struct RFCDetailView: View {
         }
     }
 
-    private func scrollToNext(store: CommentStore) {
-        let lines = unresolvedLines(store: store)
+    private func scrollToNext() {
+        let lines = liveStore.commentedLines
         guard !lines.isEmpty else { return }
         if let current = scrollToLine, let idx = lines.firstIndex(of: current), idx < lines.count - 1 {
             scrollToLine = lines[idx + 1]
@@ -95,8 +100,7 @@ struct RFCDetailView: View {
     }
 
     private var rfcContentView: some View {
-        let store = commentStore ?? CommentStore()
-        return ScrollViewReader { proxy in
+        ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: true) {
                 GutterMarkdownView(
                     blocks: MarkdownParser.parse(markdown),
@@ -104,7 +108,7 @@ struct RFCDetailView: View {
                     viewportHeight: viewportHeight,
                     scrollToLine: $scrollToLine
                 )
-                .environmentObject(store)
+                .environmentObject(liveStore)
                 .padding(.horizontal, 32)
                 .padding(.vertical, 40)
                 .frame(maxWidth: 940, alignment: .leading)
