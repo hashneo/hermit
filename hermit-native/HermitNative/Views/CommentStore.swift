@@ -68,24 +68,46 @@ final class CommentStore: ObservableObject {
     }
 
     /// Sorted list of line numbers that have at least one thread (resolved or not).
-    var commentedLines: [Int] {
-        let lines = Set(comments.map { $0.lineStart })
+    /// Uses effectiveLine(for:blockRanges:) so orphaned threads are counted on their nearest block.
+    func commentedLines(blockRanges: [(start: Int, end: Int)]) -> [Int] {
+        let lines = Set(comments.map { effectiveLine(for: $0, blockRanges: blockRanges) })
         return lines.sorted()
     }
 
-    /// Returns the number of threads that overlap the given block line range [blockStart, blockEnd].
-    /// A thread overlaps when its anchor intersects the block: thread.lineStart <= blockEnd && thread.lineEnd >= blockStart.
-    func count(for line: Int, lineEnd: Int? = nil) -> Int {
-        let end = lineEnd ?? line
-        return comments.filter { $0.lineStart <= end && $0.lineEnd >= line }.count
+    /// Returns the number of threads that overlap or are snapped to the given block line range.
+    func count(for line: Int, lineEnd: Int? = nil, blockRanges: [(start: Int, end: Int)] = []) -> Int {
+        comments(for: line, lineEnd: lineEnd, blockRanges: blockRanges).count
     }
 
-    /// All threads overlapping the given block line range, oldest first.
-    func comments(for line: Int, lineEnd: Int? = nil) -> [ReviewThread] {
+    /// All threads overlapping or snapped to the given block line range, oldest first.
+    func comments(for line: Int, lineEnd: Int? = nil, blockRanges: [(start: Int, end: Int)] = []) -> [ReviewThread] {
         let end = lineEnd ?? line
         return comments
-            .filter { $0.lineStart <= end && $0.lineEnd >= line }
+            .filter {
+                // Standard overlap check
+                ($0.lineStart <= end && $0.lineEnd >= line) ||
+                // Snap orphaned thread to nearest block
+                (!blockRanges.isEmpty && effectiveLine(for: $0, blockRanges: blockRanges) == line)
+            }
             .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// Given a thread, returns the block start line it should be displayed on.
+    /// If the thread overlaps a block normally, returns thread.lineStart.
+    /// Otherwise snaps to the nearest block's start line.
+    func effectiveLine(for thread: ReviewThread, blockRanges: [(start: Int, end: Int)], fallbackRange: (Int, Int)? = nil) -> Int {
+        // Check normal overlap first
+        for r in blockRanges {
+            if thread.lineStart <= r.end && thread.lineEnd >= r.start {
+                return r.start
+            }
+        }
+        // No overlap — snap to nearest block by minimum distance
+        guard !blockRanges.isEmpty else { return thread.lineStart }
+        return blockRanges.min(by: {
+            min(abs($0.start - thread.lineStart), abs($0.end - thread.lineStart)) <
+            min(abs($1.start - thread.lineStart), abs($1.end - thread.lineStart))
+        })!.start
     }
 
     /// Post a new thread anchored to a block line range and refresh.

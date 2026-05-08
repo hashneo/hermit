@@ -39,6 +39,10 @@ struct GutterMarkdownView: View {
 
     private let gutterWidth: CGFloat = 28
 
+    private var blockRanges: [(start: Int, end: Int)] {
+        blocks.map { (start: $0.sourceLine, end: $0.sourceLineEnd) }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
@@ -89,8 +93,8 @@ struct GutterMarkdownView: View {
     private func blockRow(_ block: MarkdownBlock) -> some View {
         let line = block.sourceLine
         let isSelected = selectedLine == line
-        let count = commentStore.count(for: line, lineEnd: block.sourceLineEnd)
-        let threads = commentStore.comments(for: line, lineEnd: block.sourceLineEnd)
+        let count = commentStore.count(for: line, lineEnd: block.sourceLineEnd, blockRanges: blockRanges)
+        let threads = commentStore.comments(for: line, lineEnd: block.sourceLineEnd, blockRanges: blockRanges)
         let allResolved = count > 0 && threads.allSatisfy { $0.resolved }
         let hasBubble = bubbleLine == line && !bubbleText.isEmpty
 

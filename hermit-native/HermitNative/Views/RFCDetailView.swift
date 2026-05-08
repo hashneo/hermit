@@ -46,12 +46,12 @@ struct RFCDetailView: View {
                     Button { scrollToPrev() } label: {
                         Image(systemName: "chevron.up")
                     }
-                    .disabled(liveStore.commentedLines.isEmpty)
+                    .disabled(liveStore.commentedLines(blockRanges: blockRanges).isEmpty)
                     .help("Previous comment")
                     Button { scrollToNext() } label: {
                         Image(systemName: "chevron.down")
                     }
-                    .disabled(liveStore.commentedLines.isEmpty)
+                    .disabled(liveStore.commentedLines(blockRanges: blockRanges).isEmpty)
                     .help("Next comment")
                 }
             }
@@ -79,20 +79,21 @@ struct RFCDetailView: View {
     @State private var viewportHeight: CGFloat = 800
     @State private var scrollToLine: Int? = nil
 
+    private var parsedBlocks: [MarkdownBlock] { MarkdownParser.parse(markdown) }
+    private var blockRanges: [(start: Int, end: Int)] { parsedBlocks.map { (start: $0.sourceLine, end: $0.sourceLineEnd) } }
+
     private func scrollToPrev() {
-        let lines = liveStore.commentedLines
+        let lines = liveStore.commentedLines(blockRanges: blockRanges)
         guard !lines.isEmpty else { return }
         let current = scrollToLine ?? Int.max
-        // Find the last line strictly before current, wrap to last
         let prev = lines.last(where: { $0 < current }) ?? lines.last!
         scrollToLine = prev
     }
 
     private func scrollToNext() {
-        let lines = liveStore.commentedLines
+        let lines = liveStore.commentedLines(blockRanges: blockRanges)
         guard !lines.isEmpty else { return }
         let current = scrollToLine ?? -1
-        // Find the first line strictly after current, wrap to first
         let next = lines.first(where: { $0 > current }) ?? lines.first!
         scrollToLine = next
     }
