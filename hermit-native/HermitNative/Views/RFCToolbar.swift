@@ -583,41 +583,34 @@ struct RFCLifecycleToolbar: ToolbarContent {
         return pdfData as Data
     }
 
-    /// Generate PDF then send it to the system print dialog.
-    /// This avoids a second render pass and guarantees print output matches export.
+    /// Send the RFC to the system print dialog using an NSHostingView directly.
     @MainActor
     private func printRFC() {
-        guard let data = renderToPDF() else { return }
+        guard !markdownSource.isEmpty else { return }
+        let blocks = MarkdownParser.parse(markdownSource)
+        guard !blocks.isEmpty else { return }
 
-        // Write to a temp file so PDFDocument can load it.
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent(pdfFilename())
-        do {
-            try data.write(to: tmp)
-        } catch {
-            return
-        }
-
-        guard let pdfDoc = PDFDocument(url: tmp) else { return }
-        let pdfView = PDFView()
-        pdfView.document = pdfDoc
-        pdfView.autoScales = true
-        // Give the view a sensible frame so AppKit has something to print.
-        pdfView.frame = NSRect(x: 0, y: 0,
-                               width: Self.pageWidth,
-                               height: Self.pageHeight)
+        // Render into a tall off-screen hosting view, same as PDF export.
+        let content = PrintableRFCView(blocks: blocks, width: Self.printableWidth)
+        let host = NSHostingView(rootView: content)
+        host.frame = NSRect(x: 0, y: 0, width: Self.printableWidth, height: 100_000)
+        host.layout()
+        let contentHeight = max(host.fittingSize.height, 1)
+        host.frame = NSRect(x: 0, y: 0, width: Self.printableWidth, height: contentHeight)
+        host.layout()
 
         let printInfo = NSPrintInfo.shared.copy() as! NSPrintInfo
-        printInfo.topMargin    = 0
-        printInfo.bottomMargin = 0
-        printInfo.leftMargin   = 0
-        printInfo.rightMargin  = 0
+        printInfo.paperSize = NSSize(width: Self.pageWidth, height: Self.pageHeight)
+        printInfo.topMargin    = Self.pageMargin
+        printInfo.bottomMargin = Self.pageMargin
+        printInfo.leftMargin   = Self.pageMargin
+        printInfo.rightMargin  = Self.pageMargin
         printInfo.horizontalPagination = .fit
         printInfo.verticalPagination   = .automatic
         printInfo.isHorizontallyCentered = false
         printInfo.isVerticallyCentered   = false
 
-        let op = NSPrintOperation(view: pdfView, printInfo: printInfo)
+        let op = NSPrintOperation(view: host, printInfo: printInfo)
         op.showsPrintPanel    = true
         op.showsProgressPanel = true
         let rfcTitle = rfc.title
