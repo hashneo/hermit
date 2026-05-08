@@ -1,4 +1,72 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+
+// MARK: - GrowingTextView
+// UIViewRepresentable wrapping UITextView so we control textContainerInset
+// exactly — eliminating the alignment gap between cursor and placeholder
+// that SwiftUI's TextEditor introduces.
+
+private struct GrowingTextView: UIViewRepresentable {
+    @Binding var text: String
+    var placeholder: String = "Reply…"
+    var font: UIFont = .preferredFont(forTextStyle: .subheadline)
+    var maxLines: Int = 5
+    var isDisabled: Bool = false
+    var onFocusChange: (Bool) -> Void = { _ in }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UITextView {
+        let tv = UITextView()
+        tv.delegate = context.coordinator
+        tv.font = font
+        tv.backgroundColor = .clear
+        tv.textContainerInset = UIEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
+        tv.textContainer.lineFragmentPadding = 0
+        tv.isScrollEnabled = false
+        tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let ph = UILabel()
+        ph.text = placeholder
+        ph.font = font
+        ph.textColor = .tertiaryLabel
+        ph.tag = 999
+        ph.translatesAutoresizingMaskIntoConstraints = false
+        tv.addSubview(ph)
+        NSLayoutConstraint.activate([
+            ph.topAnchor.constraint(equalTo: tv.topAnchor, constant: 8),
+            ph.leadingAnchor.constraint(equalTo: tv.leadingAnchor, constant: 4),
+        ])
+
+        return tv
+    }
+
+    func updateUIView(_ tv: UITextView, context: Context) {
+        if tv.text != text { tv.text = text }
+        tv.isEditable = !isDisabled
+        tv.isSelectable = !isDisabled
+        if let ph = tv.viewWithTag(999) { ph.isHidden = !text.isEmpty }
+
+        let lineH = font.lineHeight
+        let insets = tv.textContainerInset.top + tv.textContainerInset.bottom
+        let maxH = lineH * CGFloat(maxLines) + insets
+        tv.isScrollEnabled = tv.contentSize.height > maxH
+    }
+
+    class Coordinator: NSObject, UITextViewDelegate {
+        var parent: GrowingTextView
+        init(_ parent: GrowingTextView) { self.parent = parent }
+
+        func textViewDidChange(_ tv: UITextView) {
+            parent.text = tv.text
+            tv.invalidateIntrinsicContentSize()
+        }
+        func textViewDidBeginEditing(_ tv: UITextView) { parent.onFocusChange(true) }
+        func textViewDidEndEditing(_ tv: UITextView)   { parent.onFocusChange(false) }
+    }
+}
+#endif
 
 // MARK: - ScrollContentHeightKey
 // Measures the natural height of the scroll content so the ScrollView can
@@ -374,35 +442,47 @@ struct ThreadPopoverView: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                ZStack(alignment: .topLeading) {
-                    if text.isEmpty {
-                        Text("Reply…")
-                            .font(.subheadline)
-                            .foregroundStyle(.tertiary)
-                            // Match TextEditor's internal insets: top ~8, leading ~5
-                            .padding(.top, 8)
-                            .padding(.leading, 5)
-                            .allowsHitTesting(false)
+                Group {
+#if canImport(UIKit)
+                    GrowingTextView(
+                        text: Binding(
+                            get: { replyText[threadId] ?? "" },
+                            set: { replyText[threadId] = $0 }
+                        ),
+                        maxLines: maxEditorLines,
+                        isDisabled: isSubmitting,
+                        onFocusChange: { replyFocused = $0 }
+                    )
+#else
+                    ZStack(alignment: .topLeading) {
+                        if text.isEmpty {
+                            Text("Reply…")
+                                .font(.subheadline)
+                                .foregroundStyle(.tertiary)
+                                .padding(.top, 8)
+                                .padding(.leading, 5)
+                                .allowsHitTesting(false)
+                        }
+                        TextEditor(text: Binding(
+                            get: { replyText[threadId] ?? "" },
+                            set: { replyText[threadId] = $0 }
+                        ))
+                        .font(.subheadline)
+                        .frame(maxHeight: CGFloat(maxEditorLines) * 20 + 16)
+                        .scrollContentBackground(.hidden)
+                        .focused($replyFocused)
+                        .disabled(isSubmitting)
                     }
-                    TextEditor(text: Binding(
-                        get: { replyText[threadId] ?? "" },
-                        set: { replyText[threadId] = $0 }
-                    ))
-                    .font(.subheadline)
-                    .frame(maxHeight: CGFloat(maxEditorLines) * 20 + 16)
-                    .scrollContentBackground(.hidden)
-                    .focused($replyFocused)
-                    .disabled(isSubmitting)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+#endif
                 }
-                .padding(.horizontal, 4)
-                .padding(.vertical, 2)
                 .background(Color.secondary.opacity(0.07))
                 .cornerRadius(8)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(replyFocused ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.25))
                 )
-                .onTapGesture { replyFocused = true }
 
                 VStack(spacing: 6) {
                     // Clear button
