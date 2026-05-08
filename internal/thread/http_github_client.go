@@ -32,103 +32,145 @@ func NewHTTPGitHubClient(resolver RepositoryAccessResolver, registryBase map[str
 // (which can occur when the fingerprinted block text itself contains line breaks).
 var anchorRE = regexp.MustCompile(`(?s)<!--\s*hermit-anchor\s+lines:(\d+)-(\d+)\s+fp:(.+?)\s*-->`)
 
+// prComment is the JSON shape returned by GET /repos/{owner}/{repo}/pulls/{pr}/comments.
+type prComment struct {
+	ID               int64     `json:"id"`
+	InReplyToID      int64     `json:"in_reply_to_id"`
+	Body             string    `json:"body"`
+	User             struct{ Login string `json:"login"` } `json:"user"`
+	Path             string    `json:"path"`
+	Position         int       `json:"position"`
+	OriginalPosition int       `json:"original_position"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
 func (c *HTTPGitHubClient) ListThreads(ctx context.Context, repositoryID string, prNumber int) ([]Thread, error) {
 	owner, repo, baseURL, token, err := c.resolve(repositoryID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Fetch all reviews for the PR.
-	reviewsURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews", strings.TrimRight(baseURL, "/"), owner, repo, prNumber)
-	reviewsData, err := c.getJSON(ctx, reviewsURL, token)
+	// Fetch all inline PR review comments in one call.
+	// GET /repos/{owner}/{repo}/pulls/{pr}/comments returns every comment
+	// including replies (which have in_reply_to_id set).  This is the only
+	// endpoint that includes replies — the reviews/{id}/comments sub-endpoint
+	// only returns root comments that were submitted as part of a formal review.
+	allComments, err := c.fetchAllPRComments(ctx, baseURL, owner, repo, prNumber, token)
 	if err != nil {
-		return nil, fmt.Errorf("list reviews: %w", err)
+		return nil, fmt.Errorf("list pr comments: %w", err)
 	}
 
-	var reviews []struct {
-		ID int64 `json:"id"`
-	}
-	if err := json.Unmarshal(reviewsData, &reviews); err != nil {
-		return nil, fmt.Errorf("decode reviews: %w", err)
-	}
+	// Separate roots from replies and index both by ID.
+	roots   := make([]prComment, 0)
+	replies := make(map[int64][]prComment) // keyed by root comment ID
+	byID    := make(map[int64]prComment)
 
-	var threads []Thread
-	for _, review := range reviews {
-		commentsURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews/%d/comments",
-			strings.TrimRight(baseURL, "/"), owner, repo, prNumber, review.ID)
-		commentsData, err := c.getJSON(ctx, commentsURL, token)
-		if err != nil {
-			continue
-		}
-
-		var comments []struct {
-			ID               int64     `json:"id"`
-			Body             string    `json:"body"`
-			User             struct{ Login string `json:"login"` } `json:"user"`
-			Path             string    `json:"path"`
-			Position         int       `json:"position"`
-			OriginalPosition int       `json:"original_position"`
-			CreatedAt        time.Time `json:"created_at"`
-			UpdatedAt        time.Time `json:"updated_at"`
-		}
-		if err := json.Unmarshal(commentsData, &comments); err != nil {
-			continue
-		}
-
-		for _, c := range comments {
-			commentID := strconv.FormatInt(c.ID, 10)
-			threadHandle := makeThreadHandle(repositoryID, prNumber, commentID)
-
-			// Strip the hermit-anchor metadata from the visible body.
-			visibleBody := strings.TrimSpace(anchorRE.ReplaceAllString(c.Body, ""))
-
-			// Parse anchor metadata if present.
-			anchor := Anchor{FilePath: c.Path}
-			if m := anchorRE.FindStringSubmatch(c.Body); m != nil {
-				if ls, err := strconv.Atoi(m[1]); err == nil {
-					anchor.LineStart = ls
+	for _, c := range allComments {
+		byID[c.ID] = c
+		if c.InReplyToID == 0 {
+			roots = append(roots, c)
+		} else {
+			// Walk up to find the true root (replies can be nested > 1 level deep).
+			rootID := c.InReplyToID
+			for {
+				if parent, ok := byID[rootID]; ok && parent.InReplyToID != 0 {
+					rootID = parent.InReplyToID
+				} else {
+					break
 				}
-				if le, err := strconv.Atoi(m[2]); err == nil {
-					anchor.LineEnd = le
-				}
-				anchor.TextFingerprint = m[3]
-			} else {
-				// No hermit metadata — use the diff position from Gitea.
-				// Gitea returns `position` (diff hunk position) for all inline
-				// comments. Fall back to original_position if position is zero
-				// (e.g. outdated comments on stale diffs).
-				pos := c.Position
-				if pos == 0 {
-					pos = c.OriginalPosition
-				}
-				anchor.LineStart = pos
-				anchor.LineEnd = pos
 			}
-
-			thread := Thread{
-				ID:             threadHandle,
-				RepositoryID:   repositoryID,
-				PRNumber:       prNumber,
-				Status:         ThreadStatusOpen,
-				Anchor:         anchor,
-				GitHubThreadID: threadHandle,
-				Messages: []Message{{
-					ID:              fmt.Sprintf("ghc-%s", commentID),
-					Author:          c.User.Login,
-					Body:            visibleBody,
-					SourceSystem:    "github",
-					GitHubCommentID: commentID,
-					CreatedAt:       c.CreatedAt,
-				}},
-				Sync:      Sync{State: SyncStateSynced},
-				CreatedAt: c.CreatedAt,
-				UpdatedAt: c.UpdatedAt,
-			}
-			threads = append(threads, thread)
+			replies[rootID] = append(replies[rootID], c)
 		}
+	}
+
+	threads := make([]Thread, 0, len(roots))
+	for _, root := range roots {
+		commentID  := strconv.FormatInt(root.ID, 10)
+		threadHandle := makeThreadHandle(repositoryID, prNumber, commentID)
+
+		visibleBody := strings.TrimSpace(anchorRE.ReplaceAllString(root.Body, ""))
+
+		anchor := Anchor{FilePath: root.Path}
+		if m := anchorRE.FindStringSubmatch(root.Body); m != nil {
+			if ls, err2 := strconv.Atoi(m[1]); err2 == nil { anchor.LineStart = ls }
+			if le, err2 := strconv.Atoi(m[2]); err2 == nil { anchor.LineEnd   = le }
+			anchor.TextFingerprint = m[3]
+		} else {
+			pos := root.Position
+			if pos == 0 { pos = root.OriginalPosition }
+			anchor.LineStart = pos
+			anchor.LineEnd   = pos
+		}
+
+		msgs := []Message{{
+			ID:              fmt.Sprintf("ghc-%s", commentID),
+			Author:          root.User.Login,
+			Body:            visibleBody,
+			SourceSystem:    "github",
+			GitHubCommentID: commentID,
+			CreatedAt:       root.CreatedAt,
+		}}
+
+		// Append replies in chronological order.
+		for _, r := range replies[root.ID] {
+			rID := strconv.FormatInt(r.ID, 10)
+			msgs = append(msgs, Message{
+				ID:              fmt.Sprintf("ghc-%s", rID),
+				Author:          r.User.Login,
+				Body:            strings.TrimSpace(anchorRE.ReplaceAllString(r.Body, "")),
+				SourceSystem:    "github",
+				GitHubCommentID: rID,
+				CreatedAt:       r.CreatedAt,
+			})
+		}
+		// Sort replies by created time.
+		for i := 1; i < len(msgs); i++ {
+			for j := i; j > 1 && msgs[j].CreatedAt.Before(msgs[j-1].CreatedAt); j-- {
+				msgs[j], msgs[j-1] = msgs[j-1], msgs[j]
+			}
+		}
+
+		threads = append(threads, Thread{
+			ID:             threadHandle,
+			RepositoryID:   repositoryID,
+			PRNumber:       prNumber,
+			Status:         ThreadStatusOpen,
+			Anchor:         anchor,
+			GitHubThreadID: threadHandle,
+			Messages:       msgs,
+			Sync:           Sync{State: SyncStateSynced},
+			CreatedAt:      root.CreatedAt,
+			UpdatedAt:      root.UpdatedAt,
+		})
 	}
 
 	return threads, nil
+}
+
+// fetchAllPRComments pages through GET /repos/{owner}/{repo}/pulls/{pr}/comments
+// returning all inline review comments including replies.
+func (c *HTTPGitHubClient) fetchAllPRComments(ctx context.Context, baseURL, owner, repo string, prNumber int, token string) ([]prComment, error) {
+	var all []prComment
+	page := 1
+	for {
+		u := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/comments?per_page=100&page=%d",
+			strings.TrimRight(baseURL, "/"), owner, repo, prNumber, page)
+		data, err := c.getJSON(ctx, u, token)
+		if err != nil {
+			return nil, err
+		}
+		var batch []prComment
+		if err := json.Unmarshal(data, &batch); err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < 100 {
+			break
+		}
+		page++
+	}
+	return all, nil
 }
 
 func (c *HTTPGitHubClient) getJSON(ctx context.Context, url, token string) ([]byte, error) {
@@ -244,7 +286,7 @@ func (c *HTTPGitHubClient) postGitHubCommentReply(ctx context.Context, baseURL, 
 
 
 func (c *HTTPGitHubClient) ResolveThread(ctx context.Context, githubThreadID string) error {
-	repositoryID, prNumber, originalCommentID, ok := parseThreadHandle(githubThreadID)
+	repositoryID, prNumber, commentID, ok := parseThreadHandle(githubThreadID)
 	if !ok {
 		return fmt.Errorf("invalid github thread handle")
 	}
@@ -254,12 +296,170 @@ func (c *HTTPGitHubClient) ResolveThread(ctx context.Context, githubThreadID str
 		return err
 	}
 
-	resolveBody := "Marked resolved in Hermit."
-	if originalCommentID != "" {
-		resolveBody = fmt.Sprintf("Marked resolved in Hermit for root comment %s.", originalCommentID)
+	// GitHub has a native GraphQL mutation for resolving review threads.
+	// Use it when talking to api.github.com so the thread shows as resolved
+	// on github.com. Gitea has no equivalent — we skip the upstream call
+	// there and rely on the local ResolvedStore overlay in Service.
+	if strings.Contains(baseURL, "api.github.com") {
+		nodeID, err := c.findThreadNodeID(ctx, baseURL, owner, repo, prNumber, commentID, token)
+		if err != nil {
+			return fmt.Errorf("find thread node id: %w", err)
+		}
+		return c.resolveThreadGraphQL(ctx, baseURL, token, nodeID)
 	}
-	_, err = c.postIssueComment(ctx, baseURL, owner, repo, prNumber, token, resolveBody)
-	return err
+
+	// Gitea: no-op at the API level; Service.Resolve persists state locally.
+	return nil
+}
+
+// findThreadNodeID queries GitHub GraphQL to find the PullRequestReviewThread
+// node ID that contains the comment with the given database ID.
+// GitHub REST comments carry a numeric databaseId; GraphQL threads have a
+// base64 node ID (PRRT_...) that the resolveReviewThread mutation requires.
+func (c *HTTPGitHubClient) findThreadNodeID(ctx context.Context, baseURL, owner, repo string, prNumber int, commentID, token string) (string, error) {
+	dbID, err := strconv.ParseInt(commentID, 10, 64)
+	if err != nil {
+		return "", fmt.Errorf("comment id %q is not numeric: %w", commentID, err)
+	}
+
+	// Page through review threads until we find one whose first comment
+	// matches our database ID. 100 threads per page is the GraphQL max.
+	query := `
+query($owner:String!, $repo:String!, $pr:Int!, $cursor:String) {
+  repository(owner:$owner, name:$repo) {
+    pullRequest(number:$pr) {
+      reviewThreads(first:100, after:$cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          comments(first:1) {
+            nodes { databaseId }
+          }
+        }
+      }
+    }
+  }
+}`
+
+	type pageInfo struct {
+		HasNextPage bool   `json:"hasNextPage"`
+		EndCursor   string `json:"endCursor"`
+	}
+	type threadNode struct {
+		ID       string `json:"id"`
+		Comments struct {
+			Nodes []struct {
+				DatabaseID int64 `json:"databaseId"`
+			} `json:"nodes"`
+		} `json:"comments"`
+	}
+	type gqlResp struct {
+		Data struct {
+			Repository struct {
+				PullRequest struct {
+					ReviewThreads struct {
+						PageInfo pageInfo     `json:"pageInfo"`
+						Nodes    []threadNode `json:"nodes"`
+					} `json:"reviewThreads"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+
+	var cursor *string
+	for {
+		vars := map[string]any{
+			"owner":  owner,
+			"repo":   repo,
+			"pr":     prNumber,
+			"cursor": cursor,
+		}
+		var resp gqlResp
+		if err := c.graphqlRequest(ctx, baseURL, token, query, vars, &resp); err != nil {
+			return "", err
+		}
+		if len(resp.Errors) > 0 {
+			return "", fmt.Errorf("graphql: %s", resp.Errors[0].Message)
+		}
+
+		threads := resp.Data.Repository.PullRequest.ReviewThreads
+		for _, t := range threads.Nodes {
+			if len(t.Comments.Nodes) > 0 && t.Comments.Nodes[0].DatabaseID == dbID {
+				return t.ID, nil
+			}
+		}
+
+		if !threads.PageInfo.HasNextPage {
+			break
+		}
+		cursor = &threads.PageInfo.EndCursor
+	}
+
+	return "", fmt.Errorf("no review thread found containing comment %s", commentID)
+}
+
+// resolveThreadGraphQL calls the GitHub GraphQL resolveReviewThread mutation.
+func (c *HTTPGitHubClient) resolveThreadGraphQL(ctx context.Context, baseURL, token, threadNodeID string) error {
+	mutation := `
+mutation($threadID:ID!) {
+  resolveReviewThread(input:{threadId:$threadID}) {
+    thread { id isResolved }
+  }
+}`
+	vars := map[string]any{"threadID": threadNodeID}
+
+	var resp struct {
+		Data   json.RawMessage `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := c.graphqlRequest(ctx, baseURL, token, mutation, vars, &resp); err != nil {
+		return err
+	}
+	if len(resp.Errors) > 0 {
+		return fmt.Errorf("graphql resolveReviewThread: %s", resp.Errors[0].Message)
+	}
+	return nil
+}
+
+// graphqlRequest posts a GraphQL query/mutation to the GitHub GraphQL endpoint
+// derived from the REST baseURL (e.g. https://api.github.com → https://api.github.com/graphql).
+func (c *HTTPGitHubClient) graphqlRequest(ctx context.Context, baseURL, token, query string, variables map[string]any, out any) error {
+	gqlURL := strings.TrimRight(baseURL, "/") + "/graphql"
+	// api.github.com/graphql is the correct endpoint; normalise in case baseURL
+	// already ends with /v3 or similar.
+	gqlURL = strings.Replace(gqlURL, "/v3/graphql", "/graphql", 1)
+
+	payload, err := json.Marshal(map[string]any{
+		"query":     query,
+		"variables": variables,
+	})
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, gqlURL, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("graphql HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
 }
 
 func (c *HTTPGitHubClient) postIssueComment(ctx context.Context, baseURL, owner, repo string, prNumber int, token, body string) (string, error) {

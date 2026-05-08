@@ -72,11 +72,13 @@ struct GutterMarkdownView: View {
         let line = block.sourceLine
         let isSelected = selectedLine == line
         let count = commentStore.count(for: line, lineEnd: block.sourceLineEnd)
+        let threads = commentStore.comments(for: line, lineEnd: block.sourceLineEnd)
+        let allResolved = count > 0 && threads.allSatisfy { $0.resolved }
         let hasBubble = bubbleLine == line && !bubbleText.isEmpty
 
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 0) {
-                gutterCell(line: line, lineEnd: block.sourceLineEnd, count: count, isSelected: isSelected)
+                gutterCell(line: line, lineEnd: block.sourceLineEnd, count: count, isSelected: isSelected, allResolved: allResolved)
 
                 MarkdownBlockView(
                     block: block,
@@ -178,7 +180,7 @@ struct GutterMarkdownView: View {
 
     // MARK: - Gutter cell
 
-    private func gutterCell(line: Int, lineEnd: Int, count: Int, isSelected: Bool) -> some View {
+    private func gutterCell(line: Int, lineEnd: Int, count: Int, isSelected: Bool, allResolved: Bool = false) -> some View {
         ZStack {
             Rectangle()
                 .fill(isSelected ? Color.accentColor.opacity(0.08) : Color.clear)
@@ -189,7 +191,7 @@ struct GutterMarkdownView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.accentColor))
+                    .background(Capsule().fill(allResolved ? Color.green : Color.accentColor))
                     .onTapGesture {
                         if popoverLine == line {
                             if !popoverIsEditing { popoverLine = nil }

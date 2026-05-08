@@ -11,7 +11,11 @@ private struct PopoverSizeModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .frame(width: max(480, containerWidth * 0.8))
-            .frame(maxHeight: containerHeight * 0.9)
+            // fixedSize lets the popover shrink to content height after resolve
+            // hides the reply field, but a minHeight prevents it collapsing too
+            // small when there are only a few messages.
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(minHeight: min(400, containerHeight * 0.5), maxHeight: containerHeight * 0.9)
     }
 }
 
@@ -205,8 +209,9 @@ struct ThreadPopoverView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(allMessages, id: \.message.id) { item in
-                            messageRow(item.message, resolved: item.resolved, threadId: item.threadId)
-                            if item.message.id != allMessages.last?.message.id {
+                            let isLast = item.message.id == allMessages.last?.message.id
+                            messageRow(item.message, resolved: item.resolved, threadId: item.threadId, isLast: isLast)
+                            if !isLast {
                                 Divider().padding(.horizontal, 14)
                             }
                         }
@@ -268,10 +273,10 @@ struct ThreadPopoverView: View {
 
     // MARK: - Message row
 
-    private func messageRow(_ message: ThreadMessage, resolved: Bool, threadId: String) -> some View {
+    private func messageRow(_ message: ThreadMessage, resolved: Bool, threadId: String, isLast: Bool) -> some View {
         let isMyComment = !commentStore.currentUserLogin.isEmpty &&
                           message.author == commentStore.currentUserLogin
-        let canDelete = isMyComment && !resolved
+        let canDelete = isMyComment && !resolved && isLast
         let isDeletingThis = deleting[threadId] == true
 
         return HStack(alignment: .top, spacing: 8) {

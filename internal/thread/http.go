@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 type Handler struct {
@@ -126,16 +127,58 @@ func (h *Handler) DeleteThread(w http.ResponseWriter, r *http.Request) {
 		RepositoryID: repositoryID,
 		PRNumber:     prNumber,
 		ThreadID:     threadID,
+		Actor:        r.Header.Get("X-Hermit-User"),
 	}); err != nil {
-		if err.Error() == "thread not found" {
-			writeError(w, http.StatusNotFound, "thread_not_found", err.Error())
-			return
-		}
-		writeError(w, http.StatusBadGateway, "github_sync_failed", err.Error())
+		h.writeDeleteError(w, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// DeleteMessage deletes a specific message from a thread.
+// The message must be the last one in the thread, and must have been authored
+// by the user identified in the X-Hermit-User request header.
+//
+// Route: DELETE /repositories/{repositoryId}/pull-requests/{prNumber}/threads/{threadId}/messages/{messageId}
+func (h *Handler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
+	repositoryID, prNumber, threadID, ok := parseThreadPathParams(w, r)
+	if !ok {
+		return
+	}
+
+	messageID := r.PathValue("messageId")
+	if messageID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_message_id", "messageId path parameter is required")
+		return
+	}
+
+	if err := h.service.Delete(r.Context(), DeleteRequest{
+		RepositoryID: repositoryID,
+		PRNumber:     prNumber,
+		ThreadID:     threadID,
+		MessageID:    messageID,
+		Actor:        r.Header.Get("X-Hermit-User"),
+	}); err != nil {
+		h.writeDeleteError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) writeDeleteError(w http.ResponseWriter, err error) {
+	msg := err.Error()
+	switch {
+	case msg == "thread not found" || msg == "message not found in thread":
+		writeError(w, http.StatusNotFound, "not_found", msg)
+	case msg == "only the last message in a thread can be deleted":
+		writeError(w, http.StatusConflict, "not_last_message", msg)
+	case strings.HasPrefix(msg, "cannot delete a message authored"):
+		writeError(w, http.StatusForbidden, "forbidden", msg)
+	default:
+		writeError(w, http.StatusBadGateway, "github_sync_failed", msg)
+	}
 }
 
 func (h *Handler) ResolveThread(w http.ResponseWriter, r *http.Request) {
@@ -221,6 +264,10 @@ func ThreadResolvePath() string {
 
 func ThreadDeletePath() string {
 	return fmt.Sprintf("%s/{threadId}", ThreadsPath())
+}
+
+func ThreadMessageDeletePath() string {
+	return fmt.Sprintf("%s/{threadId}/messages/{messageId}", ThreadsPath())
 }
 
 func decodeOptionalJSONBody(r *http.Request, payload any) error {

@@ -106,3 +106,73 @@ func TestThreadLifecycleCreateReplyResolve(t *testing.T) {
 		t.Fatalf("listed thread status = %q, want %q", listed.Items[0].Status, ThreadStatusResolved)
 	}
 }
+
+// TestDeleteMessage_Guards verifies that:
+//   - deleting a non-last message is rejected (409)
+//   - deleting someone else's message is rejected (403)
+//   - deleting your own last message succeeds (204)
+func TestDeleteMessage_Guards(t *testing.T) {
+	service := NewService(nil)
+	handler := NewHandler(service)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+ThreadsPath(), handler.ListThreads)
+	mux.HandleFunc("POST "+ThreadsPath(), handler.CreateThread)
+	mux.HandleFunc("POST "+ThreadReplyPath(), handler.ReplyThread)
+	mux.HandleFunc("DELETE "+ThreadDeletePath(), handler.DeleteThread)
+	mux.HandleFunc("DELETE "+ThreadMessageDeletePath(), handler.DeleteMessage)
+
+	// Create a thread as alice.
+	body := bytes.NewBufferString(`{"anchor":{"line_start":1,"line_end":1,"text_fingerprint":"fp1"},"body":"alice root"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/repositories/repo-1/pull-requests/3/threads", body)
+	req.Header.Set("X-Hermit-User", "alice")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	}
+	var created Thread
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	rootMsgID := created.Messages[0].ID
+	threadID := created.ID
+
+	// Add a reply as bob.
+	body = bytes.NewBufferString(`{"body":"bob reply"}`)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/repositories/repo-1/pull-requests/3/threads/"+threadID+"/reply", body)
+	req.Header.Set("X-Hermit-User", "bob")
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reply: %d %s", rec.Code, rec.Body)
+	}
+	var replied Thread
+	_ = json.Unmarshal(rec.Body.Bytes(), &replied)
+	replyMsgID := replied.Messages[1].ID
+
+	// --- Guard: cannot delete non-last message (alice's root, bob's reply is last) ---
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/repositories/repo-1/pull-requests/3/threads/"+threadID+"/messages/"+rootMsgID, nil)
+	req.Header.Set("X-Hermit-User", "alice")
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("delete non-last: want 409, got %d %s", rec.Code, rec.Body)
+	}
+
+	// --- Guard: cannot delete someone else's last message ---
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/repositories/repo-1/pull-requests/3/threads/"+threadID+"/messages/"+replyMsgID, nil)
+	req.Header.Set("X-Hermit-User", "alice") // alice trying to delete bob's reply
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("delete other's message: want 403, got %d %s", rec.Code, rec.Body)
+	}
+
+	// --- Success: bob deletes their own last message ---
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/repositories/repo-1/pull-requests/3/threads/"+threadID+"/messages/"+replyMsgID, nil)
+	req.Header.Set("X-Hermit-User", "bob")
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete own last: want 204, got %d %s", rec.Code, rec.Body)
+	}
+}

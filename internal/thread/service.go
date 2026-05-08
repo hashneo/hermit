@@ -82,6 +82,12 @@ type DeleteRequest struct {
 	RepositoryID string
 	PRNumber     int
 	ThreadID     string
+	// MessageID is the specific message to delete (format "ghc-{commentID}").
+	// If empty the entire thread root is deleted (legacy behaviour).
+	MessageID string
+	// Actor is the GitHub login of the requesting user. The service enforces
+	// that the caller may only delete their own messages.
+	Actor string
 }
 
 type GitHubClient interface {
@@ -94,9 +100,12 @@ type GitHubClient interface {
 
 // Service is a stateless pass-through to the GitHub client.
 // GitHub is the sole source of truth — no in-memory cache, no file store.
+// resolved is an optional local overlay for thread IDs marked resolved by
+// Hermit when the upstream platform (Gitea) has no native resolve concept.
 type Service struct {
-	client GitHubClient
-	now    func() time.Time
+	client   GitHubClient
+	resolved *ResolvedStore
+	now      func() time.Time
 }
 
 func NewService(client GitHubClient) *Service {
@@ -104,6 +113,13 @@ func NewService(client GitHubClient) *Service {
 		client = NewInMemoryGitHubClient()
 	}
 	return &Service{client: client, now: time.Now}
+}
+
+func NewServiceWithDataDir(client GitHubClient, dataDir string) *Service {
+	if client == nil {
+		client = NewInMemoryGitHubClient()
+	}
+	return &Service{client: client, resolved: NewResolvedStore(dataDir), now: time.Now}
 }
 
 // NewServiceWithStore exists only for test compatibility — store is ignored.
@@ -117,6 +133,15 @@ func (s *Service) List(repositoryID string, prNumber int) []Thread {
 	threads, err := s.client.ListThreads(ctx, repositoryID, prNumber)
 	if err != nil {
 		return nil
+	}
+	// Overlay locally-stored resolved status for platforms (e.g. Gitea) that
+	// don't have a native resolve concept.
+	if s.resolved != nil {
+		for i := range threads {
+			if s.resolved.IsResolved(threads[i].ID) {
+				threads[i].Status = ThreadStatusResolved
+			}
+		}
 	}
 	return threads
 }
@@ -218,8 +243,15 @@ func (s *Service) Reply(ctx context.Context, req ReplyRequest) (Thread, error) {
 	return Thread{}, fmt.Errorf("thread not found after reply")
 }
 
-func (s *Service) Resolve(ctx context.Context, req ResolveRequest) (Thread, error) {	if err := s.client.ResolveThread(ctx, req.ThreadID); err != nil {
+func (s *Service) Resolve(ctx context.Context, req ResolveRequest) (Thread, error) {
+	if err := s.client.ResolveThread(ctx, req.ThreadID); err != nil {
 		return Thread{}, fmt.Errorf("resolve github thread: %w", err)
+	}
+
+	// Persist the resolved state locally so future ListThreads calls reflect it
+	// even on platforms (e.g. Gitea) that have no native resolve concept.
+	if s.resolved != nil {
+		_ = s.resolved.MarkResolved(req.ThreadID)
 	}
 
 	threads, err := s.client.ListThreads(ctx, req.RepositoryID, req.PRNumber)
@@ -242,12 +274,79 @@ func (s *Service) Resolve(ctx context.Context, req ResolveRequest) (Thread, erro
 	}, nil
 }
 
-// Delete removes the root comment of a thread from GitHub/Gitea.
-// The threadID is the GitHub thread handle (e.g. "{repoID}:{prNumber}:{commentID}").
-// Only the root comment is deleted — the whole thread disappears when the root
-// review comment is removed from GitHub's perspective.
+// Delete removes a single message from a thread on GitHub/Gitea.
+//
+// Rules enforced:
+//   - The message must be the last one in the thread (preserves conversation history).
+//   - If Actor is set, the message must have been authored by that user.
+//
+// If MessageID is empty the thread root comment ID is derived from ThreadID
+// and the same rules apply (legacy single-comment delete path).
 func (s *Service) Delete(ctx context.Context, req DeleteRequest) error {
-	if err := s.client.DeleteComment(ctx, req.ThreadID); err != nil {
+	// Fetch the current thread state so we can apply guards.
+	threads, err := s.client.ListThreads(ctx, req.RepositoryID, req.PRNumber)
+	if err != nil {
+		return fmt.Errorf("fetch threads for delete: %w", err)
+	}
+
+	var target *Thread
+	for i := range threads {
+		if threads[i].ID == req.ThreadID {
+			target = &threads[i]
+			break
+		}
+	}
+	if target == nil {
+		return fmt.Errorf("thread not found")
+	}
+
+	if len(target.Messages) == 0 {
+		return fmt.Errorf("thread has no messages")
+	}
+
+	// Determine which message is being deleted.
+	messageID := req.MessageID
+	if messageID == "" {
+		// Legacy: derive from root comment encoded in ThreadID.
+		_, _, commentID, ok := parseThreadHandle(req.ThreadID)
+		if !ok {
+			return fmt.Errorf("invalid thread id")
+		}
+		messageID = fmt.Sprintf("ghc-%s", commentID)
+	}
+
+	// Find the message.
+	msgIdx := -1
+	for i, m := range target.Messages {
+		if m.ID == messageID {
+			msgIdx = i
+			break
+		}
+	}
+	if msgIdx < 0 {
+		return fmt.Errorf("message not found in thread")
+	}
+
+	// Guard: must be the last message to preserve conversation history.
+	if msgIdx != len(target.Messages)-1 {
+		return fmt.Errorf("only the last message in a thread can be deleted")
+	}
+
+	msg := target.Messages[msgIdx]
+
+	// Guard: caller may only delete their own messages.
+	if req.Actor != "" && msg.Author != req.Actor {
+		return fmt.Errorf("cannot delete a message authored by %q", msg.Author)
+	}
+
+	// Strip the "ghc-" prefix to get the raw GitHub comment ID.
+	rawCommentID := strings.TrimPrefix(msg.GitHubCommentID, "ghc-")
+	if rawCommentID == "" {
+		rawCommentID = msg.GitHubCommentID
+	}
+	commentHandle := makeThreadHandle(req.RepositoryID, req.PRNumber, rawCommentID)
+
+	if err := s.client.DeleteComment(ctx, commentHandle); err != nil {
 		return fmt.Errorf("delete github comment: %w", err)
 	}
 	return nil

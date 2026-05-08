@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
 type resolverStub struct {
@@ -89,5 +91,146 @@ func TestHTTPGitHubClient_CreateThreadPostsInlineComment(t *testing.T) {
 	}
 	if threadID != "repo_1:42:9001" {
 		t.Fatalf("unexpected thread handle: %q", threadID)
+	}
+}
+
+func TestHTTPGitHubClient_ListThreads_IncludesReplies(t *testing.T) {
+	t0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	t1 := t0.Add(time.Minute)
+
+	// Simulate GET /pulls/7/comments returning a root comment and one reply.
+	comments := []map[string]any{
+		{
+			"id":                int64(100),
+			"in_reply_to_id":    int64(0),
+			"body":              "root comment",
+			"user":              map[string]any{"login": "alice"},
+			"path":              "docs-cms/rfcs/rfc-001.md",
+			"position":          5,
+			"original_position": 5,
+			"created_at":        t0.Format(time.RFC3339),
+			"updated_at":        t0.Format(time.RFC3339),
+		},
+		{
+			"id":                int64(101),
+			"in_reply_to_id":    int64(100),
+			"body":              "reply comment",
+			"user":              map[string]any{"login": "bob"},
+			"path":              "docs-cms/rfcs/rfc-001.md",
+			"position":          5,
+			"original_position": 5,
+			"created_at":        t1.Format(time.RFC3339),
+			"updated_at":        t1.Format(time.RFC3339),
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/pulls/7/comments" {
+			_ = json.NewEncoder(w).Encode(comments)
+		} else {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewHTTPGitHubClient(
+		resolverStub{owner: "owner", name: "repo", reg: "gh", token: "tok", found: true},
+		map[string]string{"gh": server.URL},
+	)
+
+	threads, err := client.ListThreads(context.Background(), "repo_1", 7)
+	if err != nil {
+		t.Fatalf("ListThreads error: %v", err)
+	}
+	if len(threads) != 1 {
+		t.Fatalf("expected 1 thread, got %d", len(threads))
+	}
+	th := threads[0]
+	if len(th.Messages) != 2 {
+		t.Fatalf("expected 2 messages (root + reply), got %d", len(th.Messages))
+	}
+	if th.Messages[0].Author != "alice" {
+		t.Fatalf("expected first message author alice, got %q", th.Messages[0].Author)
+	}
+	if th.Messages[1].Author != "bob" {
+		t.Fatalf("expected second message author bob, got %q", th.Messages[1].Author)
+	}
+}
+
+// TestResolveThread_GitHub verifies that ResolveThread on a github.com repo:
+//  1. Queries the GraphQL endpoint to find the thread node ID by comment databaseId.
+//  2. Calls the resolveReviewThread mutation with that node ID.
+//  3. Returns nil on success.
+func TestResolveThread_GitHub(t *testing.T) {
+	const (
+		commentDBID  = int64(9876)
+		threadNodeID = "PRRT_kwDOABC123"
+	)
+
+	findCalled   := false
+	mutateCalled := false
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/graphql") {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var body struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+
+		if strings.Contains(body.Query, "reviewThreads") {
+			findCalled = true
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"repository": map[string]any{
+						"pullRequest": map[string]any{
+							"reviewThreads": map[string]any{
+								"pageInfo": map[string]any{"hasNextPage": false, "endCursor": ""},
+								"nodes": []map[string]any{{
+									"id": threadNodeID,
+									"comments": map[string]any{
+										"nodes": []map[string]any{{"databaseId": commentDBID}},
+									},
+								}},
+							},
+						},
+					},
+				},
+			})
+		} else if strings.Contains(body.Query, "resolveReviewThread") {
+			mutateCalled = true
+			if v, ok := body.Variables["threadID"]; !ok || v != threadNodeID {
+				t.Fatalf("mutation threadID = %v, want %q", v, threadNodeID)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"resolveReviewThread": map[string]any{
+						"thread": map[string]any{"id": threadNodeID, "isResolved": true},
+					},
+				},
+			})
+		} else {
+			t.Fatalf("unexpected graphql query: %s", body.Query)
+		}
+	}))
+	defer server.Close()
+
+	// Embed "api.github.com" in the base URL so the GitHub code path is taken.
+	client := NewHTTPGitHubClient(
+		resolverStub{owner: "owner", name: "repo", reg: "gh", token: "tok", found: true},
+		map[string]string{"gh": server.URL + "/api.github.com"},
+	)
+
+	err := client.ResolveThread(context.Background(), "repo_1:42:9876")
+	if err != nil {
+		t.Fatalf("ResolveThread error: %v", err)
+	}
+	if !findCalled {
+		t.Fatal("expected GraphQL reviewThreads query to be called")
+	}
+	if !mutateCalled {
+		t.Fatal("expected resolveReviewThread mutation to be called")
 	}
 }
