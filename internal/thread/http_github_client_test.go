@@ -127,6 +127,20 @@ func TestHTTPGitHubClient_ListThreads_IncludesReplies(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/pulls/7/comments" {
 			_ = json.NewEncoder(w).Encode(comments)
+		} else if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/graphql") {
+			// Return an empty resolved-threads response for the new fetchResolvedThreadIDs call.
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"repository": map[string]any{
+						"pullRequest": map[string]any{
+							"reviewThreads": map[string]any{
+								"pageInfo": map[string]any{"hasNextPage": false, "endCursor": ""},
+								"nodes":    []any{},
+							},
+						},
+					},
+				},
+			})
 		} else {
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}

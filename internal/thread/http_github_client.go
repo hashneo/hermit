@@ -86,6 +86,11 @@ func (c *HTTPGitHubClient) ListThreads(ctx context.Context, repositoryID string,
 		}
 	}
 
+	// Fetch resolved status for every review thread from GitHub GraphQL.
+	// Map: root comment database ID → isResolved.  Best-effort; on failure
+	// we fall back to treating everything as open (ResolvedStore overlay still applies).
+	resolvedByRootID, _ := c.fetchResolvedThreadIDs(ctx, baseURL, owner, repo, prNumber, token)
+
 	threads := make([]Thread, 0, len(roots))
 	for _, root := range roots {
 		commentID  := strconv.FormatInt(root.ID, 10)
@@ -145,11 +150,16 @@ func (c *HTTPGitHubClient) ListThreads(ctx context.Context, repositoryID string,
 			}
 		}
 
+		status := ThreadStatusOpen
+		if resolvedByRootID[root.ID] {
+			status = ThreadStatusResolved
+		}
+
 		threads = append(threads, Thread{
 			ID:             threadHandle,
 			RepositoryID:   repositoryID,
 			PRNumber:       prNumber,
-			Status:         ThreadStatusOpen,
+			Status:         status,
 			Outdated:       outdated,
 			Anchor:         anchor,
 			GitHubThreadID: threadHandle,
@@ -186,6 +196,89 @@ func (c *HTTPGitHubClient) fetchAllPRComments(ctx context.Context, baseURL, owne
 		page++
 	}
 	return all, nil
+}
+
+// fetchResolvedThreadIDs queries GitHub GraphQL for all review threads on the PR
+// and returns a map of root-comment database ID → isResolved.
+// This allows ListThreads to reflect resolved state set on GitHub.com, not just
+// via Hermit's local ResolvedStore.
+func (c *HTTPGitHubClient) fetchResolvedThreadIDs(ctx context.Context, baseURL, owner, repo string, prNumber int, token string) (map[int64]bool, error) {
+	query := `
+query($owner:String!, $repo:String!, $pr:Int!, $cursor:String) {
+  repository(owner:$owner, name:$repo) {
+    pullRequest(number:$pr) {
+      reviewThreads(first:100, after:$cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          isResolved
+          comments(first:1) {
+            nodes { databaseId }
+          }
+        }
+      }
+    }
+  }
+}`
+
+	type pageInfo struct {
+		HasNextPage bool   `json:"hasNextPage"`
+		EndCursor   string `json:"endCursor"`
+	}
+	type threadNode struct {
+		IsResolved bool `json:"isResolved"`
+		Comments   struct {
+			Nodes []struct {
+				DatabaseID int64 `json:"databaseId"`
+			} `json:"nodes"`
+		} `json:"comments"`
+	}
+	type gqlResp struct {
+		Data struct {
+			Repository struct {
+				PullRequest struct {
+					ReviewThreads struct {
+						PageInfo pageInfo     `json:"pageInfo"`
+						Nodes    []threadNode `json:"nodes"`
+					} `json:"reviewThreads"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+		Errors []struct{ Message string `json:"message"` } `json:"errors"`
+	}
+
+	result := make(map[int64]bool)
+	var cursor *string
+
+	for {
+		vars := map[string]any{
+			"owner": owner, "repo": repo, "pr": prNumber,
+		}
+		if cursor != nil {
+			vars["cursor"] = *cursor
+		}
+
+		var resp gqlResp
+		if err := c.graphqlRequest(ctx, baseURL, token, query, vars, &resp); err != nil {
+			return nil, err
+		}
+		if len(resp.Errors) > 0 {
+			return nil, fmt.Errorf("graphql: %s", resp.Errors[0].Message)
+		}
+
+		for _, node := range resp.Data.Repository.PullRequest.ReviewThreads.Nodes {
+			if len(node.Comments.Nodes) > 0 {
+				result[node.Comments.Nodes[0].DatabaseID] = node.IsResolved
+			}
+		}
+
+		pi := resp.Data.Repository.PullRequest.ReviewThreads.PageInfo
+		if !pi.HasNextPage {
+			break
+		}
+		cursor = &pi.EndCursor
+	}
+
+	return result, nil
 }
 
 func (c *HTTPGitHubClient) getJSON(ctx context.Context, url, token string) ([]byte, error) {

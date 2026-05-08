@@ -86,20 +86,20 @@ final class CommentStore: ObservableObject {
         comments(for: line, lineEnd: lineEnd, blockRanges: blockRanges).count
     }
 
-    /// All threads overlapping or snapped to the given block line range, oldest first.
+    /// All threads that belong to the given block, oldest first.
+    /// A thread "belongs" to the block whose start line equals effectiveLine(thread).
+    /// This guarantees each thread appears on exactly one gutter badge regardless
+    /// of how wide the block's line range is.
     func comments(for line: Int, lineEnd: Int? = nil, blockRanges: [(start: Int, end: Int)] = []) -> [ReviewThread] {
-        let end = lineEnd ?? line
+        guard !blockRanges.isEmpty else {
+            // No block layout info — fall back to simple line overlap.
+            let end = lineEnd ?? line
+            return comments
+                .filter { !$0.outdated && $0.lineStart <= end && $0.lineEnd >= line }
+                .sorted { $0.createdAt < $1.createdAt }
+        }
         return comments
-            .filter {
-                // Outdated threads must go through the snap path — their lineStart
-                // is from the old diff and must not match via normal line overlap.
-                if $0.outdated {
-                    return !blockRanges.isEmpty && effectiveLine(for: $0, blockRanges: blockRanges) == line
-                }
-                // Non-outdated: normal overlap check first, then snap for any that missed all blocks.
-                return ($0.lineStart <= end && $0.lineEnd >= line) ||
-                       (!blockRanges.isEmpty && effectiveLine(for: $0, blockRanges: blockRanges) == line)
-            }
+            .filter { effectiveLine(for: $0, blockRanges: blockRanges) == line }
             .sorted { $0.createdAt < $1.createdAt }
     }
 
