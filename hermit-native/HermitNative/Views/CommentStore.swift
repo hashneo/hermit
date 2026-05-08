@@ -67,6 +67,13 @@ final class CommentStore: ObservableObject {
         isLoading = false
     }
 
+    /// Sorted list of line numbers that have at least one unresolved thread.
+    var unresolvedLines: [Int] {
+        let unresolved = comments.filter { !$0.resolved }
+        let lines = Set(unresolved.map { $0.lineStart })
+        return lines.sorted()
+    }
+
     /// Returns the number of threads that overlap the given block line range [blockStart, blockEnd].
     /// A thread overlaps when its anchor intersects the block: thread.lineStart <= blockEnd && thread.lineEnd >= blockStart.
     func count(for line: Int, lineEnd: Int? = nil) -> Int {

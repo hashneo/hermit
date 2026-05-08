@@ -31,6 +31,22 @@ struct RFCDetailView: View {
         .toolbar {
             RFCLifecycleToolbar(rfc: rfc, markdownSource: markdown)
             ToolbarItem(placement: .automatic) {
+                let store = commentStore ?? CommentStore()
+                let lines = unresolvedLines(store: store)
+                HStack(spacing: 4) {
+                    Button { scrollToPrev(store: store) } label: {
+                        Image(systemName: "chevron.up")
+                    }
+                    .disabled(lines.isEmpty)
+                    .help("Previous unresolved comment")
+                    Button { scrollToNext(store: store) } label: {
+                        Image(systemName: "chevron.down")
+                    }
+                    .disabled(lines.isEmpty)
+                    .help("Next unresolved comment")
+                }
+            }
+            ToolbarItem(placement: .automatic) {
                 Button {
                     withAnimation { isReadingMode.toggle() }
                 } label: {
@@ -52,27 +68,60 @@ struct RFCDetailView: View {
     }
 
     @State private var viewportHeight: CGFloat = 800
+    @State private var scrollToLine: Int? = nil
+    @State private var commentStore_: CommentStore? = nil
+
+    private func unresolvedLines(store: CommentStore) -> [Int] { store.unresolvedLines }
+
+    private func scrollToPrev(store: CommentStore) {
+        let lines = unresolvedLines(store: store)
+        guard !lines.isEmpty else { return }
+        // find the line before current scrollToLine, wrap around
+        if let current = scrollToLine, let idx = lines.firstIndex(of: current), idx > 0 {
+            scrollToLine = lines[idx - 1]
+        } else {
+            scrollToLine = lines.last
+        }
+    }
+
+    private func scrollToNext(store: CommentStore) {
+        let lines = unresolvedLines(store: store)
+        guard !lines.isEmpty else { return }
+        if let current = scrollToLine, let idx = lines.firstIndex(of: current), idx < lines.count - 1 {
+            scrollToLine = lines[idx + 1]
+        } else {
+            scrollToLine = lines.first
+        }
+    }
 
     private var rfcContentView: some View {
         let store = commentStore ?? CommentStore()
-        let gutterView = GutterMarkdownView(
-            blocks: MarkdownParser.parse(markdown),
-            onLineTapped: onLineTapped,
-            viewportHeight: viewportHeight
-        )
-        return ScrollView(.vertical, showsIndicators: true) {
-            gutterView
+        return ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: true) {
+                GutterMarkdownView(
+                    blocks: MarkdownParser.parse(markdown),
+                    onLineTapped: onLineTapped,
+                    viewportHeight: viewportHeight,
+                    scrollToLine: $scrollToLine
+                )
                 .environmentObject(store)
                 .padding(.horizontal, 32)
                 .padding(.vertical, 40)
                 .frame(maxWidth: 940, alignment: .leading)
                 .frame(maxWidth: .infinity)
+            }
+            .background(GeometryReader { proxy in
+                Color.clear
+                    .onAppear { viewportHeight = proxy.size.height }
+                    .onChange(of: proxy.size.height) { _, h in viewportHeight = h }
+            })
+            .onChange(of: scrollToLine) { _, line in
+                guard let line else { return }
+                withAnimation(.easeInOut(duration: 0.4)) {
+                    proxy.scrollTo("line-\(line)", anchor: .center)
+                }
+            }
         }
-        .background(GeometryReader { proxy in
-            Color.clear
-                .onAppear { viewportHeight = proxy.size.height }
-                .onChange(of: proxy.size.height) { _, h in viewportHeight = h }
-        })
     }
 
     private func loadContent() async {

@@ -10,6 +10,15 @@ struct GutterMarkdownView: View {
     let blocks: [MarkdownBlock]
     var onLineTapped: ((Int, Int) -> Void)? = nil
     var viewportHeight: CGFloat = 800
+    /// Set to a line number to scroll that block into view, then reset to nil.
+    @Binding var scrollToLine: Int?
+
+    init(blocks: [MarkdownBlock], onLineTapped: ((Int, Int) -> Void)? = nil, viewportHeight: CGFloat = 800, scrollToLine: Binding<Int?> = .constant(nil)) {
+        self.blocks = blocks
+        self.onLineTapped = onLineTapped
+        self.viewportHeight = viewportHeight
+        self._scrollToLine = scrollToLine
+    }
 
     @EnvironmentObject private var commentStore: CommentStore
     @State private var selectedLine: Int? = nil
@@ -34,6 +43,7 @@ struct GutterMarkdownView: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 blockRow(block)
+                    .id("line-\(block.sourceLine)")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
