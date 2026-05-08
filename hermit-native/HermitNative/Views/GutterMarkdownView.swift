@@ -57,6 +57,14 @@ struct GutterMarkdownView: View {
                 contentHeight = s.height
             }
         })
+        .onChange(of: scrollToLine) { _, line in
+            guard let line else { return }
+            // Open the popover for the navigated line after a short delay
+            // so the scroll animation has time to complete first.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                popoverLine = line
+            }
+        }
     }
 
     // MARK: - Quote handler
