@@ -71,7 +71,7 @@ struct RFCDetailView: View {
     @State private var scrollToLine: Int? = nil
     @State private var commentStore_: CommentStore? = nil
 
-    private func unresolvedLines(store: CommentStore) -> [Int] { store.unresolvedLines }
+    private func unresolvedLines(store: CommentStore) -> [Int] { store.commentedLines }
 
     private func scrollToPrev(store: CommentStore) {
         let lines = unresolvedLines(store: store)

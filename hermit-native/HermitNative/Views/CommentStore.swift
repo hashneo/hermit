@@ -67,10 +67,9 @@ final class CommentStore: ObservableObject {
         isLoading = false
     }
 
-    /// Sorted list of line numbers that have at least one unresolved thread.
-    var unresolvedLines: [Int] {
-        let unresolved = comments.filter { !$0.resolved }
-        let lines = Set(unresolved.map { $0.lineStart })
+    /// Sorted list of line numbers that have at least one thread (resolved or not).
+    var commentedLines: [Int] {
+        let lines = Set(comments.map { $0.lineStart })
         return lines.sorted()
     }
 
