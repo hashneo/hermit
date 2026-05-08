@@ -29,6 +29,10 @@ protocol HermitClientProtocol: Actor {
     func getReviewState(prNumber: Int) async throws -> ReviewState
     func approve(prNumber: Int) async throws
 
+    // Merge / branch-update status
+    func getMergeStatus(prNumber: Int) async throws -> Bool   // true = branch is behind base
+    func updateBranch(prNumber: Int) async throws
+
     // Current authenticated user
     func fetchCurrentUser() async throws -> String   // returns GitHub login
 
@@ -264,6 +268,22 @@ actor HermitAPIClient: HermitClientProtocol {
         _ = try await post(u, body: [:])
     }
 
+    // MARK: - getMergeStatus / updateBranch
+
+    func getMergeStatus(prNumber: Int) async throws -> Bool {
+        let repoID = try await repoID()
+        let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/review/merge-status")
+        let data = try await get(u)
+        struct Response: Decodable { let behind: Bool }
+        return try JSONDecoder().decode(Response.self, from: data).behind
+    }
+
+    func updateBranch(prNumber: Int) async throws {
+        let repoID = try await repoID()
+        let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/review/update-branch")
+        _ = try await put(u, body: [:])
+    }
+
     // MARK: - submitForReview
 
     func submitForReview(rfcID: String) async throws -> SubmitForReviewResult {
@@ -400,6 +420,18 @@ actor HermitAPIClient: HermitClientProtocol {
         // 204 No Content is success; checkResponse handles errors
         if let http = resp as? HTTPURLResponse, http.statusCode == 204 { return }
         try checkResponse(resp, data: data)
+    }
+
+    private func put(_ url: URL, body: [String: Any]) async throws -> Data {
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(config.pat)", forHTTPHeaderField: "Authorization")
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, resp) = try await session.data(for: req)
+        if let http = resp as? HTTPURLResponse, http.statusCode == 204 { return data }
+        try checkResponse(resp, data: data)
+        return data
     }
 
     private func checkResponse(_ response: URLResponse, data: Data) throws {

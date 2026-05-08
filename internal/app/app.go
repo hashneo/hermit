@@ -97,10 +97,12 @@ func newMux(cfg config.Config) *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/rfcs/{rfcId}", rfcHandler.RenderRepositoryRFCByID)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rfcs/{rfcId}/submit-for-review", rfcHandler.SubmitForReview)
 
-	reviewService := review.NewService(nil)
+	reviewService := review.NewServiceWithMergeClient(nil, review.NewHTTPMergeClient(repositoryService, registryBaseURLs))
 	reviewHandler := review.NewHandler(reviewService)
 	mux.HandleFunc("GET "+review.ReviewStatePath(), reviewHandler.GetReviewState)
 	mux.HandleFunc("POST "+review.ReviewApprovePath(), reviewHandler.Approve)
+	mux.HandleFunc("GET "+review.ReviewMergeStatusPath(), reviewHandler.GetMergeStatus)
+	mux.HandleFunc("PUT "+review.ReviewUpdateBranchPath(), reviewHandler.UpdateBranch)
 
 	threadService := thread.NewServiceWithDataDir(
 		thread.NewHTTPGitHubClient(repositoryService, registryBaseURLs),

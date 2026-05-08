@@ -39,21 +39,29 @@ type GitHubClient interface {
 }
 
 type Service struct {
-	mu     sync.RWMutex
-	state  map[string]State
-	client GitHubClient
-	now    func() time.Time
+	mu          sync.RWMutex
+	state       map[string]State
+	client      GitHubClient
+	mergeClient MergeClient
+	now         func() time.Time
 }
 
 func NewService(client GitHubClient) *Service {
+	return NewServiceWithMergeClient(client, nil)
+}
+
+func NewServiceWithMergeClient(client GitHubClient, mergeClient MergeClient) *Service {
 	if client == nil {
 		client = NewInMemoryGitHubClient()
 	}
-
+	if mergeClient == nil {
+		mergeClient = &InMemoryMergeClient{}
+	}
 	return &Service{
-		state:  make(map[string]State),
-		client: client,
-		now:    time.Now,
+		state:       make(map[string]State),
+		client:      client,
+		mergeClient: mergeClient,
+		now:         time.Now,
 	}
 }
 
@@ -99,4 +107,12 @@ func (s *Service) Get(repositoryID string, prNumber int) State {
 
 func (s *Service) key(repositoryID string, prNumber int) string {
 	return fmt.Sprintf("%s:%d", repositoryID, prNumber)
+}
+
+func (s *Service) GetMergeStatus(ctx context.Context, repositoryID string, prNumber int) (MergeStatus, error) {
+	return s.mergeClient.GetMergeStatus(ctx, repositoryID, prNumber)
+}
+
+func (s *Service) UpdateBranch(ctx context.Context, repositoryID string, prNumber int) error {
+	return s.mergeClient.UpdateBranch(ctx, repositoryID, prNumber)
 }

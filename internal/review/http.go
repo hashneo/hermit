@@ -90,6 +90,39 @@ func writeError(w http.ResponseWriter, code int, errCode, message string) {
 	})
 }
 
+func (h *Handler) GetMergeStatus(w http.ResponseWriter, r *http.Request) {
+	repositoryID, prNumber, ok := parsePRPathParams(w, r)
+	if !ok {
+		return
+	}
+	status, err := h.service.GetMergeStatus(r.Context(), repositoryID, prNumber)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "merge_status_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (h *Handler) UpdateBranch(w http.ResponseWriter, r *http.Request) {
+	repositoryID, prNumber, ok := parsePRPathParams(w, r)
+	if !ok {
+		return
+	}
+	if err := h.service.UpdateBranch(r.Context(), repositoryID, prNumber); err != nil {
+		writeError(w, http.StatusBadGateway, "update_branch_failed", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func ReviewMergeStatusPath() string {
+	return fmt.Sprintf("%s/merge-status", ReviewStatePath())
+}
+
+func ReviewUpdateBranchPath() string {
+	return fmt.Sprintf("%s/update-branch", ReviewStatePath())
+}
+
 func ReviewStatePath() string {
 	return "/api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/review"
 }

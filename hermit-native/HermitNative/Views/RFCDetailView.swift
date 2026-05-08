@@ -26,6 +26,7 @@ struct RFCDetailView: View {
     @State private var isLoading = true
     @State private var errorMessage: String? = nil
     @State private var isReadingMode = false  // hermit-8q5
+    @State private var isBehind = false       // true when PR branch is behind base
 
     var body: some View {
         Group {
@@ -40,7 +41,20 @@ struct RFCDetailView: View {
         }
         .navigationTitle(rfc.title)
         .toolbar {
-            RFCLifecycleToolbar(rfc: rfc, markdownSource: $markdown)
+            RFCLifecycleToolbar(
+                rfc: rfc,
+                isBehind: isBehind,
+                onUpdateBranch: {
+                    guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient(),
+                          case .pullRequest(let pr) = rfc.source else { return }
+                    try? await client.updateBranch(prNumber: pr.number)
+                    // Re-check status after update — branch should no longer be behind.
+                    if let status = try? await client.getMergeStatus(prNumber: pr.number) {
+                        isBehind = status
+                    }
+                },
+                markdownSource: $markdown
+            )
             ToolbarItem(placement: .automatic) {
                 HStack(spacing: 4) {
                     Button { scrollToPrev() } label: {
@@ -173,8 +187,14 @@ struct RFCDetailView: View {
                 filePath: resolvedPath
             )
             await store.load()
+
+            // Check whether this branch is behind the base branch (best-effort; silent on failure).
+            if let behind = try? await client.getMergeStatus(prNumber: pr.number) {
+                isBehind = behind
+            }
         } else {
             commentStore?.reset()
+            isBehind = false
         }
 
         isLoading = false

@@ -36,6 +36,10 @@ struct RFCLifecycleToolbar: ToolbarContent {
     var allThreadsResolved: Bool = false
     /// hermit-cns: true when the PR already has an approval review.
     var prApproved: Bool = false
+    /// hermit-cns: true when the PR branch is behind the base branch.
+    var isBehind: Bool = false
+    /// hermit-cns: called when the user taps "Update Branch".
+    var onUpdateBranch: (() async -> Void)? = nil
     /// Populated once markdown loads, used for export/print.
     @Binding var markdownSource: String
 
@@ -49,12 +53,14 @@ struct RFCLifecycleToolbar: ToolbarContent {
         case approve
         case markImplemented
         case approvePR
+        case updateBranch
 
         var id: String {
             switch self {
             case .approve:          return "approve"
             case .markImplemented:  return "markImplemented"
             case .approvePR:        return "approvePR"
+            case .updateBranch:     return "updateBranch"
             }
         }
 
@@ -63,6 +69,7 @@ struct RFCLifecycleToolbar: ToolbarContent {
             case .approve:          return "Approve RFC"
             case .markImplemented:  return "Mark as Implemented"
             case .approvePR:        return "Approve Pull Request"
+            case .updateBranch:     return "Update Branch"
             }
         }
 
@@ -77,6 +84,9 @@ struct RFCLifecycleToolbar: ToolbarContent {
             case .approvePR:
                 return "Approving this pull request will submit a GitHub approval review on your behalf, " +
                        "marking the RFC PR as ready to merge."
+            case .updateBranch:
+                return "This will merge the latest changes from the base branch into this PR branch. " +
+                       "A merge commit will be created on your behalf."
             }
         }
 
@@ -85,6 +95,7 @@ struct RFCLifecycleToolbar: ToolbarContent {
             case .approve:          return "Approve"
             case .markImplemented:  return "Mark Implemented"
             case .approvePR:        return "Approve PR"
+            case .updateBranch:     return "Update Branch"
             }
         }
     }
@@ -205,6 +216,22 @@ struct RFCLifecycleToolbar: ToolbarContent {
                                 : "Approve and mark this RFC PR ready to merge"
                 )
             }
+
+            // Update Branch — only shown when the PR branch is behind the base branch.
+            if isPullRequest && isBehind {
+                Button {
+                    pendingAction = .updateBranch
+                } label: {
+                    if isActioning {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Update Branch", systemImage: "arrow.triangle.2.circlepath")
+                            .foregroundStyle(.orange)
+                    }
+                }
+                .disabled(isActioning)
+                .help("This branch is out-of-date with the base branch. Tap to merge the latest changes in.")
+            }
         }
 
         // Confirmation dialog anchor — hidden view that carries the lifecycle
@@ -227,11 +254,12 @@ struct RFCLifecycleToolbar: ToolbarContent {
                             let captured = action
                             pendingAction = nil
                             Task {
-                                switch captured {
-                                case .approve:         await runAction(onApprove)
-                                case .markImplemented: await runAction(onMarkImplemented)
-                                case .approvePR:       await runAction(onApprovePR)
-                                }
+                                 switch captured {
+                                 case .approve:         await runAction(onApprove)
+                                 case .markImplemented: await runAction(onMarkImplemented)
+                                 case .approvePR:       await runAction(onApprovePR)
+                                 case .updateBranch:    await runAction(onUpdateBranch)
+                                 }
                             }
                         }
                         Button("Cancel", role: .cancel) {
