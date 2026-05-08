@@ -71,6 +71,20 @@ private struct GrowingTextView: UIViewRepresentable {
 #if os(macOS)
 import AppKit
 
+// NSTextView subclass that reports an intrinsic height so SwiftUI
+// allocates space before the user types.
+private class AutosizingTextView: NSTextView {
+    var minHeight: CGFloat = 36
+    override var intrinsicContentSize: NSSize {
+        guard let lm = layoutManager, let tc = textContainer else {
+            return NSSize(width: NSView.noIntrinsicMetric, height: minHeight)
+        }
+        lm.ensureLayout(for: tc)
+        let h = max(minHeight, lm.usedRect(for: tc).height + textContainerInset.height * 2)
+        return NSSize(width: NSView.noIntrinsicMetric, height: h)
+    }
+}
+
 // MARK: - GrowingTextView (macOS)
 private struct GrowingTextView: NSViewRepresentable {
     @Binding var text: String
@@ -82,7 +96,7 @@ private struct GrowingTextView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let tv = NSTextView()
+        let tv = AutosizingTextView()
         tv.delegate = context.coordinator
         tv.font = .preferredFont(forTextStyle: .body)
         tv.backgroundColor = .clear
@@ -132,6 +146,7 @@ private struct GrowingTextView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let tv = notification.object as? NSTextView else { return }
             parent.text = tv.string
+            tv.invalidateIntrinsicContentSize()
         }
         func textDidBeginEditing(_ notification: Notification) { parent.onFocusChange(true) }
         func textDidEndEditing(_ notification: Notification)   { parent.onFocusChange(false) }
