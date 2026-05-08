@@ -11,11 +11,9 @@ private struct PopoverSizeModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .frame(width: max(480, containerWidth * 0.8))
-            // fixedSize lets the popover shrink to content height after resolve
-            // hides the reply field, but a minHeight prevents it collapsing too
-            // small when there are only a few messages.
+            // Auto-size to content height, capping at 75% of the window height.
             .fixedSize(horizontal: false, vertical: true)
-            .frame(minHeight: min(400, containerHeight * 0.5), maxHeight: containerHeight * 0.9)
+            .frame(maxHeight: containerHeight * 0.75)
     }
 }
 
