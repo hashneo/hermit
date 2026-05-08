@@ -54,7 +54,14 @@ final class CommentStore: ObservableObject {
         isLoading = true
         errorMessage = nil
         do {
-            comments = try await client.listReviewComments(prNumber: prNumber)
+            let all = try await client.listReviewComments(prNumber: prNumber)
+            // Only show threads that belong to this RFC's file. If filePath is
+            // not set (shouldn't happen in practice) fall back to showing all.
+            if let fp = filePath, !fp.isEmpty {
+                comments = all.filter { $0.filePath == fp }
+            } else {
+                comments = all
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
