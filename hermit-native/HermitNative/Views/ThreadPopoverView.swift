@@ -75,15 +75,15 @@ import AppKit
 // allocates space before the user types.
 private class AutosizingTextView: NSTextView {
     override var intrinsicContentSize: NSSize {
-        guard let lm = layoutManager, let tc = textContainer else {
+        guard let lm = layoutManager, let tc = textContainer, let f = font else {
             return NSSize(width: NSView.noIntrinsicMetric, height: 36)
         }
         lm.ensureLayout(for: tc)
         let used = lm.usedRect(for: tc).height
-        let lineH = font?.ascender ?? 14 + abs(font?.descender ?? 3) + (font?.leading ?? 0)
         let insetH = textContainerInset.height * 2
-        let h = max(lineH + insetH, used + insetH)
-        return NSSize(width: NSView.noIntrinsicMetric, height: h)
+        let lineH = lm.defaultLineHeight(for: f)
+        let contentH = used > 0 ? used : lineH
+        return NSSize(width: NSView.noIntrinsicMetric, height: contentH + insetH)
     }
 }
 
