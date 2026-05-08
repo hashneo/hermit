@@ -91,6 +91,9 @@ private struct GrowingTextView: NSViewRepresentable {
         tv.isSelectable = true
         tv.textContainerInset = NSSize(width: 4, height: 8)
         tv.textContainer?.lineFragmentPadding = 0
+        tv.isVerticallyResizable = true
+        tv.isHorizontallyResizable = false
+        tv.autoresizingMask = [.width]
 
         // Placeholder
         let ph = NSTextField(labelWithString: placeholder)
@@ -101,13 +104,15 @@ private struct GrowingTextView: NSViewRepresentable {
         tv.addSubview(ph)
         NSLayoutConstraint.activate([
             ph.topAnchor.constraint(equalTo: tv.topAnchor, constant: 8),
-            ph.leadingAnchor.constraint(equalTo: tv.leadingAnchor, constant: 4),
+            ph.leadingAnchor.constraint(equalTo: tv.leadingAnchor, constant: 6),
         ])
 
         let scroll = NSScrollView()
         scroll.documentView = tv
         scroll.hasVerticalScroller = false
         scroll.drawsBackground = false
+        scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        tv.frame = CGRect(x: 0, y: 0, width: scroll.bounds.width, height: 0)
         context.coordinator.textView = tv
         return scroll
     }
