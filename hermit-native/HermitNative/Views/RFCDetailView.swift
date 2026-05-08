@@ -82,21 +82,19 @@ struct RFCDetailView: View {
     private func scrollToPrev() {
         let lines = liveStore.commentedLines
         guard !lines.isEmpty else { return }
-        if let current = scrollToLine, let idx = lines.firstIndex(of: current), idx > 0 {
-            scrollToLine = lines[idx - 1]
-        } else {
-            scrollToLine = lines.last
-        }
+        let current = scrollToLine ?? Int.max
+        // Find the last line strictly before current, wrap to last
+        let prev = lines.last(where: { $0 < current }) ?? lines.last!
+        scrollToLine = prev
     }
 
     private func scrollToNext() {
         let lines = liveStore.commentedLines
         guard !lines.isEmpty else { return }
-        if let current = scrollToLine, let idx = lines.firstIndex(of: current), idx < lines.count - 1 {
-            scrollToLine = lines[idx + 1]
-        } else {
-            scrollToLine = lines.first
-        }
+        let current = scrollToLine ?? -1
+        // Find the first line strictly after current, wrap to first
+        let next = lines.first(where: { $0 > current }) ?? lines.first!
+        scrollToLine = next
     }
 
     private var rfcContentView: some View {
