@@ -357,8 +357,8 @@ struct ThreadPopoverView: View {
                     Text("Outdated")
                         .font(.caption2).fontWeight(.medium)
                         .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.18))
-                        .foregroundStyle(.secondary)
+                        .background(Color.orange.opacity(0.15))
+                        .foregroundStyle(.orange)
                         .clipShape(Capsule())
                 }
                 Spacer()
@@ -401,10 +401,11 @@ struct ThreadPopoverView: View {
                 if let root = rootThread, !root.resolved {
                     let isOriginalAuthor = !commentStore.currentUserLogin.isEmpty &&
                                           root.user == commentStore.currentUserLogin
+                    let canResolve = isOriginalAuthor || root.outdated
                     let isResolvingThis = resolving[root.id] == true
 
-                    // Resolve button — only shown to the original comment author
-                    if isOriginalAuthor {
+                    // Resolve button — shown to original author always; shown to anyone for outdated threads
+                    if canResolve {
                         Divider()
                         HStack {
                             Spacer()

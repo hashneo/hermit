@@ -96,11 +96,12 @@ struct GutterMarkdownView: View {
         let count = commentStore.count(for: line, lineEnd: block.sourceLineEnd, blockRanges: blockRanges)
         let threads = commentStore.comments(for: line, lineEnd: block.sourceLineEnd, blockRanges: blockRanges)
         let allResolved = count > 0 && threads.allSatisfy { $0.resolved }
+        let anyOutdated = threads.contains { $0.outdated }
         let hasBubble = bubbleLine == line && !bubbleText.isEmpty
 
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 0) {
-                gutterCell(line: line, lineEnd: block.sourceLineEnd, count: count, isSelected: isSelected, allResolved: allResolved)
+                gutterCell(line: line, lineEnd: block.sourceLineEnd, count: count, isSelected: isSelected, allResolved: allResolved, anyOutdated: anyOutdated)
 
                 MarkdownBlockView(
                     block: block,
@@ -202,7 +203,7 @@ struct GutterMarkdownView: View {
 
     // MARK: - Gutter cell
 
-    private func gutterCell(line: Int, lineEnd: Int, count: Int, isSelected: Bool, allResolved: Bool = false) -> some View {
+    private func gutterCell(line: Int, lineEnd: Int, count: Int, isSelected: Bool, allResolved: Bool = false, anyOutdated: Bool = false) -> some View {
         ZStack {
             Rectangle()
                 .fill(isSelected ? Color.accentColor.opacity(0.08) : Color.clear)
@@ -213,7 +214,7 @@ struct GutterMarkdownView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
-                    .background(Capsule().fill(allResolved ? Color.green : Color.accentColor))
+                    .background(Capsule().fill(allResolved ? Color.green : anyOutdated ? Color.orange : Color.accentColor))
                     .onTapGesture {
                         if popoverLine == line {
                             if !popoverIsEditing { popoverLine = nil }
