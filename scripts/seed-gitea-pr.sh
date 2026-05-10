@@ -311,10 +311,10 @@ for l in labels:
   create_response=$(curl -s -u "${GITEA_ADMIN_USER}:${GITEA_ADMIN_PASS}" \
     -H 'Content-Type: application/json' \
     -X POST "${GITEA_API_BASE}/repos/${GITEA_ADMIN_USER}/${GITEA_TEST_REPO}/labels" \
-    -d "$(python3 -c "import json,sys; print(json.dumps({'name':sys.argv[1],'color':sys.argv[2],'description':sys.argv[3]}))" "${label_name}" "${label_color}" "${label_desc}")")
+    -d "$(printf '{"name":"%s","color":"%s","description":"%s"}' "${label_name}" "${label_color}" "${label_desc}")")
 
   local label_id
-  label_id=$(python3 -c "import sys,json; print(json.loads(sys.argv[1])['id'])" "${create_response}" 2>/dev/null || true)
+  label_id=$(echo "${create_response}" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null || true)
 
   if [ -z "${label_id}" ]; then
     printf 'Failed to create label "%s": %s\n' "${label_name}" "${create_response}" >&2
