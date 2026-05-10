@@ -57,6 +57,8 @@ type CatalogItem struct {
 	LifecycleStatus string   `json:"lifecycle_status,omitempty"`
 	PRNumber        int      `json:"pr_number,omitempty"`
 	HeadSHA         string   `json:"head_sha,omitempty"`
+	HeadRef         string   `json:"head_ref,omitempty"`
+	Labels          []string `json:"labels,omitempty"`
 	Commentable     bool     `json:"commentable"`
 	StatusMutable   bool     `json:"status_mutable"`
 	HTMLURL         string   `json:"html_url,omitempty"`
@@ -280,6 +282,8 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 			AllowedActions: []string{"view", "comment"},
 			PRNumber:       prItem.PRNumber,
 			HeadSHA:        prItem.HeadSHA,
+			HeadRef:        prItem.HeadRef,
+			Labels:         prItem.Labels,
 			Commentable:    true,
 			StatusMutable:  false,
 			HTMLURL:        prItem.HTMLURL,
@@ -380,6 +384,127 @@ func (s *Service) SubmitForReview(ctx context.Context, repositoryID, rfcPath str
 	}
 
 	return SubmitForReviewResult{PRNumber: pr.Number, HTMLURL: pr.HTMLURL, Branch: reviewBranch}, nil
+}
+
+// AcceptRFCResult is returned by AcceptRFC.
+type AcceptRFCResult struct {
+	Merged           bool   `json:"merged"`
+	BlockedByCI      bool   `json:"blocked_by_ci"`
+	CommitSHA        string `json:"commit_sha,omitempty"`        // SHA of the acceptance commit on the PR branch
+	HandedToIronhide bool   `json:"handed_to_ironhide,omitempty"` // true when ironhide labels were applied instead of direct merge
+}
+
+// AcceptRFC marks a PR RFC as accepted.
+//
+// Flow:
+//  1. Fetch the current RFC file from the PR branch.
+//  2. Rewrite frontmatter status to "accepted" and commit (skipped if already accepted).
+//  3. Check whether both ironhide labels exist on the repository.
+//     - If YES: add ironhide-review and ironhide-merge labels to the PR and return
+//       HandedToIronhide=true.  Ironhide will handle merging.
+//     - If NO:  attempt a direct squash-merge.  If CI blocks the merge, return
+//       BlockedByCI=true and CommitSHA so the caller can poll and retry.
+func (s *Service) AcceptRFC(ctx context.Context, repositoryID string, prNumber int, filePath string) (AcceptRFCResult, error) {
+	if s.repoResolver == nil {
+		return AcceptRFCResult{}, fmt.Errorf("repository resolver is not configured")
+	}
+	owner, name, registry, _, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	if !ok {
+		return AcceptRFCResult{}, fmt.Errorf("repository not found")
+	}
+	if token == "" {
+		return AcceptRFCResult{}, fmt.Errorf("repository token unavailable")
+	}
+
+	client, ok := s.githubClients[registry]
+	if !ok {
+		client = NewHTTPGitHubRFCClient()
+	}
+	baseURL := s.registryBaseURL(registry)
+
+	// 1. Get the PR head branch and current commit SHA.
+	headRef, headSHA, err := client.GetPRHead(ctx, baseURL, owner, name, prNumber, token)
+	if err != nil {
+		return AcceptRFCResult{}, fmt.Errorf("get PR head ref: %w", err)
+	}
+
+	// 2. Fetch current RFC content from the PR branch.
+	view, err := client.GetRFC(ctx, baseURL, owner, name, headRef, filePath, token)
+	if err != nil {
+		return AcceptRFCResult{}, fmt.Errorf("fetch rfc: %w", err)
+	}
+
+	// 3. Rewrite frontmatter status → "accepted" and commit, unless already accepted.
+	meta, _ := parseFrontmatter(view.MarkdownSource)
+	currentStatus := normalizeLifecycleStatus(meta["status"])
+	var sha string
+	if currentStatus != "accepted" {
+		updated := rewriteFrontmatterStatus(view.MarkdownSource, "accepted")
+		commitMsg := fmt.Sprintf("docs(rfc): accept %s", path.Base(filePath))
+		sha, err = client.CommitFileOnBranch(ctx, baseURL, owner, name, headRef, filePath, updated, commitMsg, token)
+		if err != nil {
+			return AcceptRFCResult{}, fmt.Errorf("commit accepted status: %w", err)
+		}
+	} else {
+		// Already accepted — use the current PR head SHA for CI polling.
+		sha = headSHA
+	}
+
+	// 4a. Ironhide path: if both labels exist on the repo, apply them and hand off.
+	const ironhideReview = "ironhide-review"
+	const ironhideMerge = "ironhide-merge"
+	reviewExists, err := client.LabelExists(ctx, baseURL, owner, name, ironhideReview, token)
+	if err != nil {
+		return AcceptRFCResult{}, fmt.Errorf("check ironhide-review label: %w", err)
+	}
+	mergeExists, err := client.LabelExists(ctx, baseURL, owner, name, ironhideMerge, token)
+	if err != nil {
+		return AcceptRFCResult{}, fmt.Errorf("check ironhide-merge label: %w", err)
+	}
+	if reviewExists && mergeExists {
+		if err := client.AddLabels(ctx, baseURL, owner, name, prNumber, []string{ironhideReview, ironhideMerge}, token); err != nil {
+			return AcceptRFCResult{}, fmt.Errorf("add ironhide labels: %w", err)
+		}
+		return AcceptRFCResult{HandedToIronhide: true, CommitSHA: sha}, nil
+	}
+
+	// 4b. Manual path: attempt immediate squash-merge.
+	merged, blockedByCI, err := client.MergePR(ctx, baseURL, owner, name, prNumber, token)
+	if err != nil {
+		return AcceptRFCResult{}, fmt.Errorf("merge PR: %w", err)
+	}
+
+	return AcceptRFCResult{Merged: merged, BlockedByCI: blockedByCI, CommitSHA: sha}, nil
+}
+
+// CIStatusResult is returned by GetCIStatus.
+type CIStatusResult struct {
+	Status string `json:"status"` // "pending" | "success" | "failure"
+}
+
+// GetCIStatus returns the aggregate GitHub Actions / check-runs status for a
+// commit SHA on this repository.  Used to poll after AcceptRFC when merging
+// was blocked by pending CI.
+func (s *Service) GetCIStatus(ctx context.Context, repositoryID, commitSHA string) (CIStatusResult, error) {
+	if s.repoResolver == nil {
+		return CIStatusResult{Status: "pending"}, fmt.Errorf("repository resolver is not configured")
+	}
+	owner, name, registry, _, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	if !ok {
+		return CIStatusResult{Status: "pending"}, fmt.Errorf("repository not found")
+	}
+
+	client, ok := s.githubClients[registry]
+	if !ok {
+		client = NewHTTPGitHubRFCClient()
+	}
+	baseURL := s.registryBaseURL(registry)
+
+	status, err := client.GetCIStatus(ctx, baseURL, owner, name, commitSHA, token)
+	if err != nil {
+		return CIStatusResult{Status: "pending"}, err
+	}
+	return CIStatusResult{Status: status}, nil
 }
 
 // rewriteFrontmatterStatus replaces the value of the "status" key inside a

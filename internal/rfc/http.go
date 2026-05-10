@@ -129,6 +129,58 @@ func (h *Handler) SubmitForReview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, result)
 }
 
+// AcceptRFC rewrites the RFC status to "accepted" on the PR branch and
+// attempts an immediate squash-merge.  The request body must contain:
+//
+//	{ "file_path": "docs-cms/rfcs/rfc-001-...md" }
+//
+// Response: AcceptRFCResult — includes merged, blocked_by_ci, commit_sha.
+func (h *Handler) AcceptRFC(w http.ResponseWriter, r *http.Request) {
+	repositoryID, prNumber, ok := parsePRPathParams(w, r)
+	if !ok {
+		return
+	}
+
+	var body struct {
+		FilePath string `json:"file_path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.FilePath == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "file_path is required in request body")
+		return
+	}
+
+	result, err := h.service.AcceptRFC(r.Context(), repositoryID, prNumber, body.FilePath)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "accept_rfc_failed", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GetCIStatus returns the aggregate CI check status for a commit SHA.
+// Query param: ?sha=<commitSHA>
+func (h *Handler) GetCIStatus(w http.ResponseWriter, r *http.Request) {
+	repositoryID := r.PathValue("repositoryId")
+	if repositoryID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_repository_id", "repositoryId path parameter is required")
+		return
+	}
+	sha := r.URL.Query().Get("sha")
+	if sha == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "sha query parameter is required")
+		return
+	}
+
+	result, err := h.service.GetCIStatus(r.Context(), repositoryID, sha)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "ci_status_unavailable", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
 func parsePRPathParams(w http.ResponseWriter, r *http.Request) (string, int, bool) {
 	repositoryID := r.PathValue("repositoryId")
 	if repositoryID == "" {

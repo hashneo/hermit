@@ -321,7 +321,16 @@ func (c *HTTPGitHubClient) CreateThread(ctx context.Context, thread Thread) (str
 	}
 	commentID, err := c.postPullRequestInlineComment(ctx, baseURL, owner, repo, thread.PRNumber, token, thread.Anchor.FilePath, commentLine, commentBody)
 	if err != nil {
-		return "", "", err
+		// GitHub returns 422 when the line is not part of the diff (e.g. unchanged
+		// lines outside the ±context shown). Fall back to a PR-level issue comment
+		// so the anchor metadata is still stored and Hermit can render it in-place.
+		issueCommentID, issueErr := c.postPRIssueComment(ctx, baseURL, owner, repo, thread.PRNumber, token, commentBody)
+		if issueErr != nil {
+			// Return the original inline error — the fallback also failed.
+			return "", "", fmt.Errorf("create github comment: %w", err)
+		}
+		threadHandle := makeThreadHandle(thread.RepositoryID, thread.PRNumber, issueCommentID)
+		return threadHandle, issueCommentID, nil
 	}
 
 	threadHandle := makeThreadHandle(thread.RepositoryID, thread.PRNumber, commentID)
@@ -716,6 +725,41 @@ func (c *HTTPGitHubClient) postPullRequestInlineComment(ctx context.Context, bas
 		return "", fmt.Errorf("github inline comment response returned no id")
 	}
 
+	return strconv.FormatInt(result.ID, 10), nil
+}
+
+// postPRIssueComment posts a comment to the PR conversation (issues API).
+// Used as a fallback when an inline review comment is rejected (e.g. line not in diff).
+func (c *HTTPGitHubClient) postPRIssueComment(ctx context.Context, baseURL, owner, repo string, prNumber int, token, body string) (string, error) {
+	u := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments", strings.TrimRight(baseURL, "/"), owner, repo, prNumber)
+	payload, err := json.Marshal(map[string]string{"body": body})
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return "", fmt.Errorf("github issue comment create failed: %d %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	var result struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	if result.ID == 0 {
+		return "", fmt.Errorf("github issue comment create returned no id")
+	}
 	return strconv.FormatInt(result.ID, 10), nil
 }
 

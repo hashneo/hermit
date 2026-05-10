@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"path"
 	"sort"
 	"strings"
@@ -18,12 +19,25 @@ type GitHubRFCClient interface {
 	ListReviewReadyRFCs(ctx context.Context, baseURL, owner, name, docsPath, rfcLabel, token string) ([]ReviewReadyRFCItem, error)
 	GetRFCFromPullRequest(ctx context.Context, baseURL, owner, name string, prNumber int, filePath, token string) (DocumentView, error)
 
-	// Write path — used by SubmitForReview.
+	// Write path — used by SubmitForReview and AcceptRFC.
 	EnsureLabel(ctx context.Context, baseURL, owner, name, label, color, description, token string) error
 	GetMainBranchSHA(ctx context.Context, baseURL, owner, name, branch, token string) (string, error)
 	CreateBranch(ctx context.Context, baseURL, owner, name, branchName, fromSHA, token string) error
 	CommitFile(ctx context.Context, baseURL, owner, name, branch, filePath, content, message, token string) (string, error)
 	CreatePR(ctx context.Context, baseURL, owner, name, title, body, head, base string, labels []string, token string) (CreatedPR, error)
+
+	// Accept path — rewrite status, merge PR, poll CI.
+	GetPRHeadRef(ctx context.Context, baseURL, owner, name string, prNumber int, token string) (headRef string, err error)
+	GetPRHead(ctx context.Context, baseURL, owner, name string, prNumber int, token string) (headRef, headSHA string, err error)
+	CommitFileOnBranch(ctx context.Context, baseURL, owner, name, branch, filePath, content, message, token string) (sha string, err error)
+	MergePR(ctx context.Context, baseURL, owner, name string, prNumber int, token string) (merged bool, blockedByCI bool, err error)
+	GetCIStatus(ctx context.Context, baseURL, owner, name, commitSHA, token string) (status string, err error) // "pending" | "success" | "failure"
+
+	// Ironhide path — check whether labels exist on the repo, then apply them to a PR.
+	// LabelExists returns true when the label is already defined on the repository.
+	LabelExists(ctx context.Context, baseURL, owner, name, label, token string) (bool, error)
+	// AddLabels appends labels to a pull request (issues API).
+	AddLabels(ctx context.Context, baseURL, owner, name string, prNumber int, labels []string, token string) error
 }
 
 // CreatedPR is the minimal response from a PR creation call.
@@ -39,6 +53,7 @@ const RFCReadyLabel = "hermit:rfc-ready"
 type ReviewReadyRFCItem struct {
 	PRNumber int
 	HeadSHA  string
+	HeadRef  string
 	HTMLURL  string
 	Title    string
 	Path     string
@@ -192,6 +207,7 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 		Draft   bool   `json:"draft"`
 		Head    struct {
 			SHA string `json:"sha"`
+			Ref string `json:"ref"`
 		} `json:"head"`
 		Labels []struct {
 			Name string `json:"name"`
@@ -222,32 +238,45 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 			return nil, err
 		}
 
+		// Pick the single RFC file with the most additions — this is the primary RFC
+		// being introduced or substantially revised by this PR. Other RFC files in
+		// the diff are incidental edits (e.g. index.md, changelog, status bumps).
+		// Fall back to the first matching file when additions are equal (e.g. in tests).
+		var primaryFile struct {
+			Filename  string
+			Additions int
+		}
 		for _, prFile := range prFiles {
 			if !isRFCPathInDocs(prFile.Filename, docsPath) {
 				continue
 			}
-
-			title := strings.TrimSuffix(path.Base(prFile.Filename), ".md")
-			view, err := c.GetRFC(ctx, baseURL, owner, name, pr.Head.SHA, prFile.Filename, token)
-			if err == nil {
-				title = view.Title
+			if primaryFile.Filename == "" || prFile.Additions > primaryFile.Additions {
+				primaryFile.Filename = prFile.Filename
+				primaryFile.Additions = prFile.Additions
 			}
-
-			items = append(items, ReviewReadyRFCItem{
-				PRNumber: pr.Number,
-				HeadSHA:  pr.Head.SHA,
-				HTMLURL:  pr.HTMLURL,
-				Title:    title,
-				Path:     prFile.Filename,
-				Labels:   labelNames,
-			})
 		}
+		if primaryFile.Filename == "" {
+			continue // no RFC file in this PR
+		}
+
+		title := strings.TrimSuffix(path.Base(primaryFile.Filename), ".md")
+		view, err := c.GetRFC(ctx, baseURL, owner, name, pr.Head.SHA, primaryFile.Filename, token)
+		if err == nil {
+			title = view.Title
+		}
+
+		items = append(items, ReviewReadyRFCItem{
+			PRNumber: pr.Number,
+			HeadSHA:  pr.Head.SHA,
+			HeadRef:  pr.Head.Ref,
+			HTMLURL:  pr.HTMLURL,
+			Title:    title,
+			Path:     primaryFile.Filename,
+			Labels:   labelNames,
+		})
 	}
 
 	sort.Slice(items, func(i, j int) bool {
-		if items[i].PRNumber == items[j].PRNumber {
-			return items[i].Path < items[j].Path
-		}
 		return items[i].PRNumber < items[j].PRNumber
 	})
 
@@ -305,8 +334,9 @@ func (c *HTTPGitHubRFCClient) GetRFCFromPullRequest(ctx context.Context, baseURL
 }
 
 func (c *HTTPGitHubRFCClient) listPullRequestFiles(ctx context.Context, apiBase, owner, name string, prNumber int, token string) ([]struct {
-	Filename string `json:"filename"`
-	Status   string `json:"status"`
+	Filename  string `json:"filename"`
+	Status    string `json:"status"`
+	Additions int    `json:"additions"`
 }, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/files?per_page=100", apiBase, owner, name, prNumber)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -327,8 +357,9 @@ func (c *HTTPGitHubRFCClient) listPullRequestFiles(ctx context.Context, apiBase,
 	}
 
 	var files []struct {
-		Filename string `json:"filename"`
-		Status   string `json:"status"`
+		Filename  string `json:"filename"`
+		Status    string `json:"status"`
+		Additions int    `json:"additions"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&files); err != nil {
 		return nil, err
@@ -589,4 +620,207 @@ func setGitHubHeaders(req *http.Request, token string) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+}
+
+// GetPRHeadRef returns the head branch name and head commit SHA for the given PR number.
+func (c *HTTPGitHubRFCClient) GetPRHeadRef(ctx context.Context, baseURL, owner, name string, prNumber int, token string) (string, error) {
+	apiBase := strings.TrimRight(baseURL, "/")
+	u := fmt.Sprintf("%s/repos/%s/%s/pulls/%d", apiBase, owner, name, prNumber)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", err
+	}
+	setGitHubHeaders(req, token)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return "", fmt.Errorf("get PR failed: %d %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var pr struct {
+		Head struct {
+			Ref string `json:"ref"`
+			SHA string `json:"sha"`
+		} `json:"head"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
+		return "", err
+	}
+	return pr.Head.Ref, nil
+}
+
+// GetPRHead returns both the head branch ref and head commit SHA for a PR.
+func (c *HTTPGitHubRFCClient) GetPRHead(ctx context.Context, baseURL, owner, name string, prNumber int, token string) (ref, sha string, err error) {
+	apiBase := strings.TrimRight(baseURL, "/")
+	u := fmt.Sprintf("%s/repos/%s/%s/pulls/%d", apiBase, owner, name, prNumber)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", "", err
+	}
+	setGitHubHeaders(req, token)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return "", "", fmt.Errorf("get PR failed: %d %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var pr struct {
+		Head struct {
+			Ref string `json:"ref"`
+			SHA string `json:"sha"`
+		} `json:"head"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
+		return "", "", err
+	}
+	return pr.Head.Ref, pr.Head.SHA, nil
+}
+
+// CommitFileOnBranch commits content to filePath on branch, returning the new commit SHA.
+// It first fetches the current blob SHA so GitHub accepts the update.
+func (c *HTTPGitHubRFCClient) CommitFileOnBranch(ctx context.Context, baseURL, owner, name, branch, filePath, content, message, token string) (string, error) {
+	return c.CommitFile(ctx, baseURL, owner, name, branch, filePath, content, message, token)
+}
+
+// MergePR squash-merges the PR. Returns:
+//   - merged=true, blockedByCI=false on success
+//   - merged=false, blockedByCI=true when GitHub rejects with 405 (checks pending/failed)
+//   - error for other failures
+func (c *HTTPGitHubRFCClient) MergePR(ctx context.Context, baseURL, owner, name string, prNumber int, token string) (bool, bool, error) {
+	apiBase := strings.TrimRight(baseURL, "/")
+	u := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/merge", apiBase, owner, name, prNumber)
+
+	body, err := json.Marshal(map[string]string{"merge_method": "squash"})
+	if err != nil {
+		return false, false, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, strings.NewReader(string(body)))
+	if err != nil {
+		return false, false, err
+	}
+	setGitHubHeaders(req, token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return false, false, err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusCreated:
+		return true, false, nil
+	case http.StatusMethodNotAllowed:
+		// 405: merge blocked by required status checks pending or failing — poll CI and retry.
+		return false, true, nil
+	case http.StatusConflict:
+		// 409: merge conflict — this is a real error the user must resolve.
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return false, false, fmt.Errorf("merge conflict: %s", strings.TrimSpace(string(b)))
+	default:
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return false, false, fmt.Errorf("merge PR failed: %d %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+}
+
+// GetCIStatus returns the aggregate check status for a commit SHA.
+// Returns "success", "failure", or "pending".
+func (c *HTTPGitHubRFCClient) GetCIStatus(ctx context.Context, baseURL, owner, name, commitSHA, token string) (string, error) {
+	apiBase := strings.TrimRight(baseURL, "/")
+	u := fmt.Sprintf("%s/repos/%s/%s/commits/%s/check-runs", apiBase, owner, name, commitSHA)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "pending", err
+	}
+	setGitHubHeaders(req, token)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "pending", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "pending", fmt.Errorf("get check-runs failed: %d", resp.StatusCode)
+	}
+
+	var result struct {
+		TotalCount int `json:"total_count"`
+		CheckRuns  []struct {
+			Status     string `json:"status"`
+			Conclusion string `json:"conclusion"`
+		} `json:"check_runs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "pending", err
+	}
+
+	if result.TotalCount == 0 {
+		return "success", nil // no checks required
+	}
+
+	for _, run := range result.CheckRuns {
+		if run.Status != "completed" {
+			return "pending", nil
+		}
+		if run.Conclusion == "failure" || run.Conclusion == "timed_out" || run.Conclusion == "cancelled" {
+			return "failure", nil
+		}
+	}
+	return "success", nil
+}
+
+// LabelExists reports whether the given label name is defined on the repository.
+func (c *HTTPGitHubRFCClient) LabelExists(ctx context.Context, baseURL, owner, name, label, token string) (bool, error) {
+	apiBase := strings.TrimRight(baseURL, "/")
+	u := fmt.Sprintf("%s/repos/%s/%s/labels/%s", apiBase, owner, name, url.PathEscape(label))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return false, err
+	}
+	setGitHubHeaders(req, token)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	io.Copy(io.Discard, resp.Body) //nolint:errcheck
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		return true, nil
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	return false, fmt.Errorf("check label failed: %d", resp.StatusCode)
+}
+
+// AddLabels appends labels to a pull request via the GitHub Issues API.
+func (c *HTTPGitHubRFCClient) AddLabels(ctx context.Context, baseURL, owner, name string, prNumber int, labels []string, token string) error {
+	if len(labels) == 0 {
+		return nil
+	}
+	apiBase := strings.TrimRight(baseURL, "/")
+	u := fmt.Sprintf("%s/repos/%s/%s/issues/%d/labels", apiBase, owner, name, prNumber)
+	payload, _ := json.Marshal(map[string]any{"labels": labels})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, strings.NewReader(string(payload)))
+	if err != nil {
+		return err
+	}
+	setGitHubHeaders(req, token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	io.Copy(io.Discard, resp.Body) //nolint:errcheck
+	resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("add labels failed: %d", resp.StatusCode)
+	}
+	return nil
 }
