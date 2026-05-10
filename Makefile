@@ -1,4 +1,4 @@
-.PHONY: build run debug clean ui-build validate-config validate-config-structure validate-config-access gitea-up gitea-down gitea-logs gitea-reset gitea-seed-pr native-build native-build-macos native-build-ipad native-test native-clean native-open gomobile-build dev ipad-deploy reset
+.PHONY: build run debug clean ui-build validate-config validate-config-structure validate-config-access gitea-up gitea-down gitea-logs gitea-reset gitea-seed-pr native-build native-build-macos native-build-ipad native-test native-clean native-open gomobile-build setup-xcconfig dev ipad-deploy reset
 
 # Include machine-local overrides (device IDs, etc.) — gitignored.
 -include .local.mk
@@ -199,7 +199,37 @@ native-open: build gomobile-build native-build-macos native-seed-prefs ## Build 
 	@sleep 0.5
 	@open $(NATIVE_APP_DEST)
 
+setup-xcconfig: ## Auto-create hermit-native/Local.xcconfig from signing identity if missing
+	@XCCONFIG=hermit-native/Local.xcconfig; \
+	if [ -f "$$XCCONFIG" ] && ! grep -q "yourname\|YOUR_TEAM_ID" "$$XCCONFIG" 2>/dev/null; then \
+		echo "Local.xcconfig already configured — skipping"; exit 0; \
+	fi; \
+	echo "Auto-generating hermit-native/Local.xcconfig..."; \
+	TEAM_ID=$$(security find-identity -v -p codesigning 2>/dev/null \
+		| grep -o '([A-Z0-9]\{10\})' | head -1 | tr -d '()'); \
+	if [ -z "$$TEAM_ID" ]; then \
+		echo ""; \
+		echo "ERROR: Could not auto-detect Apple Developer Team ID — no valid signing certificate found."; \
+		echo ""; \
+		echo "To fix:"; \
+		echo "  1. Open Xcode -> Settings (Cmd+,) -> Accounts tab"; \
+		echo "  2. Sign in with your Apple ID if not already signed in"; \
+		echo "  3. Select your account -> click 'Manage Certificates...'"; \
+		echo "  4. Click '+' and create an 'Apple Development' certificate if none exist"; \
+		echo "  5. Re-run: make dev"; \
+		echo ""; \
+		exit 1; \
+	fi; \
+	BUNDLE_ID="com.$$(id -un | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9').hermit-native"; \
+	cp hermit-native/Local.xcconfig.example "$$XCCONFIG"; \
+	sed -i '' "s/YOUR_TEAM_ID/$$TEAM_ID/" "$$XCCONFIG"; \
+	sed -i '' "s/com\.yourname\.hermit-native/$$BUNDLE_ID/" "$$XCCONFIG"; \
+	echo "  Team ID:   $$TEAM_ID"; \
+	echo "  Bundle ID: $$BUNDLE_ID"; \
+	echo "  Written to $$XCCONFIG"
+
 dev: ## Zero-to-demo: start Gitea (idempotent), seed PRs, install PAT to Keychain, build + deploy app
+	@$(MAKE) setup-xcconfig
 	@$(MAKE) gitea-up
 	@bash scripts/install-keychain-pat.sh $(if $(NO_KEYCHAIN),--no-keychain)
 	@$(MAKE) build
@@ -247,12 +277,27 @@ reset: ## Full reset: kill app, destroy Gitea container + data, remove keychain 
 	@$(MAKE) clean
 	@echo "Reset complete. Run 'make dev' to start fresh."
 
-IPAD_UDID        ?= $(error IPAD_UDID not set — copy .local.mk.example to .local.mk)
-IPAD_DEVICE_ID   ?= $(error IPAD_DEVICE_ID not set — copy .local.mk.example to .local.mk)
+IPAD_UDID        ?=
+IPAD_DEVICE_ID   ?=
 IPAD_APP_BUNDLE  := $(NATIVE_BUILD_DIR)/Build/Products/Debug-iphoneos/HermitNative.app
 
 ipad-deploy: ## Build and push to connected iPad (requires Developer Mode enabled)
-	@echo "Building HermitNative for iPad..."
+	@if [ -z "$(IPAD_UDID)" ]; then \
+		echo "IPAD_UDID not set — skipping iPad deploy."; \
+		echo ""; \
+		echo "To enable iPad deploy:"; \
+		echo "  1. Copy the example local config:"; \
+		echo "       cp .local.mk.example .local.mk"; \
+		echo "  2. Find your iPad UDID:"; \
+		echo "       Connect your iPad, then run: xcrun xctrace list devices"; \
+		echo "       Copy the UDID from the iPad line (e.g. 00006031-001C69120E23001C)"; \
+		echo "  3. Find your iPad device ID (for devicectl):"; \
+		echo "       Run: xcrun devicectl list devices"; \
+		echo "       Copy the 'identifier' value for your iPad"; \
+		echo "  4. Set IPAD_UDID and IPAD_DEVICE_ID in .local.mk"; \
+		exit 0; \
+	fi; \
+	echo "Building HermitNative for iPad..."; \
 	$(XCODE) \
 		-project $(NATIVE_PROJECT) \
 		-scheme $(NATIVE_SCHEME) \
@@ -261,8 +306,8 @@ ipad-deploy: ## Build and push to connected iPad (requires Developer Mode enable
 		-derivedDataPath $(NATIVE_BUILD_DIR) \
 		-allowProvisioningUpdates \
 		-destination-timeout 30 \
-		build
-	@echo "Installing on iPad..."
+		build && \
+	echo "Installing on iPad..." && \
 	DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl device install app \
 		--device $(IPAD_UDID) \
 		--timeout 60 \

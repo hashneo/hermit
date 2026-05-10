@@ -177,12 +177,22 @@ LOCAL_XCCONFIG="${REPO_ROOT}/hermit-native/Local.xcconfig"
 EXAMPLE_XCCONFIG="${REPO_ROOT}/hermit-native/Local.xcconfig.example"
 
 BUNDLE_ID=$(grep -E '^HERMIT_BUNDLE_ID\s*=' "${LOCAL_XCCONFIG}" 2>/dev/null \
-    | head -1 | sed 's/.*=[ \t]*//' | tr -d '[:space:]')
+    | head -1 | sed 's/.*=[ \t]*//' | tr -d '[:space:]') || true
 
 if [ -z "${BUNDLE_ID}" ] || echo "${BUNDLE_ID}" | grep -q "yourname"; then
-    printf 'ERROR: HERMIT_BUNDLE_ID not set in hermit-native/Local.xcconfig\n' >&2
-    printf 'Copy %s to Local.xcconfig and set your bundle ID.\n' "${EXAMPLE_XCCONFIG}" >&2
-    exit 1
+    printf 'WARNING: HERMIT_BUNDLE_ID not set — skipping UserDefaults/Keychain bootstrap.\n' >&2
+    printf '\n' >&2
+    printf 'If you are running this via "make dev" this should have been set up automatically.\n' >&2
+    printf 'If it was not, your Mac may not have a valid Apple Development certificate.\n' >&2
+    printf '\n' >&2
+    printf 'To fix:\n' >&2
+    printf '  1. Open Xcode -> Settings (Cmd+,) -> Accounts tab\n' >&2
+    printf '  2. Sign in with your Apple ID if not already signed in\n' >&2
+    printf '  3. Select your account -> click "Manage Certificates..."\n' >&2
+    printf '  4. Click "+" and create an "Apple Development" certificate if none exist\n' >&2
+    printf '  5. Re-run: make dev\n' >&2
+    printf '\n' >&2
+    exit 0
 fi
 
 # ── 1. Write PAT to Keychain (service=HermitNative account=hermit.account.<UUID>) ─
