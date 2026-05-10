@@ -17,12 +17,14 @@ struct MermaidView: View {
                     Image(nsImage: img)
                         .resizable()
                         .scaledToFit()
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: min(CGFloat(img.size.width / 2), 880), alignment: .center)
+                        .frame(maxWidth: .infinity, alignment: .center)
 #else
                     Image(uiImage: img)
                         .resizable()
                         .scaledToFit()
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: min(CGFloat(img.size.width / 2), 880), alignment: .center)
+                        .frame(maxWidth: .infinity, alignment: .center)
 #endif
                     // Expand button
                     Button {
@@ -122,10 +124,9 @@ final class MermaidRenderer: NSObject {
         prefs.allowsContentJavaScript = true
         config.defaultWebpagePreferences = prefs
 
-        // Render at 2x width so the rasterised snapshot has enough pixels to
-        // stay sharp when the image is expanded. SwiftUI's .scaledToFit()
-        // scales it back down for the inline display.
-        let renderWidth: CGFloat = 1800
+        // Match the RFC content column width so mermaid lays out at display size.
+        // We snapshot at 2x pixel density for sharpness on retina/ProMotion displays.
+        let renderWidth: CGFloat = 880
         let wv = WKWebView(frame: CGRect(x: 0, y: 0, width: renderWidth, height: 600), configuration: config)
         wv.navigationDelegate = self
 #if os(macOS)
@@ -156,17 +157,32 @@ final class MermaidRenderer: NSObject {
     }
 
     private func snapshot(wv: WKWebView) async {
-        // Resize frame to content height first
-        if let h = try? await wv.evaluateJavaScript("document.body.scrollHeight") as? CGFloat, h > 0 {
+        // Query the SVG's actual rendered bounds so we snapshot only the diagram,
+        // not blank canvas. Falls back to full body size if JS fails.
+        let js = """
+        (function() {
+            var svg = document.querySelector('.mermaid svg');
+            if (!svg) return null;
+            var r = svg.getBoundingClientRect();
+            return { x: r.left, y: r.top, w: r.width, h: r.height };
+        })()
+        """
+        var snapRect = CGRect(origin: .zero, size: wv.frame.size)
+        if let dict = try? await wv.evaluateJavaScript(js) as? [String: CGFloat],
+           let w = dict["w"], let h = dict["h"], w > 0, h > 0 {
+            let x = dict["x"] ?? 0
+            let y = dict["y"] ?? 0
+            snapRect = CGRect(x: x, y: y, width: w, height: h)
+            wv.frame.size.height = y + h
+        } else if let h = try? await wv.evaluateJavaScript("document.body.scrollHeight") as? CGFloat, h > 0 {
             wv.frame.size.height = h
         }
 
         let config = WKSnapshotConfiguration()
-        config.rect = CGRect(origin: .zero, size: wv.frame.size)
-        // Request snapshot at 2x the logical width so the raster image has
-        // enough pixels to remain sharp when the user expands the diagram.
+        config.rect = snapRect
+        // 2x pixel density for sharp rendering on retina/ProMotion displays.
         if #available(macOS 14.0, iOS 17.0, *) {
-            config.snapshotWidth = NSNumber(value: Double(wv.frame.size.width) * 2)
+            config.snapshotWidth = NSNumber(value: Double(snapRect.width) * 2)
         }
 
         do {
@@ -219,8 +235,8 @@ private func mermaidHTML(source: String) -> String {
     <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: white; }
-    .mermaid { width: 100%; }
-    .mermaid svg { width: 100% !important; height: auto !important; display: block; }
+    .mermaid { width: 100%; text-align: center; }
+    .mermaid svg { display: block; margin: 0 auto; height: auto !important; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     </head>
