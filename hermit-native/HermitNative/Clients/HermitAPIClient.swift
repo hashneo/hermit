@@ -47,6 +47,11 @@ protocol HermitClientProtocol: Actor {
 
     // Promote draft RFC to in-review: rewrites frontmatter, ensures label, opens PR.
     func submitForReview(rfcID: String) async throws -> SubmitForReviewResult
+
+    // Accept RFC: rewrites frontmatter to "accepted" on the PR branch and squash-merges.
+    func acceptRFC(prNumber: Int, filePath: String) async throws -> AcceptRFCResult
+    // Poll GitHub CI check status for a commit SHA.
+    func getCIStatus(commitSHA: String) async throws -> String  // "pending" | "success" | "failure"
 }
 
 // MARK: - HermitAPIClient
@@ -93,6 +98,8 @@ actor HermitAPIClient: HermitClientProtocol {
             let lifecycle_status: String?
             let pr_number: Int?
             let head_sha: String?
+            let head_ref: String?
+            let labels: [String]?
             let commentable: Bool?
             let html_url: String?
         }
@@ -110,11 +117,11 @@ actor HermitAPIClient: HermitClientProtocol {
                     title: item.title,
                     body: "",
                     headSHA: item.head_sha ?? "",
-                    headRef: "",
+                    headRef: item.head_ref ?? "",
                     htmlURL: item.html_url ?? "",
                     state: "open",
                     draft: false,
-                    labels: []
+                    labels: item.labels ?? []
                 ))
             } else {
                 files.append(RFCFile(id: item.id, name: item.title,
@@ -303,6 +310,25 @@ actor HermitAPIClient: HermitClientProtocol {
         let u = url("/api/v1/repositories/\(repoID)/rfcs/\(encoded)/submit-for-review")
         let data = try await post(u, body: [:])
         return try JSONDecoder().decode(SubmitForReviewResult.self, from: data)
+    }
+
+    // MARK: - acceptRFC
+
+    func acceptRFC(prNumber: Int, filePath: String) async throws -> AcceptRFCResult {
+        let repoID = try await repoID()
+        let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/accept")
+        let data = try await post(u, body: ["file_path": filePath])
+        return try JSONDecoder().decode(AcceptRFCResult.self, from: data)
+    }
+
+    // MARK: - getCIStatus
+
+    func getCIStatus(commitSHA: String) async throws -> String {
+        let repoID = try await repoID()
+        let u = url("/api/v1/repositories/\(repoID)/ci-status?sha=\(commitSHA)")
+        let data = try await get(u)
+        struct Response: Decodable { let status: String }
+        return (try? JSONDecoder().decode(Response.self, from: data))?.status ?? "pending"
     }
 
     // MARK: - getMainBranchSHA

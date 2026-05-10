@@ -17,6 +17,8 @@ struct SelectableTextView: NSViewRepresentable {
     var onSelectionChanged: ((String?, CGRect) -> Void)? = nil
     /// Fired when the user clicks without making a text selection (i.e. a plain tap).
     var onTapped: (() -> Void)? = nil
+    /// Fired when the user clicks a link. Return true to suppress default browser open.
+    var onLinkTapped: ((URL) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -26,6 +28,7 @@ struct SelectableTextView: NSViewRepresentable {
         tv.onQuoteSelected = onQuoteSelected
         tv.onSelectionChanged = onSelectionChanged
         tv.onTapped = onTapped
+        tv.onLinkTapped = onLinkTapped
         tv.isEditable = false
         tv.isSelectable = true
         tv.drawsBackground = false
@@ -43,6 +46,7 @@ struct SelectableTextView: NSViewRepresentable {
         nsView.onQuoteSelected = onQuoteSelected
         nsView.onSelectionChanged = onSelectionChanged
         nsView.onTapped = onTapped
+        nsView.onLinkTapped = onLinkTapped
         if nsView.attributedString() != attributedText {
             nsView.textStorage?.setAttributedString(attributedText)
         }
@@ -60,6 +64,15 @@ final class QuotableNSTextView: NSTextView {
     var onQuoteSelected: ((String) -> Void)?
     var onSelectionChanged: ((String?, CGRect) -> Void)?
     var onTapped: (() -> Void)?
+    var onLinkTapped: ((URL) -> Void)?
+
+    override func clicked(onLink link: Any, at charIndex: Int) {
+        if let url = link as? URL, let handler = onLinkTapped {
+            handler(url)
+        } else {
+            super.clicked(onLink: link, at: charIndex)
+        }
+    }
 
     override var intrinsicContentSize: NSSize {
         guard let lm = layoutManager, let tc = textContainer else { return super.intrinsicContentSize }
@@ -70,11 +83,25 @@ final class QuotableNSTextView: NSTextView {
     // Forward single clicks (no drag, no selection) to SwiftUI as a tap.
     // This allows code blocks and list items to open the comment composer
     // even though NSTextView normally consumes all mouse events.
+    // Suppress onTapped when the click lands on a .link attribute so that
+    // clicked(onLink:) can handle it without also opening the comment composer.
     override func mouseDown(with event: NSEvent) {
         super.mouseDown(with: event)
-        if selectedRange().length == 0 {
+        if selectedRange().length == 0 && !clickIsOnLink(event) {
             onTapped?()
         }
+    }
+
+    private func clickIsOnLink(_ event: NSEvent) -> Bool {
+        let point = convert(event.locationInWindow, from: nil)
+        guard let lm = layoutManager, let tc = textContainer else { return false }
+        let origin = textContainerOrigin
+        let adjustedPoint = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+        let glyphIndex = lm.glyphIndex(for: adjustedPoint, in: tc)
+        guard glyphIndex < lm.numberOfGlyphs else { return false }
+        let charIndex = lm.characterIndexForGlyph(at: glyphIndex)
+        guard charIndex < textStorage?.length ?? 0 else { return false }
+        return textStorage?.attribute(.link, at: charIndex, effectiveRange: nil) != nil
     }
 
     func reportSelection() {
@@ -125,9 +152,11 @@ struct SelectableTextView: UIViewRepresentable {
     var onSelectionChanged: ((String?, CGRect) -> Void)? = nil
     /// Fired when the user taps without making a text selection.
     var onTapped: (() -> Void)? = nil
+    /// Fired when the user taps a link.
+    var onLinkTapped: ((URL) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onQuoteSelected: onQuoteSelected, onSelectionChanged: onSelectionChanged)
+        Coordinator(onQuoteSelected: onQuoteSelected, onSelectionChanged: onSelectionChanged, onLinkTapped: onLinkTapped)
     }
 
     func makeUIView(context: Context) -> QuotableUITextView {
@@ -150,6 +179,7 @@ struct SelectableTextView: UIViewRepresentable {
     func updateUIView(_ uiView: QuotableUITextView, context: Context) {
         context.coordinator.onQuoteSelected = onQuoteSelected
         context.coordinator.onSelectionChanged = onSelectionChanged
+        context.coordinator.onLinkTapped = onLinkTapped
         uiView.coordinator = context.coordinator
         uiView.onTapped = onTapped
         if uiView.attributedText != attributedText {
@@ -161,10 +191,20 @@ struct SelectableTextView: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         var onQuoteSelected: ((String) -> Void)?
         var onSelectionChanged: ((String?, CGRect) -> Void)?
+        var onLinkTapped: ((URL) -> Void)?
 
-        init(onQuoteSelected: ((String) -> Void)?, onSelectionChanged: ((String?, CGRect) -> Void)?) {
+        init(onQuoteSelected: ((String) -> Void)?, onSelectionChanged: ((String?, CGRect) -> Void)?, onLinkTapped: ((URL) -> Void)?) {
             self.onQuoteSelected = onQuoteSelected
             self.onSelectionChanged = onSelectionChanged
+            self.onLinkTapped = onLinkTapped
+        }
+
+        func textView(_ textView: UITextView, shouldInteractWith url: URL, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
+            if let handler = onLinkTapped {
+                handler(url)
+                return false
+            }
+            return true
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
@@ -187,9 +227,18 @@ final class QuotableUITextView: UITextView {
     }
 
     @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
-        if selectedTextRange?.isEmpty ?? true {
+        if selectedTextRange?.isEmpty ?? true && !tapIsOnLink(recognizer) {
             onTapped?()
         }
+    }
+
+    private func tapIsOnLink(_ recognizer: UITapGestureRecognizer) -> Bool {
+        let point = recognizer.location(in: self)
+        let glyphIndex = layoutManager.glyphIndex(for: point, in: textContainer)
+        guard glyphIndex < layoutManager.numberOfGlyphs else { return false }
+        let charIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
+        guard charIndex < textStorage.length else { return false }
+        return textStorage.attribute(.link, at: charIndex, effectiveRange: nil) != nil
     }
 
     override var intrinsicContentSize: CGSize {

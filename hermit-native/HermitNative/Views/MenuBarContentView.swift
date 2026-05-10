@@ -52,6 +52,7 @@ struct MenuBarContentView: View {
 
         Button("Refresh All") {
             RepoRFCCache.shared.invalidateAll()
+            NotificationCenter.default.post(name: .hermitRefreshAll, object: nil)
         }
 
         Divider()
@@ -85,6 +86,9 @@ private struct RepoSubmenu: View {
         .task(id: serverPort) {
             guard serverPort != nil else { return }
             await loader.loadIfNeeded(repo: repo, appState: appState)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .hermitRefreshAll)) { _ in
+            Task { await loader.reload(repo: repo, appState: appState) }
         }
     }
 

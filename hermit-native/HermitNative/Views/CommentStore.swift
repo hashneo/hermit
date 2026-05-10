@@ -12,6 +12,9 @@ final class CommentStore: ObservableObject {
     @Published private(set) var errorMessage: String? = nil
     /// The GitHub login of the authenticated user. Populated on first load.
     @Published private(set) var currentUserLogin: String = ""
+    /// When true, resolved and outdated threads are hidden from gutter badges and the thread panel.
+    /// Users can toggle this off to see historical/resolved comments.
+    @Published var hideNoise: Bool = true
 
     // Context set when a PR RFC is selected
     private(set) var prNumber: Int?
@@ -77,7 +80,7 @@ final class CommentStore: ObservableObject {
     /// Sorted list of line numbers that have at least one thread (resolved or not).
     /// Uses effectiveLine(for:blockRanges:) so orphaned threads are counted on their nearest block.
     func commentedLines(blockRanges: [(start: Int, end: Int)]) -> [Int] {
-        let lines = Set(comments.map { effectiveLine(for: $0, blockRanges: blockRanges) })
+        let lines = Set(visibleComments.map { effectiveLine(for: $0, blockRanges: blockRanges) })
         return lines.sorted()
     }
 
@@ -94,13 +97,19 @@ final class CommentStore: ObservableObject {
         guard !blockRanges.isEmpty else {
             // No block layout info — fall back to simple line overlap.
             let end = lineEnd ?? line
-            return comments
+            return visibleComments
                 .filter { !$0.outdated && $0.lineStart <= end && $0.lineEnd >= line }
                 .sorted { $0.createdAt < $1.createdAt }
         }
-        return comments
+        return visibleComments
             .filter { effectiveLine(for: $0, blockRanges: blockRanges) == line }
             .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// The subset of comments shown based on the current hideNoise setting.
+    var visibleComments: [ReviewThread] {
+        guard hideNoise else { return comments }
+        return comments.filter { !$0.resolved && !$0.outdated }
     }
 
     /// Given a thread, returns the block start line it should be displayed on.

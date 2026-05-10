@@ -80,3 +80,24 @@ struct SubmitForReviewResult: Decodable {
         case branch
     }
 }
+
+struct AcceptRFCResult: Decodable {
+    let merged: Bool
+    let blockedByCI: Bool
+    let commitSHA: String
+    let handedToIronhide: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case merged           = "merged"
+        case blockedByCI      = "blocked_by_ci"
+        case commitSHA        = "commit_sha"
+        case handedToIronhide = "handed_to_ironhide"
+    }
+
+    init(merged: Bool, blockedByCI: Bool, commitSHA: String, handedToIronhide: Bool = false) {
+        self.merged = merged
+        self.blockedByCI = blockedByCI
+        self.commitSHA = commitSHA
+        self.handedToIronhide = handedToIronhide
+    }
+}

@@ -349,4 +349,6 @@ extension Notification.Name {
     /// requires the app to be relaunched for the embedded server to pick it up.
     /// Config changes no longer trigger a live server restart.
     static let hermitRestartRequired = Notification.Name("com.hashicorp.hermit.restartRequired")
+    /// Posted by "Refresh All" in the menu bar to force all RepoSubmenu loaders to reload.
+    static let hermitRefreshAll = Notification.Name("com.hashicorp.hermit.refreshAll")
 }

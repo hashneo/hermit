@@ -9,13 +9,15 @@ import SwiftUI
 struct GutterMarkdownView: View {
     let blocks: [MarkdownBlock]
     var onLineTapped: ((Int, Int) -> Void)? = nil
+    var onLinkTapped: ((URL) -> Void)? = nil
     var viewportHeight: CGFloat = 800
     /// Set to a line number to scroll that block into view, then reset to nil.
     @Binding var scrollToLine: Int?
 
-    init(blocks: [MarkdownBlock], onLineTapped: ((Int, Int) -> Void)? = nil, viewportHeight: CGFloat = 800, scrollToLine: Binding<Int?> = .constant(nil)) {
+    init(blocks: [MarkdownBlock], onLineTapped: ((Int, Int) -> Void)? = nil, onLinkTapped: ((URL) -> Void)? = nil, viewportHeight: CGFloat = 800, scrollToLine: Binding<Int?> = .constant(nil)) {
         self.blocks = blocks
         self.onLineTapped = onLineTapped
+        self.onLinkTapped = onLinkTapped
         self.viewportHeight = viewportHeight
         self._scrollToLine = scrollToLine
     }
@@ -149,7 +151,8 @@ struct GutterMarkdownView: View {
                             }
                         }
                         onLineTapped?(line, block.sourceLineEnd)
-                    }
+                    },
+                    onLinkTapped: onLinkTapped
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 6)
@@ -396,6 +399,8 @@ struct MarkdownBlockView: View {
     var onSelectionChanged: ((String?, CGRect) -> Void)? = nil
     /// Fired on a plain tap (no text selected) so the gutter can open the comment composer.
     var onTapped: (() -> Void)? = nil
+    /// Fired when the user taps a link inside this block.
+    var onLinkTapped: ((URL) -> Void)? = nil
 
     private var codeBackground: Color {
         Color(red: 0.92, green: 0.98, blue: 0.92)  // light green
@@ -423,7 +428,7 @@ struct MarkdownBlockView: View {
         case .mermaidBlock(let source, _, _):
             MermaidView(source: source)
                 .frame(minHeight: 200)
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, alignment: .center)
         case .bulletList(let items, _, _):
             bulletListView(items: items)
         case .orderedList(let items, _, _):
@@ -443,7 +448,8 @@ struct MarkdownBlockView: View {
             attributedText: attrStr,
             onQuoteSelected: onQuoteSelected,
             onSelectionChanged: { text, rect in onSelectionChanged?(text, rect) },
-            onTapped: onTapped
+            onTapped: onTapped,
+            onLinkTapped: onLinkTapped
         )
     }
 

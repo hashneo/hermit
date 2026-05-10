@@ -1,4 +1,9 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 // MARK: - hermit-ii0: RFCDetailView — native markdown viewer with gutter comment markers
 // hermit-8q5: Reading Mode — full-screen RFC view with swipe-to-restore sidebar
@@ -25,9 +30,18 @@ struct RFCDetailView: View {
     @State private var markdown: String = ""
     @State private var isLoading = true
     @State private var errorMessage: String? = nil
+    @State private var actionError: String? = nil  // merge/accept errors surfaced as alert
     @State private var isReadingMode = false  // hermit-8q5
     @State private var isBehind = false       // true when PR branch is behind base
-    @State private var prApproved = false     // true when PR already has an approval review
+    /// For PR RFCs: the GitHub blob URL pointing directly to the RFC file on the PR branch.
+    @State private var resolvedFileURL: String = ""
+    /// The actual .md file path on the PR branch (e.g. "docs-cms/rfcs/rfc-070-...md").
+    @State private var resolvedFilePath: String = ""
+    /// True when the loaded PR RFC frontmatter already says status: accepted —
+    /// meaning the accept commit was made but the PR was not yet merged.
+    @State private var prAlreadyAccepted: Bool = false
+    /// Bumped by the reload button to re-trigger .task without navigating away.
+    @State private var reloadToken = UUID()
 
     var body: some View {
         Group {
@@ -44,14 +58,38 @@ struct RFCDetailView: View {
         .toolbar {
             RFCLifecycleToolbar(
                 rfc: rfc,
-                onApprovePR: {
+                fileURL: resolvedFileURL,
+                prAlreadyAccepted: prAlreadyAccepted,
+                onAcceptRFC: {
                     guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient(),
-                          case .pullRequest(let pr) = rfc.source else { return }
-                    try? await client.approve(prNumber: pr.number)
-                    prApproved = true
+                          case .pullRequest(let pr) = rfc.source else {
+                        return AcceptRFCResult(merged: false, blockedByCI: false, commitSHA: "")
+                    }
+                    let result: AcceptRFCResult
+                    do {
+                        result = try await client.acceptRFC(prNumber: pr.number, filePath: resolvedFilePath)
+                    } catch {
+                        actionError = error.localizedDescription
+                        return AcceptRFCResult(merged: false, blockedByCI: false, commitSHA: "")
+                    }
+                    if result.merged {
+                        // RFC merged — trigger list reload in parent
+                        reloadToken = UUID()
+                    }
+                    return result
                 },
-                allThreadsResolved: liveStore.comments.isEmpty ? false : liveStore.comments.allSatisfy { $0.resolved },
-                prApproved: prApproved,
+                onPollCI: { sha in
+                    guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient() else { return false }
+                    // Poll every 15 seconds, max ~10 minutes.
+                    for _ in 0..<40 {
+                        try? await Task.sleep(for: .seconds(15))
+                        let status = (try? await client.getCIStatus(commitSHA: sha)) ?? "pending"
+                        if status == "success" { return true }
+                        if status == "failure" { return false }
+                    }
+                    return false // timed out
+                },
+                allThreadsResolved: liveStore.visibleComments.isEmpty,
                 isBehind: isBehind,
                 onUpdateBranch: {
                     guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient(),
@@ -80,6 +118,15 @@ struct RFCDetailView: View {
             }
             ToolbarItem(placement: .automatic) {
                 Button {
+                    reloadToken = UUID()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(isLoading)
+                .help("Reload this RFC")
+            }
+            ToolbarItem(placement: .automatic) {
+                Button {
                     withAnimation { isReadingMode.toggle() }
                 } label: {
                     Image(systemName: isReadingMode ? "sidebar.left" : "arrow.up.left.and.arrow.down.right")
@@ -88,6 +135,12 @@ struct RFCDetailView: View {
             }
         }
         .task(id: rfc.id) { await loadContent() }
+        .onChange(of: reloadToken) { Task { await loadContent() } }
+        .alert("Merge Failed", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
+            Button("OK", role: .cancel) { actionError = nil }
+        } message: {
+            Text(actionError ?? "")
+        }
         // hermit-8q5: swipe right restores sidebar
         .gesture(
             DragGesture()
@@ -127,6 +180,7 @@ struct RFCDetailView: View {
                 GutterMarkdownView(
                     blocks: MarkdownParser.parse(markdown),
                     onLineTapped: onLineTapped,
+                    onLinkTapped: { url in handleLinkTap(url) },
                     viewportHeight: viewportHeight,
                     scrollToLine: $scrollToLine
                 )
@@ -179,31 +233,45 @@ struct RFCDetailView: View {
             return
         }
 
-        // Configure and load comments if this is a PR RFC
-        if case .pullRequest(let pr) = rfc.source, let store = commentStore {
-            // rfc.path holds the branch name (headRef) for PR RFCs, not the file path.
-            // Resolve the actual changed file path from the server before configuring.
+        // For PR RFCs: check if the frontmatter already says accepted (accept commit
+        // was made but PR not yet merged — show Merge button instead of Accept & Merge).
+        if case .pullRequest = rfc.source {
+            prAlreadyAccepted = frontmatterStatus(markdown) == "accepted"
+        }
+
+        // For PR RFCs, build the direct blob URL to the file on the PR branch.
+        // This is done regardless of whether a commentStore is present.
+        if case .pullRequest(let pr) = rfc.source {
             let resolvedPath: String
             if let changed = try? await client.listPRChangedFiles(prNumber: pr.number, docsPath: ""),
                let first = changed.first, !first.isEmpty {
                 resolvedPath = first
             } else {
-                resolvedPath = rfc.path   // fallback (won't work for inline comments, but safe)
+                resolvedPath = rfc.path
             }
-            store.configure(
-                client: client,
-                prNumber: pr.number,
-                filePath: resolvedPath
-            )
-            await store.load()
+            resolvedFilePath = resolvedPath
+            // pr.htmlURL is e.g. "https://github.com/owner/repo/pull/123"
+            // → strip "/pull/N" → append "/blob/{headRef}/{filePath}"
+            if URL(string: pr.htmlURL) != nil,
+               let prRange = pr.htmlURL.range(of: "/pull/", options: .backwards) {
+                let repoBase = String(pr.htmlURL[..<prRange.lowerBound])
+                resolvedFileURL = "\(repoBase)/blob/\(pr.headRef)/\(resolvedPath)"
+            }
 
-            // Check whether this branch is behind the base branch (best-effort; silent on failure).
-            if let behind = try? await client.getMergeStatus(prNumber: pr.number) {
-                isBehind = behind
-            }
-            // Check whether the PR already has an approval review.
-            if let reviewState = try? await client.getReviewState(prNumber: pr.number) {
-                prApproved = reviewState.approved
+            // Configure and load comments if a store is present.
+            if let store = commentStore {
+                store.configure(
+                    client: client,
+                    prNumber: pr.number,
+                    filePath: resolvedPath
+                )
+                await store.load()
+
+                // Check whether this branch is behind the base branch (best-effort; silent on failure).
+                if let behind = try? await client.getMergeStatus(prNumber: pr.number) {
+                    isBehind = behind
+                }
+                // (approval review state no longer tracked here — accept flow handles it)
             }
         } else {
             commentStore?.reset()
@@ -211,5 +279,48 @@ struct RFCDetailView: View {
         }
 
         isLoading = false
+    }
+
+    /// Extracts the value of the `status` key from YAML frontmatter in the given markdown.
+    /// Returns nil if no frontmatter or no status key is present.
+    private func frontmatterStatus(_ source: String) -> String? {
+        let lines = source.components(separatedBy: "\n")
+        guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else { return nil }
+        for line in lines.dropFirst() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed == "---" { break }
+            if trimmed.hasPrefix("status:") {
+                return trimmed.dropFirst("status:".count)
+                    .trimmingCharacters(in: .whitespaces)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            }
+        }
+        return nil
+    }
+
+    /// Handle a link tap from the rendered RFC document.
+    /// - Relative links (no scheme): resolve against the current RFC's directory,
+    ///   encode as a `hermit://rfc/<path>` deep link, and open within Hermit.
+    /// - Absolute links: open in the system browser.
+    private func handleLinkTap(_ url: URL) {
+        if url.scheme == nil || url.scheme == "" {
+            // Relative path — resolve against current RFC directory
+            let rfcDir = (rfc.path as NSString).deletingLastPathComponent
+            let resolved = rfcDir.isEmpty ? url.path : rfcDir + "/" + url.path
+            let encoded = resolved.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? resolved
+            guard let deepLink = URL(string: "hermit://rfc/\(encoded)") else { return }
+            openURL(deepLink)
+        } else {
+            // Absolute URL — open in system browser
+            openURL(url)
+        }
+    }
+
+    private func openURL(_ url: URL) {
+#if os(macOS)
+        NSWorkspace.shared.open(url)
+#else
+        UIApplication.shared.open(url)
+#endif
     }
 }

@@ -22,7 +22,7 @@ struct ThreadPanelView: View {
         if let line = selectedLine {
             return commentStore.comments(for: line, lineEnd: selectedLineEnd)
         }
-        return commentStore.comments.sorted { $0.createdAt < $1.createdAt }
+        return commentStore.visibleComments.sorted { $0.createdAt < $1.createdAt }
     }
 
     var body: some View {
@@ -39,6 +39,13 @@ struct ThreadPanelView: View {
                     }
                 }
                 Spacer()
+                // Toggle resolved/outdated visibility
+                Button {
+                    commentStore.hideNoise.toggle()
+                } label: {
+                    Image(systemName: commentStore.hideNoise ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                }
+                .help(commentStore.hideNoise ? "Showing open comments only — tap to show resolved and outdated" : "Showing all comments — tap to hide resolved and outdated")
                 // hermit-3ey: approve button
                 if let rv = reviewState, !rv.approved {
                     Button("Approve") { showApproveConfirm = true }
