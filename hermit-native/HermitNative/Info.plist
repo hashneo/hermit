@@ -17,6 +17,14 @@
 		<string>com.hashicorp.hermit.handoff</string>
 	</array>
 
+	<!-- Microphone access: required for voice RFC dictation via SFSpeechRecognizer -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Hermit uses the microphone to let you dictate RFC content using your voice.</string>
+
+	<!-- Speech recognition access: required for on-device STT via SFSpeechRecognizer -->
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Hermit uses on-device speech recognition to transcribe your voice into RFC text.</string>
+
 	<!-- URL scheme for deep linking: hermit://rfc/<encoded-path> -->
 	<key>CFBundleURLTypes</key>
 	<array>

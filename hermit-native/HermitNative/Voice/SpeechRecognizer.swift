@@ -23,9 +23,9 @@ actor SpeechRecognizer {
     func startLiveTranscription(locale: Locale = .current) async throws
         -> (task: SFSpeechAudioBufferRecognitionRequest, stream: AsyncStream<String>) {
 
-        guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
+        // hermit-67g: request permission first, then check status — prevents premature denial
+        if SFSpeechRecognizer.authorizationStatus() != .authorized {
             try await requestSpeechPermission()
-            throw RecognitionError.permissionDenied
         }
 
         guard let recognizer = SFSpeechRecognizer(locale: locale),
@@ -34,7 +34,7 @@ actor SpeechRecognizer {
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        request.requiresOnDeviceRecognition = false
+        request.requiresOnDeviceRecognition = true  // hermit-67g: force on-device STT
 
         let stream = AsyncStream<String> { continuation in
             recognizer.recognitionTask(with: request) { result, error in

@@ -7,12 +7,18 @@ struct RFCInterviewView: View {
     @StateObject private var session: RFCInterviewSession
     @StateObject private var voiceEngine = VoiceEngine()
     @StateObject private var synthesizer = SpeechSynthesizer()
+    // hermit-il8: single SpeechRecognizer instance owned here, passed into VoiceInterviewInputRow
+    @StateObject private var speechRecognizer: SpeechRecognizerBox
     @State private var inputText = ""
     @State private var useVoice = false
     @State private var showPreview = false
 
+    // hermit-zbp: client context pulled from environment for downstream injection
+    @EnvironmentObject private var appState: AppState
+
     init(aiProvider: any AIProvider) {
         _session = StateObject(wrappedValue: RFCInterviewSession(aiProvider: aiProvider))
+        _speechRecognizer = StateObject(wrappedValue: SpeechRecognizerBox(aiProvider: aiProvider))
     }
 
     var body: some View {
@@ -79,10 +85,22 @@ struct RFCInterviewView: View {
             }
         }
         .sheet(isPresented: $showPreview) {
-            RFCPreviewView(
-                markdown: session.draftMarkdown,
-                onPublish: { showPreview = false }
-            )
+            // hermit-zbp: inject client/docsPath/rfcLabel from AppState environment
+            if let client = appState.makeAPIClient() {
+                RFCPreviewView(
+                    markdown: session.draftMarkdown,
+                    client: client,
+                    docsPath: appState.docsPath,
+                    rfcLabel: appState.rfcLabel,
+                    onPublish: { showPreview = false }
+                )
+            } else {
+                ContentUnavailableView(
+                    "Not Connected",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text("Configure a repository in Settings before publishing.")
+                )
+            }
         }
         .task {
             if case .idle = session.state { await session.start() }
@@ -94,9 +112,10 @@ struct RFCInterviewView: View {
     @ViewBuilder
     private var inputRow: some View {
         if useVoice {
-            // hermit-7nx: voice loop — record → transcribe → fill → send
+            // hermit-il8: pass speechRecognizer into VoiceInterviewInputRow
             VoiceInterviewInputRow(
                 voiceEngine: voiceEngine,
+                speechRecognizer: speechRecognizer.recognizer,
                 onTranscription: { text in
                     inputText = text
                     Task { await sendInput() }
@@ -147,14 +166,25 @@ private struct ChatBubble: View {
     }
 }
 
+// MARK: - hermit-il8: SpeechRecognizerBox — ObservableObject wrapper so RFCInterviewView can hold actor as @StateObject
+
+@MainActor
+final class SpeechRecognizerBox: ObservableObject {
+    let recognizer: SpeechRecognizer
+    init(aiProvider: any AIProvider) {
+        recognizer = SpeechRecognizer(aiProvider: aiProvider)
+    }
+}
+
 // MARK: - hermit-7nx: Voice interview input row
 
 private struct VoiceInterviewInputRow: View {
     @ObservedObject var voiceEngine: VoiceEngine
+    let speechRecognizer: SpeechRecognizer  // hermit-il8: injected from RFCInterviewView
     var onTranscription: (String) -> Void
 
-    @StateObject private var recognizer_store = VoiceEngine()  // reuse engine ref
     @State private var liveText = ""
+    @State private var transcriptionTask: Task<Void, Never>? = nil
 
     var body: some View {
         VStack(spacing: 8) {
@@ -166,14 +196,12 @@ private struct VoiceInterviewInputRow: View {
                 Spacer()
                 if voiceEngine.state == .recording {
                     Button("Done") {
-                        voiceEngine.stopRecording()
-                        onTranscription(liveText)
-                        liveText = ""
+                        finishRecording()
                     }
                     .buttonStyle(.borderedProminent)
                 } else {
                     Button {
-                        Task { try? await voiceEngine.startRecording() }
+                        startRecording()
                     } label: {
                         Image(systemName: "mic.circle.fill").font(.title)
                     }
@@ -183,5 +211,51 @@ private struct VoiceInterviewInputRow: View {
             .padding(.horizontal)
         }
         .padding(.vertical, 8)
+        .onDisappear {
+            transcriptionTask?.cancel()
+        }
+    }
+
+    // hermit-il8: start VoiceEngine + SFSpeechRecognizer live transcription together
+    private func startRecording() {
+        liveText = ""
+        transcriptionTask = Task {
+            do {
+                // Start SFSpeechRecognizer live transcription — gets (request, stream)
+                let (request, stream) = try await speechRecognizer.startLiveTranscription()
+
+                // Wire VoiceEngine audio buffers into the recognition request
+                voiceEngine.onAudioBuffer = { buffer in
+                    request.append(buffer)
+                }
+
+                // Auto-stop on silence
+                voiceEngine.onSilenceDetected = {
+                    finishRecording()
+                }
+
+                try await voiceEngine.startRecording()
+
+                // Consume transcription stream, updating liveText in real time
+                for await partial in stream {
+                    if Task.isCancelled { break }
+                    await MainActor.run { liveText = partial }
+                }
+            } catch {
+                // Permission denied or unavailable — surface in liveText
+                await MainActor.run { liveText = error.localizedDescription }
+            }
+        }
+    }
+
+    private func finishRecording() {
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
+        voiceEngine.onAudioBuffer = nil
+        voiceEngine.onSilenceDetected = nil
+        voiceEngine.stopRecording()
+        let final = liveText
+        liveText = ""
+        if !final.isEmpty { onTranscription(final) }
     }
 }

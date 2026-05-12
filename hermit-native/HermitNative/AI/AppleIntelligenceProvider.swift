@@ -1,9 +1,15 @@
 import Foundation
+// hermit-ijn: FoundationModels ships in macOS 26+ / iOS 26+ (Xcode 26 SDK).
+// The conditional import keeps older toolchains compiling; #available guards
+// prevent execution on unsupported OS versions at runtime.
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
 // MARK: - hermit-6qn: Apple Intelligence provider (FoundationModels)
 
 /// Wraps the FoundationModels framework for on-device LLM inference.
-/// Only available on macOS 15.2+ / iOS 18.2+ with Apple Intelligence enabled.
+/// Only available on macOS 26+ / iOS 26+ with Apple Intelligence enabled.
 /// Falls back gracefully: AIProviderFactory will not return this if isAvailable is false.
 final class AppleIntelligenceProvider: AIProvider {
     let displayName = "Apple Intelligence (on-device)"
@@ -11,11 +17,7 @@ final class AppleIntelligenceProvider: AIProvider {
     // MARK: Availability gate
 
     static var isAvailable: Bool {
-        // FoundationModels availability check — guarded to avoid crash on unsupported OS.
-        if #available(macOS 15.2, iOS 18.2, *) {
-            // The FoundationModels framework is present; runtime availability
-            // depends on the user having Apple Intelligence enabled.
-            // We check by attempting a lightweight system model presence probe.
+        if #available(macOS 26.0, iOS 26.0, *) {
             return _foundationModelsAvailable()
         }
         return false
@@ -24,14 +26,14 @@ final class AppleIntelligenceProvider: AIProvider {
     // MARK: Chat
 
     func chat(messages: [AIMessage]) async throws -> String {
-        guard #available(macOS 15.2, iOS 18.2, *) else {
+        guard #available(macOS 26.0, iOS 26.0, *) else {
             throw AIError.notConfigured
         }
         return try await _foundationModelsChat(messages: messages)
     }
 
     // MARK: Transcription
-    // Apple Intelligence does not expose a public transcription API in 18.2/15.2;
+    // Apple Intelligence does not expose a public transcription API;
     // callers should fall through to SFSpeechRecognizer for on-device STT.
 
     func transcribe(audioData: Data, mimeType: String) async throws -> String {
@@ -39,32 +41,40 @@ final class AppleIntelligenceProvider: AIProvider {
     }
 }
 
-// MARK: - FoundationModels shims
-// FoundationModels is an Apple-private framework in the SDK.
-// We use @_silgen_name / dynamic dispatch to avoid a hard link-time dependency.
-// If the symbols are absent the availability guard prevents reaching this code.
+// MARK: - FoundationModels implementation (hermit-ijn)
 
-@available(macOS 15.2, iOS 18.2, *)
+@available(macOS 26.0, iOS 26.0, *)
 private func _foundationModelsAvailable() -> Bool {
     // Lightweight probe: check that the class exists at runtime.
     return NSClassFromString("FMSystemLanguageModel") != nil
 }
 
-@available(macOS 15.2, iOS 18.2, *)
+// hermit-ijn: real LanguageModelSession implementation.
+// LanguageModelSession is single-turn; we build one formatted prompt from the
+// [AIMessage] array: system message first, alternating user/assistant, ending on user.
+@available(macOS 26.0, iOS 26.0, *)
 private func _foundationModelsChat(messages: [AIMessage]) async throws -> String {
-    // FoundationModels public API landed as LanguageModelSession in the
-    // "Apple Intelligence" SDK overlay (Xcode 16.2+, macOS 15.2 SDK).
-    // When the project is built against that SDK this can be replaced with:
-    //
-    //   import FoundationModels
-    //   let session = LanguageModelSession()
-    //   let prompt = messages.map { "\($0.role): \($0.content)" }.joined(separator: "\n")
-    //   let response = try await session.respond(to: prompt)
-    //   return response.content
-    //
-    // Until the SDK is confirmed, we surface a clear developer-time error.
+#if canImport(FoundationModels)
+    var parts: [String] = []
+    for msg in messages {
+        switch msg.role {
+        case .system:
+            parts.append("[System]\n\(msg.content)")
+        case .user:
+            parts.append("[User]\n\(msg.content)")
+        case .assistant:
+            parts.append("[Assistant]\n\(msg.content)")
+        }
+    }
+    let prompt = parts.joined(separator: "\n\n")
+
+    // FoundationModels public API — available macOS 26+ / iOS 26+
+    let session = LanguageModelSession()
+    let response = try await session.respond(to: prompt)
+    return response.content
+#else
     throw AIError.requestFailed(
-        "FoundationModels integration requires Xcode 16.2+ built against macOS 15.2 SDK. " +
-        "Replace _foundationModelsChat() with LanguageModelSession API when available."
+        "FoundationModels requires the macOS 26 SDK (Xcode 26+)."
     )
+#endif
 }
