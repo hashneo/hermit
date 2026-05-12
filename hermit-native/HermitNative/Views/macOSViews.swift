@@ -17,6 +17,7 @@ struct MenuBarRFCBrowserView: View {
     @ObservedObject private var serverMgr    = EmbeddedServerManager.shared
     @StateObject private var store = RFCStore()
     @State private var selectedRFC: RFC? = nil
+    @State private var showNewRFC = false
 
     /// Stable identity for the current (account, repo, server-port) triple.
     /// Changing any of these fires a new `.task`, reconfigures the client, and reloads.
@@ -42,9 +43,7 @@ struct MenuBarRFCBrowserView: View {
                     .help("Refresh RFCs")
                 }
                 ToolbarItem {
-                    NavigationLink {
-                        RFCInterviewView(aiProvider: AIProviderFactory.makeProvider())
-                    } label: {
+                    Button { showNewRFC = true } label: {
                         Image(systemName: "plus")
                     }
                     .help("New RFC")
@@ -58,6 +57,17 @@ struct MenuBarRFCBrowserView: View {
             }
         }
         .frame(width: 780, height: 540)
+        .sheet(isPresented: $showNewRFC) {
+            NavigationStack {
+                RFCInterviewView(aiProvider: AIProviderFactory.makeProvider())
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { showNewRFC = false }
+                        }
+                    }
+            }
+            .frame(minWidth: 600, minHeight: 500)
+        }
         .task(id: activeKey) {
             selectedRFC = nil
             guard serverMgr.port != nil else { return }  // server still restarting
