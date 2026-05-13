@@ -327,4 +327,53 @@ final class RFCViewerWindowManager {
         }
     }
 }
+
+// MARK: - New RFC Window Manager (macOS)
+// Opens a standalone window containing RFCInterviewView.
+// Re-uses the existing window if one is already open.
+
+@MainActor
+final class NewRFCWindowManager {
+    static let shared = NewRFCWindowManager()
+    private var controller: NSWindowController?
+
+    func open(appState: AppState) {
+        if let existing = controller?.window, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let view = NavigationStack {
+            RFCInterviewView(aiProvider: AIProviderFactory.makeProvider())
+        }
+        .environmentObject(appState)
+        .frame(minWidth: 620, minHeight: 520)
+
+        let hosting = NSHostingController(rootView: view)
+        let window = NSWindow(contentViewController: hosting)
+        window.title = "New RFC"
+        window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
+        window.setContentSize(NSSize(width: 680, height: 560))
+        window.center()
+        window.isReleasedWhenClosed = false
+
+        let wc = NSWindowController(window: window)
+        controller = wc
+
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.controller = nil }
+        }
+
+        wc.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.async {
+            NSApp.setActivationPolicy(.regular)
+        }
+    }
+}
 #endif

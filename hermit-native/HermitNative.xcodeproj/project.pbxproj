@@ -30,6 +30,7 @@
 		B0010024 /* VoiceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010025 /* VoiceEngine.swift */; };
 		B0010026 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010027 /* SpeechRecognizer.swift */; };
 		B0010028 /* SpeechSynthesizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010029 /* SpeechSynthesizer.swift */; };
+		B0010301 /* LiveVoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010300 /* LiveVoiceSession.swift */; };
 		B001002A /* WaveformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001002B /* WaveformView.swift */; };
 		B001002C /* WebViewRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001002D /* WebViewRenderer.swift */; };
 		B001002E /* MarkdownRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001002F /* MarkdownRenderer.swift */; };
@@ -90,6 +91,7 @@
 		B0010025 /* VoiceEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceEngine.swift; sourceTree = "<group>"; };
 		B0010027 /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
 		B0010029 /* SpeechSynthesizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSynthesizer.swift; sourceTree = "<group>"; };
+		B0010300 /* LiveVoiceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVoiceSession.swift; sourceTree = "<group>"; };
 		B001002B /* WaveformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformView.swift; sourceTree = "<group>"; };
 		B001002D /* WebViewRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewRenderer.swift; sourceTree = "<group>"; };
 		B001002F /* MarkdownRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRenderer.swift; sourceTree = "<group>"; };
@@ -253,6 +255,7 @@
 				B0010025 /* VoiceEngine.swift */,
 				B0010027 /* SpeechRecognizer.swift */,
 				B0010029 /* SpeechSynthesizer.swift */,
+				B0010300 /* LiveVoiceSession.swift */,
 				B001002B /* WaveformView.swift */,
 			);
 			path = Voice;
@@ -415,7 +418,8 @@
 				B00100A0 /* SubmitForReviewSession.swift in Sources */,
 				B0010024 /* VoiceEngine.swift in Sources */,
 				B0010026 /* SpeechRecognizer.swift in Sources */,
-				B0010028 /* SpeechSynthesizer.swift in Sources */,
+			B0010028 /* SpeechSynthesizer.swift in Sources */,
+				B0010301 /* LiveVoiceSession.swift in Sources */,
 				B001002A /* WaveformView.swift in Sources */,
 				B001002C /* WebViewRenderer.swift in Sources */,
 				B001002E /* MarkdownRenderer.swift in Sources */,

@@ -1,24 +1,19 @@
 import SwiftUI
 
-// MARK: - hermit-c7r: RFCInterviewView — chat-bubble UI with progress bar and voice toggle
-// hermit-7nx: Voice interview loop
+// MARK: - hermit-c7r: RFCInterviewView
 
 struct RFCInterviewView: View {
     @StateObject private var session: RFCInterviewSession
-    @StateObject private var voiceEngine = VoiceEngine()
     @StateObject private var synthesizer = SpeechSynthesizer()
-    // hermit-il8: single SpeechRecognizer instance owned here, passed into VoiceInterviewInputRow
-    @StateObject private var speechRecognizer: SpeechRecognizerBox
+    @StateObject private var voice = LiveVoiceSession()
     @State private var inputText = ""
     @State private var useVoice = false
     @State private var showPreview = false
 
-    // hermit-zbp: client context pulled from environment for downstream injection
     @EnvironmentObject private var appState: AppState
 
     init(aiProvider: any AIProvider) {
         _session = StateObject(wrappedValue: RFCInterviewSession(aiProvider: aiProvider))
-        _speechRecognizer = StateObject(wrappedValue: SpeechRecognizerBox(aiProvider: aiProvider))
     }
 
     var body: some View {
@@ -51,9 +46,16 @@ struct RFCInterviewView: View {
                 .onChange(of: session.messages.count) { _, _ in
                     if let last = session.messages.last {
                         withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
-                        // hermit-7nx: speak assistant messages in voice mode
+                        // In voice mode: speak the AI question, then auto-start listening
                         if useVoice, last.sender == .assistant {
-                            Task { await synthesizer.speak(last.text) }
+                            Task {
+                                await synthesizer.speak(last.text)
+                                // After speaking, immediately start listening for the answer
+                                guard useVoice, voice.state == .idle else { return }
+                                if case .reviewing = session.state { return }
+                                if case .complete  = session.state { return }
+                                voice.startListening()
+                            }
                         }
                     }
                 }
@@ -61,31 +63,45 @@ struct RFCInterviewView: View {
 
             Divider()
 
-            // Review/publish transition
+            // Bottom input area
             if case .reviewing = session.state {
                 Button("Preview & Publish →") { showPreview = true }
                     .buttonStyle(.borderedProminent)
                     .padding()
             } else if case .complete = session.state {
                 Text("Done! Check Hermit for your RFC.").foregroundStyle(.secondary).padding()
+            } else if useVoice {
+                voiceInputRow
             } else {
-                // Input row
-                inputRow
+                textInputRow
             }
         }
         .navigationTitle("New RFC")
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                Picker("", selection: $useVoice) {
-                    Image(systemName: "keyboard").tag(false)
-                    Image(systemName: "mic").tag(true)
+                Toggle(isOn: $useVoice) {
+                    Label(useVoice ? "Voice" : "Type", systemImage: useVoice ? "mic.fill" : "keyboard")
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 80)
+                .toggleStyle(.button)
+                .onChange(of: useVoice) { _, nowVoice in
+                    if !nowVoice {
+                        // Switched to keyboard — stop listening
+                        synthesizer.stop()
+                        voice.stopListening(submit: false)
+                    } else {
+                        // Switched to voice — if AI already asked something, start listening
+                        if !session.isLoading && !session.messages.isEmpty,
+                           let last = session.messages.last, last.sender == .assistant {
+                            Task {
+                                await synthesizer.speak(last.text)
+                                voice.startListening()
+                            }
+                        }
+                    }
+                }
             }
         }
         .sheet(isPresented: $showPreview) {
-            // hermit-zbp: inject client/docsPath/rfcLabel from AppState environment
             if let client = appState.makeAPIClient() {
                 RFCPreviewView(
                     markdown: session.draftMarkdown,
@@ -105,40 +121,116 @@ struct RFCInterviewView: View {
         .task {
             if case .idle = session.state { await session.start() }
         }
-    }
-
-    // MARK: - Input row
-
-    @ViewBuilder
-    private var inputRow: some View {
-        if useVoice {
-            // hermit-il8: pass speechRecognizer into VoiceInterviewInputRow
-            VoiceInterviewInputRow(
-                voiceEngine: voiceEngine,
-                speechRecognizer: speechRecognizer.recognizer,
-                onTranscription: { text in
-                    inputText = text
-                    Task { await sendInput() }
+        // Wire voice transcription → send answer
+        .onAppear {
+            voice.onTranscription = { text in
+                Task {
+                    await session.respond(with: text)
+                    voice.markProcessingDone()
+                    // Next listen cycle triggered by .onChange(of: session.messages)
                 }
-            )
-        } else {
-            HStack(spacing: 8) {
-                TextField("Your answer…", text: $inputText, axis: .vertical)
-                    .lineLimit(1...4)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { Task { await sendInput() } }
-                Button {
-                    Task { await sendInput() }
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill").font(.title2)
-                }
-                .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty || session.isLoading)
             }
-            .padding(.horizontal).padding(.vertical, 8)
         }
     }
 
-    private func sendInput() async {
+    // MARK: - Voice input row (organic — shows live transcript + amplitude)
+
+    private var voiceInputRow: some View {
+        VStack(spacing: 6) {
+            // Live transcript
+            Group {
+                switch voice.state {
+                case .idle:
+                    Text("Tap mic or wait — listening starts automatically")
+                        .foregroundStyle(.tertiary)
+                case .listening:
+                    Text(voice.liveText.isEmpty ? "Listening…" : voice.liveText)
+                        .foregroundStyle(voice.liveText.isEmpty ? .tertiary : .primary)
+                case .processing:
+                    Text("Got it…")
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .font(.subheadline)
+            .lineLimit(3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal)
+            .animation(.easeInOut(duration: 0.2), value: voice.liveText)
+
+            HStack(spacing: 16) {
+                // Waveform
+                WaveformView(amplitude: voice.amplitude)
+                    .frame(maxWidth: .infinity)
+
+                // Mic button — tap to force-start or force-stop
+                Button {
+                    switch voice.state {
+                    case .idle:
+                        voice.startListening()
+                    case .listening:
+                        voice.stopListening(submit: true)
+                    case .processing:
+                        break
+                    }
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(voice.state == .listening ? Color.red : Color.accentColor)
+                            .frame(width: 44, height: 44)
+                        Image(systemName: voice.state == .processing ? "ellipsis" : "mic.fill")
+                            .foregroundStyle(.white)
+                            .font(.system(size: 18, weight: .semibold))
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(voice.state == .processing || session.isLoading)
+                // Pulse animation when listening
+                .scaleEffect(voice.state == .listening ? 1.0 : 0.92)
+                .animation(
+                    voice.state == .listening
+                        ? .easeInOut(duration: 0.6).repeatForever(autoreverses: true)
+                        : .default,
+                    value: voice.state == .listening
+                )
+            }
+            .padding(.horizontal)
+
+            // Status hint
+            Group {
+                switch voice.state {
+                case .listening:
+                    Text("Pause and I'll send automatically · Tap mic to send now")
+                case .processing:
+                    Text("Thinking…")
+                case .idle:
+                    Text("Tap mic to speak")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 10)
+    }
+
+    // MARK: - Text input row
+
+    private var textInputRow: some View {
+        HStack(spacing: 8) {
+            TextField("Your answer…", text: $inputText, axis: .vertical)
+                .lineLimit(1...4)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { Task { await sendText() } }
+            Button {
+                Task { await sendText() }
+            } label: {
+                Image(systemName: "arrow.up.circle.fill").font(.title2)
+            }
+            .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty || session.isLoading)
+        }
+        .padding(.horizontal).padding(.vertical, 8)
+    }
+
+    private func sendText() async {
         let text = inputText.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
         inputText = ""
@@ -163,99 +255,5 @@ private struct ChatBubble: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16))
             if isAssistant { Spacer(minLength: 40) }
         }
-    }
-}
-
-// MARK: - hermit-il8: SpeechRecognizerBox — ObservableObject wrapper so RFCInterviewView can hold actor as @StateObject
-
-@MainActor
-final class SpeechRecognizerBox: ObservableObject {
-    let recognizer: SpeechRecognizer
-    init(aiProvider: any AIProvider) {
-        recognizer = SpeechRecognizer(aiProvider: aiProvider)
-    }
-}
-
-// MARK: - hermit-7nx: Voice interview input row
-
-private struct VoiceInterviewInputRow: View {
-    @ObservedObject var voiceEngine: VoiceEngine
-    let speechRecognizer: SpeechRecognizer  // hermit-il8: injected from RFCInterviewView
-    var onTranscription: (String) -> Void
-
-    @State private var liveText = ""
-    @State private var transcriptionTask: Task<Void, Never>? = nil
-
-    var body: some View {
-        VStack(spacing: 8) {
-            WaveformView(amplitude: voiceEngine.amplitude)
-            HStack {
-                Text(liveText.isEmpty ? "Tap to speak…" : liveText)
-                    .font(.subheadline).foregroundStyle(.secondary)
-                    .lineLimit(2)
-                Spacer()
-                if voiceEngine.state == .recording {
-                    Button("Done") {
-                        finishRecording()
-                    }
-                    .buttonStyle(.borderedProminent)
-                } else {
-                    Button {
-                        startRecording()
-                    } label: {
-                        Image(systemName: "mic.circle.fill").font(.title)
-                    }
-                    .buttonStyle(.plain).tint(.accentColor)
-                }
-            }
-            .padding(.horizontal)
-        }
-        .padding(.vertical, 8)
-        .onDisappear {
-            transcriptionTask?.cancel()
-        }
-    }
-
-    // hermit-il8: start VoiceEngine + SFSpeechRecognizer live transcription together
-    private func startRecording() {
-        liveText = ""
-        transcriptionTask = Task {
-            do {
-                // Start SFSpeechRecognizer live transcription — gets (request, stream)
-                let (request, stream) = try await speechRecognizer.startLiveTranscription()
-
-                // Wire VoiceEngine audio buffers into the recognition request
-                voiceEngine.onAudioBuffer = { buffer in
-                    request.append(buffer)
-                }
-
-                // Auto-stop on silence
-                voiceEngine.onSilenceDetected = {
-                    finishRecording()
-                }
-
-                try await voiceEngine.startRecording()
-
-                // Consume transcription stream, updating liveText in real time
-                for await partial in stream {
-                    if Task.isCancelled { break }
-                    await MainActor.run { liveText = partial }
-                }
-            } catch {
-                // Permission denied or unavailable — surface in liveText
-                await MainActor.run { liveText = error.localizedDescription }
-            }
-        }
-    }
-
-    private func finishRecording() {
-        transcriptionTask?.cancel()
-        transcriptionTask = nil
-        voiceEngine.onAudioBuffer = nil
-        voiceEngine.onSilenceDetected = nil
-        voiceEngine.stopRecording()
-        let final = liveText
-        liveText = ""
-        if !final.isEmpty { onTranscription(final) }
     }
 }
