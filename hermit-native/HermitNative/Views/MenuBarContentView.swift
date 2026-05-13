@@ -45,6 +45,11 @@ struct MenuBarContentView: View {
         Divider()
 
         // ── Actions ────────────────────────────────────────────────────
+        Button("New RFC…") {
+            NewRFCWindowManager.shared.open(appState: appState)
+        }
+        .keyboardShortcut("n")
+
         Button("Settings…") {
             SettingsWindowManager.shared.open()
         }

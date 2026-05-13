@@ -45,7 +45,8 @@ enum AIProviderFactory {
             return OpenAIProvider(apiKey: key)
         }
 
-        return NullAIProvider()
+        // Offline template fallback — works without any API key or Apple Intelligence
+        return TemplateAIProvider()
     }
 }
 

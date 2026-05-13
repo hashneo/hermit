@@ -21,6 +21,7 @@
 		B0010014 /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010015 /* AIProvider.swift */; };
 		B0010016 /* AppleIntelligenceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010017 /* AppleIntelligenceProvider.swift */; };
 		B0010018 /* OpenAIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010019 /* OpenAIProvider.swift */; };
+		B0010302 /* TemplateAIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010303 /* TemplateAIProvider.swift */; };
 		B001001A /* RFCInterviewPrompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001001B /* RFCInterviewPrompts.swift */; };
 		B001001C /* RFCInterviewSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001001D /* RFCInterviewSession.swift */; };
 		B001001E /* VoiceCommentSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001001F /* VoiceCommentSession.swift */; };
@@ -82,6 +83,7 @@
 		B0010015 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
 		B0010017 /* AppleIntelligenceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleIntelligenceProvider.swift; sourceTree = "<group>"; };
 		B0010019 /* OpenAIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIProvider.swift; sourceTree = "<group>"; };
+		B0010303 /* TemplateAIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemplateAIProvider.swift; sourceTree = "<group>"; };
 		B001001B /* RFCInterviewPrompts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCInterviewPrompts.swift; sourceTree = "<group>"; };
 		B001001D /* RFCInterviewSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCInterviewSession.swift; sourceTree = "<group>"; };
 		B001001F /* VoiceCommentSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCommentSession.swift; sourceTree = "<group>"; };
@@ -232,6 +234,7 @@
 				B0010015 /* AIProvider.swift */,
 				B0010017 /* AppleIntelligenceProvider.swift */,
 				B0010019 /* OpenAIProvider.swift */,
+				B0010303 /* TemplateAIProvider.swift */,
 				B001001B /* RFCInterviewPrompts.swift */,
 			);
 			path = AI;
@@ -410,6 +413,7 @@
 				B0010014 /* AIProvider.swift in Sources */,
 				B0010016 /* AppleIntelligenceProvider.swift in Sources */,
 				B0010018 /* OpenAIProvider.swift in Sources */,
+				B0010302 /* TemplateAIProvider.swift in Sources */,
 				B001001A /* RFCInterviewPrompts.swift in Sources */,
 				B001001C /* RFCInterviewSession.swift in Sources */,
 				B001001E /* VoiceCommentSession.swift in Sources */,
