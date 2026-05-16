@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // MergeStatus describes whether a PR branch is behind its base branch.
@@ -43,6 +44,9 @@ func NewHTTPMergeClient(resolver RepositoryAccessResolver, registryBase map[stri
 
 // GetMergeStatus calls GET /repos/{owner}/{repo}/pulls/{number} and inspects
 // mergeable_state.  A value of "behind" means the branch needs updating.
+// GitHub computes mergeable_state lazily and may return "unknown" on the first
+// request after activity — we retry up to 3 times with a short backoff so the
+// caller always gets a definitive answer.
 func (c *HTTPMergeClient) GetMergeStatus(ctx context.Context, repositoryID string, prNumber int) (MergeStatus, error) {
 	owner, repo, base, token, err := c.resolve(repositoryID)
 	if err != nil {
@@ -50,31 +54,56 @@ func (c *HTTPMergeClient) GetMergeStatus(ctx context.Context, repositoryID strin
 	}
 
 	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d", strings.TrimRight(base, "/"), owner, repo, prNumber)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return MergeStatus{}, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
 
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return MergeStatus{}, fmt.Errorf("github get pr: %w", err)
-	}
-	defer resp.Body.Close()
+	const maxAttempts = 4
+	delays := []time.Duration{0, 1 * time.Second, 2 * time.Second, 3 * time.Second}
 
-	if resp.StatusCode != http.StatusOK {
-		return MergeStatus{}, fmt.Errorf("github get pr: unexpected status %d", resp.StatusCode)
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if delays[attempt] > 0 {
+			select {
+			case <-ctx.Done():
+				return MergeStatus{}, ctx.Err()
+			case <-time.After(delays[attempt]):
+			}
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return MergeStatus{}, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "application/vnd.github+json")
+
+		resp, err := c.client.Do(req)
+		if err != nil {
+			return MergeStatus{}, fmt.Errorf("github get pr: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return MergeStatus{}, fmt.Errorf("github get pr: unexpected status %d", resp.StatusCode)
+		}
+
+		var pr struct {
+			MergeableState string `json:"mergeable_state"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
+			resp.Body.Close()
+			return MergeStatus{}, fmt.Errorf("github get pr: decode: %w", err)
+		}
+		resp.Body.Close()
+
+		// "unknown" means GitHub is still computing — retry.
+		if pr.MergeableState == "unknown" {
+			continue
+		}
+
+		return MergeStatus{Behind: pr.MergeableState == "behind"}, nil
 	}
 
-	var pr struct {
-		MergeableState string `json:"mergeable_state"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
-		return MergeStatus{}, fmt.Errorf("github get pr: decode: %w", err)
-	}
-
-	return MergeStatus{Behind: pr.MergeableState == "behind"}, nil
+	// After all retries state is still unknown — return not-behind to avoid
+	// a false positive, but don't error; the next load cycle will re-check.
+	return MergeStatus{Behind: false}, nil
 }
 
 // UpdateBranch calls PUT /repos/{owner}/{repo}/pulls/{number}/update-branch
