@@ -121,6 +121,7 @@ NATIVE_BUILD_DIR  := $(NATIVE_DIR)/build
 NATIVE_APP_SRC    := $(NATIVE_BUILD_DIR)/Build/Products/Debug/HermitNative.app
 NATIVE_APP_DEST   := HermitNative.app
 XCODE             := DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild
+PYTHON            ?= /usr/bin/python3
 
 native-build: native-build-macos native-build-ipad ## Build the native app for macOS and iPad simulator
 
@@ -191,7 +192,7 @@ native-clean: ## Clean the native app build artifacts
 native-seed-prefs: ## Write hermit config into the non-sandboxed UserDefaults plist used by ad-hoc debug builds
 	@BUNDLE_ID=$$(grep -E '^HERMIT_BUNDLE_ID\s*=' hermit-native/Local.xcconfig 2>/dev/null | head -1 | sed 's/.*=[ \t]*//;s/[[:space:]]*//g'); \
 	if [ -z "$$BUNDLE_ID" ]; then echo "Warning: HERMIT_BUNDLE_ID not found in Local.xcconfig — skipping pref seed"; exit 0; fi; \
-	python3 scripts/seed-native-prefs.py "$$BUNDLE_ID" config/hermit.yaml
+	$(PYTHON) scripts/seed-native-prefs.py "$$BUNDLE_ID" config/hermit.yaml
 
 native-open: build gomobile-build native-build-macos native-seed-prefs ## Build Go binary + xcframework + macOS app, then launch
 	@pkill -x HermitNative 2>/dev/null || true
@@ -209,16 +210,15 @@ setup-xcconfig: ## Auto-create hermit-native/Local.xcconfig from signing identit
 		| grep -o '([A-Z0-9]\{10\})' | head -1 | tr -d '()'); \
 	if [ -z "$$TEAM_ID" ]; then \
 		echo ""; \
-		echo "ERROR: Could not auto-detect Apple Developer Team ID — no valid signing certificate found."; \
+		echo "Warning: Could not auto-detect Apple Developer Team ID — no valid signing certificate found."; \
 		echo ""; \
-		echo "To fix:"; \
+		echo "Continuing with an empty HERMIT_TEAM_ID for local macOS ad-hoc builds."; \
+		echo "Physical iPad deploy still requires Apple signing setup:"; \
 		echo "  1. Open Xcode -> Settings (Cmd+,) -> Accounts tab"; \
 		echo "  2. Sign in with your Apple ID if not already signed in"; \
 		echo "  3. Select your account -> click 'Manage Certificates...'"; \
 		echo "  4. Click '+' and create an 'Apple Development' certificate if none exist"; \
-		echo "  5. Re-run: make dev"; \
 		echo ""; \
-		exit 1; \
 	fi; \
 	BUNDLE_ID="com.$$(id -un | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9').hermit-native"; \
 	cp hermit-native/Local.xcconfig.example "$$XCCONFIG"; \

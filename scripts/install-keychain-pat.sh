@@ -23,6 +23,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PYTHON="${PYTHON:-/usr/bin/python3}"
 
 # ── Parse flags ───────────────────────────────────────────────────────────────
 
@@ -65,7 +66,7 @@ if [ ! -f "${HERMIT_YAML}" ]; then
 fi
 
 # Extract the gitea-local registry base_url
-GITEA_BASE_URL=$(python3 - "${HERMIT_YAML}" <<'PY'
+GITEA_BASE_URL=$("${PYTHON}" - "${HERMIT_YAML}" <<'PY'
 import sys
 with open(sys.argv[1]) as f:
     content = f.read()
@@ -100,7 +101,7 @@ GITEA_ENDPOINT="${GITEA_BASE_URL%/api/v1}"
 GITEA_ENDPOINT="${GITEA_ENDPOINT%/}"
 
 # Extract the Hermit server listen address
-HERMIT_SERVER_URL=$(python3 - "${HERMIT_YAML}" <<'PY'
+HERMIT_SERVER_URL=$("${PYTHON}" - "${HERMIT_YAML}" <<'PY'
 import sys
 with open(sys.argv[1]) as f:
     for line in f:
@@ -115,7 +116,7 @@ PY
 HERMIT_SERVER_URL="${HERMIT_SERVER_URL:-http://localhost:8080}"
 
 # Extract the first gitea-backed repo
-read -r REPO_OWNER REPO_NAME DOCS_PATH RFC_LABEL < <(python3 - "${HERMIT_YAML}" <<'PY'
+read -r REPO_OWNER REPO_NAME DOCS_PATH RFC_LABEL < <("${PYTHON}" - "${HERMIT_YAML}" <<'PY'
 import sys
 with open(sys.argv[1]) as f:
     content = f.read()
@@ -256,7 +257,7 @@ patch_dev_pat() {
     local patched_plist
     patched_plist=$(mktemp /tmp/hermit-patched-XXXXXX.plist)
 
-    python3 - "${tmp_plist}" "${patched_plist}" "${ACCOUNT_UUID}" "${PAT}" <<'PY'
+    "${PYTHON}" - "${tmp_plist}" "${patched_plist}" "${ACCOUNT_UUID}" "${PAT}" <<'PY'
 import sys, json, plistlib
 
 src, dst, target_id, pat = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
