@@ -17,9 +17,18 @@ The project already uses Docuchango with a `docs-cms` layout and templates for A
 
 # Decision
 
-We propose that Hermit source RFC documents from the Docuchango `docs-cms` path and require RFC files to conform to Docuchango RFC format.
+We propose that Hermit source RFC documents from Docuchango docs projects discovered in the repository and require RFC files to conform to Docuchango RFC format.
 
-For this project, canonical RFC files live under `docs-cms/rfcs/` and must:
+Hermit discovers the docs project by reading `docs-project.yaml` from the repository root, `docs-cms/`, or `docs/`. When present, that config is authoritative for RFC discovery:
+
+- `structure.doc_types` entries with `schema: rfc` define RFC folders.
+- Legacy `structure.rfc_dir` remains the RFC folder when custom document types are not configured.
+- `subprojects` are followed so monorepos and submodules can expose their own docs projects.
+- `indexes[].targets` are used as additional document discovery patterns for indexed RFC lanes.
+
+If no Docuchango project config is present, Hermit falls back to the configured repository docs path for compatibility.
+
+Canonical RFC files must:
 
 - Follow filename convention `rfc-NNN-short-description.md`.
 - Include required frontmatter fields defined by Docuchango templates/schema.
@@ -29,21 +38,22 @@ For this project, canonical RFC files live under `docs-cms/rfcs/` and must:
 
 ## Positive
 
-- Establishes one unambiguous source path for RFC content used by Hermit.
+- Establishes one unambiguous source of RFC discovery: the Docuchango project config committed with the repository.
+- Supports repositories with nested docs projects, submodules, and indexed document lanes.
 - Ensures consistent metadata (id, status, project_id, doc_uuid) across RFC documents.
-- Reduces parsing and ingestion complexity in the application.
+- Reduces Hermit-specific path policy by reusing Docuchango project metadata.
 - Improves interoperability with existing docs workflows and validation tools.
 
 ## Negative
 
 - RFC authors must follow Docuchango conventions, which adds process constraints.
-- Existing ad hoc RFC files outside `docs-cms/rfcs/` require migration or are excluded.
+- Existing ad hoc RFC files outside configured Docuchango RFC lanes require migration or explicit index targets.
 - Future format changes in Docuchango may require synchronized updates in Hermit logic.
 
 ## Neutral
 
-- Hermit may index additional document types later, but RFC ingestion remains path- and schema-gated.
-- Local caching for performance is allowed, but source content remains the repository `docs-cms/rfcs/` documents.
+- Hermit may index additional document types later, but RFC ingestion remains project-config- and schema-gated.
+- Local caching for performance is allowed, but source content remains the repository Docuchango documents.
 
 # Alternatives Considered
 

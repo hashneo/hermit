@@ -2,6 +2,7 @@ package rfc
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -33,6 +34,63 @@ func TestHTTPGitHubRFCClient_ListRFCs_FiltersNonDocuchangoFilenames(t *testing.T
 	}
 }
 
+func TestHTTPGitHubRFCClient_ListRFCs_UsesDocuchangoProjectConfigAndSubprojects(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/contents/docs-project.yaml":
+			writeContentResponse(t, w, "docs-project.yaml", `project:
+  id: parent
+  name: Parent
+subprojects:
+  - services/service-a
+indexes:
+  - name: RFC Index
+    path: docs/rfc-index.md
+    targets:
+      - docs/proposals/*.md
+`)
+		case "/repos/owner/repo/contents/services/service-a/docs-project.yaml":
+			writeContentResponse(t, w, "docs-project.yaml", `project:
+  id: service-a
+  name: Service A
+structure:
+  docs_roots: [docs]
+  doc_types:
+    rfc:
+      schema: rfc
+      folders: [proposals]
+`)
+		case "/repos/owner/repo/contents/services/service-a/docs/proposals":
+			_ = json.NewEncoder(w).Encode([]map[string]string{
+				{"path": "services/service-a/docs/proposals/rfc-010-subproject.md", "type": "file"},
+				{"path": "services/service-a/docs/proposals/not-rfc.md", "type": "file"},
+			})
+		case "/repos/owner/repo/contents/docs/proposals":
+			_ = json.NewEncoder(w).Encode([]map[string]string{
+				{"path": "docs/proposals/rfc-011-indexed.md", "type": "file"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewHTTPGitHubRFCClient()
+	items, err := client.ListRFCs(context.Background(), server.URL, "owner", "repo", "main", "legacy/rfcs", "token")
+	if err != nil {
+		t.Fatalf("ListRFCs returned error: %v", err)
+	}
+
+	got := make([]string, 0, len(items))
+	for _, item := range items {
+		got = append(got, item.Path)
+	}
+	want := []string{"docs/proposals/rfc-011-indexed.md", "services/service-a/docs/proposals/rfc-010-subproject.md"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("paths = %v, want %v", got, want)
+	}
+}
+
 func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -61,6 +119,10 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *t
 				"content": "LS0tCnRpdGxlOiBSZWFkeSBQUiBSRkMKLS0tCgojIFJlYWR5IFBSIFJGQwo=",
 			})
 		default:
+			if strings.HasSuffix(r.URL.Path, "docs-project.yaml") {
+				http.NotFound(w, r)
+				return
+			}
 			t.Fatalf("unexpected request path: %s?%s", r.URL.Path, r.URL.RawQuery)
 		}
 	}))
@@ -111,6 +173,10 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_ExcludesPRsWithoutRFCReadyLabel
 				"content": "IyBMYWJlbGVkIFJGQwo=",
 			})
 		default:
+			if strings.HasSuffix(r.URL.Path, "docs-project.yaml") {
+				http.NotFound(w, r)
+				return
+			}
 			t.Fatalf("unexpected request path: %s?%s", r.URL.Path, r.URL.RawQuery)
 		}
 	}))
@@ -127,6 +193,44 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_ExcludesPRsWithoutRFCReadyLabel
 	}
 	if items[0].PRNumber != 20 {
 		t.Fatalf("expected PR 20 (labeled), got PR %d", items[0].PRNumber)
+	}
+}
+
+func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_UsesDocuchangoIndexTargets(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/contents/docs-project.yaml":
+			writeContentResponse(t, w, "docs-project.yaml", `project:
+  id: indexed
+  name: Indexed
+indexes:
+  - name: RFC Index
+    path: docs/rfc-index.md
+    targets: [docs/proposals/*.md]
+`)
+		case "/repos/owner/repo/pulls":
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"number": 30, "draft": false, "head": map[string]any{"sha": "sha-indexed"}, "labels": []map[string]any{{"name": "hermit:rfc-ready"}}},
+			})
+		case "/repos/owner/repo/pulls/30/files":
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"filename": "docs/proposals/rfc-030-indexed.md", "status": "added", "additions": 5},
+			})
+		case "/repos/owner/repo/contents/docs/proposals/rfc-030-indexed.md":
+			writeContentResponse(t, w, "rfc-030-indexed.md", "---\ntitle: Indexed RFC\n---\n# Indexed RFC\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewHTTPGitHubRFCClient()
+	items, err := client.ListReviewReadyRFCs(context.Background(), server.URL, "owner", "repo", "docs-cms/rfcs", "hermit:rfc-ready", "token")
+	if err != nil {
+		t.Fatalf("ListReviewReadyRFCs returned error: %v", err)
+	}
+	if len(items) != 1 || items[0].Path != "docs/proposals/rfc-030-indexed.md" {
+		t.Fatalf("expected indexed RFC PR item, got %+v", items)
 	}
 }
 
@@ -170,4 +274,13 @@ func TestHTTPGitHubRFCClient_GetRFCFromPullRequest_UsesHeadSHAAndValidatesMember
 	if err == nil {
 		t.Fatalf("expected error when requested file is not part of PR")
 	}
+}
+
+func writeContentResponse(t *testing.T, w http.ResponseWriter, name, content string) {
+	t.Helper()
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"name":    name,
+		"path":    name,
+		"content": base64.StdEncoding.EncodeToString([]byte(content)),
+	})
 }

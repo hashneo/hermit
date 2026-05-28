@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 type GitHubRFCClient interface {
@@ -88,6 +90,12 @@ func NewHTTPGitHubRFCClient() *HTTPGitHubRFCClient {
 
 func (c *HTTPGitHubRFCClient) ListRFCs(ctx context.Context, baseURL, owner, name, branch, docsPath, token string) ([]CatalogItem, error) {
 	apiBase := strings.TrimRight(baseURL, "/")
+	if items, ok, err := c.listDocuchangoProjectRFCs(ctx, apiBase, owner, name, branch, token); err != nil {
+		return nil, err
+	} else if ok {
+		return items, nil
+	}
+
 	docsPath = strings.Trim(strings.TrimSpace(docsPath), "/")
 	if docsPath == "" {
 		docsPath = "docs-cms/rfcs"
@@ -191,6 +199,10 @@ func (c *HTTPGitHubRFCClient) GetRFC(ctx context.Context, baseURL, owner, name, 
 
 func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, owner, name, docsPath, rfcLabel, token string) ([]ReviewReadyRFCItem, error) {
 	apiBase := strings.TrimRight(baseURL, "/")
+	rfcRoots, rfcPatterns, ok, err := c.docuchangoRFCPaths(ctx, apiBase, owner, name, "", token)
+	if err != nil {
+		return nil, err
+	}
 	docsPath = strings.Trim(strings.TrimSpace(docsPath), "/")
 	if docsPath == "" {
 		docsPath = "docs-cms/rfcs"
@@ -265,7 +277,11 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 			Additions int
 		}
 		for _, prFile := range prFiles {
-			if !isRFCPathInDocs(prFile.Filename, docsPath) {
+			if ok {
+				if !isRFCPathInDocuchangoProject(prFile.Filename, rfcRoots, rfcPatterns) {
+					continue
+				}
+			} else if !isRFCPathInDocs(prFile.Filename, docsPath) {
 				continue
 			}
 			if primaryFile.Filename == "" || prFile.Additions > primaryFile.Additions {
@@ -619,7 +635,420 @@ func (c *HTTPGitHubRFCClient) CreatePR(ctx context.Context, baseURL, owner, name
 	return CreatedPR{Number: pr.Number, HTMLURL: pr.HTMLURL, Title: pr.Title}, nil
 }
 
-func prHasLabel(labels []struct{ Name string `json:"name"` }, target string) bool {
+type docuchangoProjectConfig struct {
+	Project struct {
+		ID   string `yaml:"id"`
+		Name string `yaml:"name"`
+	} `yaml:"project"`
+	Structure struct {
+		RFCDir       string                       `yaml:"rfc_dir"`
+		DocsRoots    []string                     `yaml:"docs_roots"`
+		DocTypes     map[string]docuchangoDocType `yaml:"doc_types"`
+		DocumentDirs []string                     `yaml:"document_folders"`
+	} `yaml:"structure"`
+	Indexes     []docuchangoIndex      `yaml:"indexes"`
+	Subprojects []docuchangoSubproject `yaml:"subprojects"`
+	Security    struct {
+		AllowExternalPaths bool `yaml:"allow_external_paths"`
+	} `yaml:"security"`
+}
+
+type docuchangoDocType struct {
+	Schema  string   `yaml:"schema"`
+	Folders []string `yaml:"folders"`
+}
+
+type docuchangoIndex struct {
+	Targets []string `yaml:"targets"`
+}
+
+type docuchangoSubproject struct {
+	Path string `yaml:"path"`
+}
+
+func (s *docuchangoSubproject) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		return value.Decode(&s.Path)
+	}
+	type alias docuchangoSubproject
+	var out alias
+	if err := value.Decode(&out); err != nil {
+		return err
+	}
+	s.Path = out.Path
+	return nil
+}
+
+type docuchangoProjectContext struct {
+	config docuchangoProjectConfig
+	path   string
+	base   string
+}
+
+func (c *HTTPGitHubRFCClient) listDocuchangoProjectRFCs(ctx context.Context, apiBase, owner, name, branch, token string) ([]CatalogItem, bool, error) {
+	contexts, ok, err := c.loadDocuchangoProjectContexts(ctx, apiBase, owner, name, branch, token)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+
+	seen := map[string]struct{}{}
+	items := make([]CatalogItem, 0)
+	for _, root := range rfcRootsFromDocuchangoContexts(contexts) {
+		paths, err := c.listMarkdownFiles(ctx, apiBase, owner, name, branch, root, token)
+		if err != nil {
+			return nil, true, err
+		}
+		for _, filePath := range paths {
+			if !isDocuchangoRFCFilename(path.Base(filePath)) {
+				continue
+			}
+			if _, ok := seen[filePath]; ok {
+				continue
+			}
+			seen[filePath] = struct{}{}
+			items = append(items, CatalogItem{ID: filePath, Title: strings.TrimSuffix(path.Base(filePath), ".md"), Path: filePath})
+		}
+	}
+
+	for _, target := range indexTargetsFromDocuchangoContexts(contexts) {
+		prefix := globLiteralPrefix(target)
+		if prefix == "" {
+			continue
+		}
+		paths, err := c.listMarkdownFiles(ctx, apiBase, owner, name, branch, prefix, token)
+		if err != nil {
+			return nil, true, err
+		}
+		for _, filePath := range paths {
+			if !isDocuchangoRFCFilename(path.Base(filePath)) || !matchDocuchangoGlob(target, filePath) {
+				continue
+			}
+			if _, ok := seen[filePath]; ok {
+				continue
+			}
+			seen[filePath] = struct{}{}
+			items = append(items, CatalogItem{ID: filePath, Title: strings.TrimSuffix(path.Base(filePath), ".md"), Path: filePath})
+		}
+	}
+
+	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
+	return items, true, nil
+}
+
+func (c *HTTPGitHubRFCClient) docuchangoRFCPaths(ctx context.Context, apiBase, owner, name, branch, token string) ([]string, []string, bool, error) {
+	contexts, ok, err := c.loadDocuchangoProjectContexts(ctx, apiBase, owner, name, branch, token)
+	if err != nil || !ok {
+		return nil, nil, ok, err
+	}
+	return rfcRootsFromDocuchangoContexts(contexts), indexTargetsFromDocuchangoContexts(contexts), true, nil
+}
+
+func (c *HTTPGitHubRFCClient) loadDocuchangoProjectContexts(ctx context.Context, apiBase, owner, name, branch, token string) ([]docuchangoProjectContext, bool, error) {
+	if branch == "" {
+		branch = "HEAD"
+	}
+	rootCandidates := []string{"docs-project.yaml", "docs-cms/docs-project.yaml", "docs/docs-project.yaml"}
+	var root docuchangoProjectContext
+	found := false
+	for _, candidate := range rootCandidates {
+		config, err := c.getDocuchangoProjectConfig(ctx, apiBase, owner, name, branch, candidate, token)
+		if err != nil {
+			return nil, false, err
+		}
+		if config == nil {
+			continue
+		}
+		root = docuchangoProjectContext{config: *config, path: candidate, base: path.Dir(candidate)}
+		if root.base == "." {
+			root.base = ""
+		}
+		found = true
+		break
+	}
+	if !found {
+		return nil, false, nil
+	}
+
+	contexts := []docuchangoProjectContext{root}
+	seen := map[string]struct{}{root.path: {}}
+	for i := 0; i < len(contexts); i++ {
+		parent := contexts[i]
+		for _, subproject := range parent.config.Subprojects {
+			subPath := resolveDocuchangoConfigPath(parent.base, subproject.Path, parent.config.Security.AllowExternalPaths)
+			if subPath == "" {
+				continue
+			}
+			candidates := []string{subPath}
+			if path.Base(subPath) != "docs-project.yaml" {
+				candidates = []string{path.Join(subPath, "docs-project.yaml")}
+			}
+			for _, candidate := range candidates {
+				if _, ok := seen[candidate]; ok {
+					continue
+				}
+				config, err := c.getDocuchangoProjectConfig(ctx, apiBase, owner, name, branch, candidate, token)
+				if err != nil {
+					return nil, false, err
+				}
+				if config == nil {
+					continue
+				}
+				base := path.Dir(candidate)
+				if base == "." {
+					base = ""
+				}
+				seen[candidate] = struct{}{}
+				contexts = append(contexts, docuchangoProjectContext{config: *config, path: candidate, base: base})
+			}
+		}
+	}
+
+	return contexts, true, nil
+}
+
+func (c *HTTPGitHubRFCClient) getDocuchangoProjectConfig(ctx context.Context, apiBase, owner, name, branch, filePath, token string) (*docuchangoProjectConfig, error) {
+	content, ok, err := c.getRepositoryFile(ctx, apiBase, owner, name, branch, filePath, token)
+	if err != nil || !ok {
+		return nil, err
+	}
+	var config docuchangoProjectConfig
+	if err := yaml.Unmarshal([]byte(content), &config); err != nil {
+		return nil, fmt.Errorf("parse Docuchango project config %s: %w", filePath, err)
+	}
+	if strings.TrimSpace(config.Project.ID) == "" || strings.TrimSpace(config.Project.Name) == "" {
+		return nil, nil
+	}
+	return &config, nil
+}
+
+func (c *HTTPGitHubRFCClient) getRepositoryFile(ctx context.Context, apiBase, owner, name, branch, filePath, token string) (string, bool, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/contents/%s?ref=%s", apiBase, owner, name, path.Clean(strings.Trim(filePath, "/")), url.QueryEscape(branch))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", false, err
+	}
+	setGitHubHeaders(req, token)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		io.Copy(io.Discard, resp.Body) //nolint:errcheck
+		return "", false, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return "", false, fmt.Errorf("get repository file failed: %d %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var raw json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return "", false, err
+	}
+	if len(raw) > 0 && raw[0] == '[' {
+		return "", false, nil
+	}
+
+	var payload struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return "", false, err
+	}
+	if strings.TrimSpace(payload.Content) == "" {
+		return "", false, nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(payload.Content, "\n", ""))
+	if err != nil {
+		return "", false, err
+	}
+	return string(decoded), true, nil
+}
+
+func (c *HTTPGitHubRFCClient) listMarkdownFiles(ctx context.Context, apiBase, owner, name, branch, dirPath, token string) ([]string, error) {
+	dirPath = strings.Trim(path.Clean(strings.Trim(dirPath, "/")), "/")
+	url := fmt.Sprintf("%s/repos/%s/%s/contents/%s?ref=%s", apiBase, owner, name, dirPath, url.QueryEscape(branch))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	setGitHubHeaders(req, token)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		io.Copy(io.Discard, resp.Body) //nolint:errcheck
+		return nil, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return nil, fmt.Errorf("list markdown files failed: %d %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var payload []struct {
+		Path string `json:"path"`
+		Type string `json:"type"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+
+	var files []string
+	for _, item := range payload {
+		switch item.Type {
+		case "file":
+			if strings.HasSuffix(item.Path, ".md") {
+				files = append(files, item.Path)
+			}
+		case "dir":
+			childFiles, err := c.listMarkdownFiles(ctx, apiBase, owner, name, branch, item.Path, token)
+			if err != nil {
+				return nil, err
+			}
+			files = append(files, childFiles...)
+		}
+	}
+	return files, nil
+}
+
+func rfcRootsFromDocuchangoContexts(contexts []docuchangoProjectContext) []string {
+	seen := map[string]struct{}{}
+	var roots []string
+	for _, context := range contexts {
+		if len(context.config.Structure.DocTypes) > 0 {
+			docsRoots := context.config.Structure.DocsRoots
+			if len(docsRoots) == 0 {
+				docsRoots = []string{"."}
+			}
+			for name, docType := range context.config.Structure.DocTypes {
+				if name != "rfc" && docType.Schema != "rfc" {
+					continue
+				}
+				for _, docsRoot := range docsRoots {
+					for _, folder := range docType.Folders {
+						root := resolveDocuchangoConfigPath(path.Join(context.base, docsRoot), folder, context.config.Security.AllowExternalPaths)
+						if root == "" {
+							continue
+						}
+						if _, ok := seen[root]; !ok {
+							seen[root] = struct{}{}
+							roots = append(roots, root)
+						}
+					}
+				}
+			}
+			continue
+		}
+
+		rfcDir := strings.TrimSpace(context.config.Structure.RFCDir)
+		if rfcDir == "" {
+			rfcDir = "rfcs"
+		}
+		root := resolveDocuchangoConfigPath(context.base, rfcDir, context.config.Security.AllowExternalPaths)
+		if root == "" {
+			continue
+		}
+		if _, ok := seen[root]; !ok {
+			seen[root] = struct{}{}
+			roots = append(roots, root)
+		}
+	}
+	return roots
+}
+
+func indexTargetsFromDocuchangoContexts(contexts []docuchangoProjectContext) []string {
+	seen := map[string]struct{}{}
+	var targets []string
+	for _, context := range contexts {
+		for _, index := range context.config.Indexes {
+			for _, target := range index.Targets {
+				resolved := resolveDocuchangoConfigPath(context.base, target, context.config.Security.AllowExternalPaths)
+				if resolved == "" {
+					continue
+				}
+				if _, ok := seen[resolved]; !ok {
+					seen[resolved] = struct{}{}
+					targets = append(targets, resolved)
+				}
+			}
+		}
+	}
+	return targets
+}
+
+func resolveDocuchangoConfigPath(base, rel string, allowExternal bool) string {
+	rel = strings.Trim(strings.TrimSpace(rel), "/")
+	if rel == "" || rel == "." {
+		return strings.Trim(path.Clean(base), "/")
+	}
+	if !allowExternal && (rel == ".." || strings.HasPrefix(rel, "../") || strings.Contains(rel, "/../")) {
+		return ""
+	}
+	joined := path.Clean(path.Join(base, rel))
+	if joined == "." {
+		return ""
+	}
+	return strings.Trim(joined, "/")
+}
+
+func globLiteralPrefix(pattern string) string {
+	idx := strings.IndexAny(pattern, "*?[")
+	if idx == -1 {
+		return path.Dir(pattern)
+	}
+	prefix := pattern[:idx]
+	prefix = strings.TrimSuffix(prefix, "/")
+	if strings.HasSuffix(prefix, ".md") {
+		prefix = path.Dir(prefix)
+	}
+	return strings.Trim(path.Clean(prefix), "/")
+}
+
+func matchDocuchangoGlob(pattern, filePath string) bool {
+	matched, err := path.Match(pattern, filePath)
+	if err == nil && matched {
+		return true
+	}
+	if strings.Contains(pattern, "**") {
+		parts := strings.Split(pattern, "**")
+		if !strings.HasPrefix(filePath, parts[0]) {
+			return false
+		}
+		suffix := strings.TrimPrefix(parts[len(parts)-1], "/")
+		if suffix == "*.md" {
+			return strings.HasSuffix(filePath, ".md")
+		}
+		return strings.HasSuffix(filePath, suffix)
+	}
+	return false
+}
+
+func isRFCPathInDocuchangoProject(filePath string, roots, patterns []string) bool {
+	normalizedPath := strings.Trim(strings.TrimSpace(filePath), "/")
+	if !isDocuchangoRFCFilename(path.Base(normalizedPath)) {
+		return false
+	}
+	for _, root := range roots {
+		root = strings.Trim(strings.TrimSpace(root), "/")
+		if root != "" && strings.HasPrefix(normalizedPath, root+"/") {
+			return true
+		}
+	}
+	for _, pattern := range patterns {
+		if matchDocuchangoGlob(pattern, normalizedPath) {
+			return true
+		}
+	}
+	return false
+}
+
+func prHasLabel(labels []struct {
+	Name string `json:"name"`
+}, target string) bool {
 	for _, l := range labels {
 		if l.Name == target {
 			return true
