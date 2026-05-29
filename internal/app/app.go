@@ -82,6 +82,7 @@ func newMux(cfg config.Config) *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/repositories", repositoryHandler.ListRepositories)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}", repositoryHandler.GetRepository)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/validate", repositoryHandler.ValidateRepository)
+	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rotate-token", repositoryHandler.RotateRepositoryToken)
 
 	registryBaseURLs := map[string]string{}
 	for _, registry := range cfg.Registries {

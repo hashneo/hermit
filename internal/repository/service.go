@@ -62,6 +62,10 @@ type createInput struct {
 	RFCLabel       string
 }
 
+type rotateTokenInput struct {
+	Token string
+}
+
 type storedConfig struct {
 	Config
 	EncryptedToken string
@@ -327,6 +331,48 @@ func (s *Service) Validate(ctx context.Context, id string) (ValidationResponse, 
 	s.mu.Unlock()
 
 	return updated.Validation, nil
+}
+
+func (s *Service) RotateToken(ctx context.Context, id string, input rotateTokenInput) (Config, error) {
+	token := strings.TrimSpace(input.Token)
+	if token == "" {
+		return Config{}, fmt.Errorf("personal_access_token is required")
+	}
+
+	s.mu.RLock()
+	item, ok := s.items[id]
+	s.mu.RUnlock()
+	if !ok {
+		return Config{}, fmt.Errorf("repository not found")
+	}
+
+	validation := s.client.ValidatePAT(ctx, item.Owner, item.Name, token)
+	now := s.now().UTC().Format(time.RFC3339)
+	checks := make([]ValidationCheckResponse, 0, len(validation.Checks))
+	for _, c := range validation.Checks {
+		checks = append(checks, ValidationCheckResponse{Name: c.Name, Status: c.Status, Message: c.Message})
+	}
+
+	updated := item
+	updated.EncryptedToken = encryptToken(token)
+	updated.Validation = ValidationResponse{
+		Healthy:       validation.Healthy,
+		Checks:        checks,
+		ValidatedAt:   now,
+		LastErrorCode: validation.LastErrorCode,
+	}
+	if validation.Healthy {
+		updated.Auth.TokenLastValidatedAt = &now
+	} else {
+		updated.Auth.TokenLastValidatedAt = nil
+	}
+	updated.UpdatedAt = now
+
+	s.mu.Lock()
+	s.items[id] = updated
+	s.mu.Unlock()
+
+	return updated.Config, nil
 }
 
 func (s *Service) newID() string {

@@ -89,6 +89,34 @@ func (h *Handler) ValidateRepository(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, validation)
 }
 
+func (h *Handler) RotateRepositoryToken(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("repositoryId")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "invalid_repository_id", "repositoryId path parameter is required")
+		return
+	}
+
+	var payload struct {
+		PersonalAccessToken string `json:"personal_access_token"`
+	}
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
+		return
+	}
+
+	cfg, err := h.service.RotateToken(r.Context(), id, rotateTokenInput{Token: payload.PersonalAccessToken})
+	if err != nil {
+		if err.Error() == "repository not found" {
+			writeError(w, http.StatusNotFound, "repository_not_found", "repository configuration was not found")
+			return
+		}
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, cfg)
+}
+
 func decodeJSON(r *http.Request, payload any) error {
 	if r.Body == nil {
 		return io.EOF

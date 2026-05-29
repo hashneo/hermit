@@ -16,6 +16,7 @@ func TestRepositoryConfigCreateGetValidate(t *testing.T) {
 	mux.HandleFunc("POST /api/v1/repositories", handler.CreateRepository)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}", handler.GetRepository)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/validate", handler.ValidateRepository)
+	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rotate-token", handler.RotateRepositoryToken)
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/repositories", bytes.NewBufferString(`{"owner":"hashicorp","name":"hermit","personal_access_token":"ghp_12345678901234567890"}`))
 	createResp := httptest.NewRecorder()
@@ -56,6 +57,21 @@ func TestRepositoryConfigCreateGetValidate(t *testing.T) {
 	}
 	if !validation.Healthy {
 		t.Fatalf("validate healthy = false, want true")
+	}
+
+	rotateReq := httptest.NewRequest(http.MethodPost, "/api/v1/repositories/"+created.ID+"/rotate-token", bytes.NewBufferString(`{"personal_access_token":"ghp_rotated1234567890"}`))
+	rotateResp := httptest.NewRecorder()
+	mux.ServeHTTP(rotateResp, rotateReq)
+	if rotateResp.Code != http.StatusOK {
+		t.Fatalf("rotate status = %d, want %d", rotateResp.Code, http.StatusOK)
+	}
+
+	var rotated Config
+	if err := json.Unmarshal(rotateResp.Body.Bytes(), &rotated); err != nil {
+		t.Fatalf("decode rotate response: %v", err)
+	}
+	if !rotated.Validation.Healthy {
+		t.Fatalf("expected healthy validation after rotation")
 	}
 }
 

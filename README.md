@@ -413,6 +413,54 @@ repositories:
 
 Configured repositories are seeded at startup (when their token env var is set), and are available in the UI selection context.
 
+### Hermit CLI
+
+`hermitctl` talks to the running Hermit server using the configured `listen_address` from `config/hermit.yaml` by default. Override the target with `--addr` or the config file with `--config`.
+
+```bash
+go run ./cmd/hermitctl health
+go run ./cmd/hermitctl repo list
+go run ./cmd/hermitctl repo get repo_2001
+go run ./cmd/hermitctl repo validate repo_2001
+go run ./cmd/hermitctl repo debug repo_2001
+```
+
+Add a repository with a token from a secure prompt:
+
+```bash
+go run ./cmd/hermitctl repo add \
+  --owner gitea_admin \
+  --name hermit-rfcs \
+  --registry gitea-local
+```
+
+For automation, pass tokens on stdin so they do not appear in shell history:
+
+```bash
+printf '%s' "$GITEA_TOKEN" | go run ./cmd/hermitctl repo rotate-token --token-stdin repo_2001
+```
+
+You can also rotate from a `.env` file without exporting the token into the shell:
+
+```bash
+go run ./cmd/hermitctl repo rotate-token --env-file .env --token-env GITEA_TOKEN repo_2001
+```
+
+If `--token-env` is omitted with `--env-file`, `hermitctl` reads `HERMIT_PAT`.
+
+If your Git credential helper already stores the token, `hermitctl` can read it without exporting anything:
+
+```bash
+go run ./cmd/hermitctl repo add \
+  --owner jrepp \
+  --name z \
+  --registry github-enterprise \
+  --git-credential \
+  --credential-host github.ibm.com
+```
+
+Use `--json` on any server command for machine-readable output.
+
 Validate config locally:
 
 ```bash
