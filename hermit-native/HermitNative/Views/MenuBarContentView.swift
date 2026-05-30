@@ -93,13 +93,14 @@ struct MenuBarContentView: View {
                 return
             }
             struct Item: Decodable {
+                let id: String
                 let owner: String
                 let name: String
                 let docsPath: String
                 let rfcLabel: String
 
                 private enum CodingKeys: String, CodingKey {
-                    case owner, name
+                    case id, owner, name
                     case docsPath = "docs_path_policy"
                     case rfcLabel = "rfc_label"
                 }
@@ -108,7 +109,8 @@ struct MenuBarContentView: View {
             let page = try JSONDecoder().decode(Page.self, from: data)
             let fallbackAccountID = accountStore.connections.first?.id ?? UUID()
             serverRepos = page.items.map {
-                Repository(accountID: fallbackAccountID,
+                Repository(serverID: $0.id,
+                           accountID: fallbackAccountID,
                            owner: $0.owner,
                            name: $0.name,
                            docsPath: $0.docsPath,

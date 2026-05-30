@@ -3,10 +3,13 @@ package repository
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"hermit/internal/config"
 	"os"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -74,12 +77,18 @@ type storedConfig struct {
 }
 
 type Service struct {
-	mu     sync.RWMutex
-	items  map[string]storedConfig
-	byName map[string]string
-	client GitHubClient
-	now    func() time.Time
-	idSeq  atomic.Int64
+	mu             sync.RWMutex
+	items          map[string]storedConfig
+	byName         map[string]string
+	client         GitHubClient
+	now            func() time.Time
+	idSeq          atomic.Int64
+	storePath      string
+	loadedFromDisk bool
+}
+
+type persistedStore struct {
+	Items []storedConfig `json:"items"`
 }
 
 func repositoryKey(registry, owner, name string) string {
@@ -103,7 +112,25 @@ func NewService(client GitHubClient) *Service {
 	return s
 }
 
+func NewPersistentService(client GitHubClient, dataDir string) *Service {
+	s := NewService(client)
+	if strings.TrimSpace(dataDir) == "" {
+		return s
+	}
+	s.storePath = filepath.Join(dataDir, "repositories.json")
+	if err := s.loadFromDisk(); err != nil {
+		// Treat malformed local repository state as empty rather than preventing
+		// the embedded server from starting; repository validation will surface
+		// missing config in the client.
+		return s
+	}
+	return s
+}
+
 func (s *Service) SeedFromConfig(repositories []config.Repository) {
+	if s.loadedFromDisk {
+		return
+	}
 	for _, repository := range repositories {
 		registry := repository.Registry
 		if registry == "" {
@@ -180,6 +207,7 @@ func (s *Service) SeedFromConfig(repositories []config.Repository) {
 		}
 		s.items[cfg.ID] = storedConfig{Config: cfg, EncryptedToken: encryptToken(token)}
 		s.byName[key] = cfg.ID
+		_ = s.saveLocked()
 		s.mu.Unlock()
 	}
 }
@@ -255,6 +283,12 @@ func (s *Service) Create(ctx context.Context, input createInput) (Config, error)
 		EncryptedToken: encryptToken(token),
 	}
 	s.byName[fullName] = cfg.ID
+	if err := s.saveLocked(); err != nil {
+		delete(s.items, cfg.ID)
+		delete(s.byName, fullName)
+		s.mu.Unlock()
+		return Config{}, err
+	}
 	s.mu.Unlock()
 
 	return cfg, nil
@@ -279,6 +313,7 @@ func (s *Service) Delete(id string) bool {
 	}
 	delete(s.items, id)
 	delete(s.byName, repositoryKey(item.Registry, item.Owner, item.Name))
+	_ = s.saveLocked()
 	return true
 }
 
@@ -343,6 +378,7 @@ func (s *Service) Validate(ctx context.Context, id string) (ValidationResponse, 
 
 	s.mu.Lock()
 	s.items[id] = updated
+	_ = s.saveLocked()
 	s.mu.Unlock()
 
 	return updated.Validation, nil
@@ -385,6 +421,7 @@ func (s *Service) RotateToken(ctx context.Context, id string, input rotateTokenI
 
 	s.mu.Lock()
 	s.items[id] = updated
+	_ = s.saveLocked()
 	s.mu.Unlock()
 
 	return updated.Config, nil
@@ -392,6 +429,53 @@ func (s *Service) RotateToken(ctx context.Context, id string, input rotateTokenI
 
 func (s *Service) newID() string {
 	return fmt.Sprintf("repo_%d", s.idSeq.Add(1))
+}
+
+func (s *Service) loadFromDisk() error {
+	data, err := os.ReadFile(s.storePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	s.loadedFromDisk = true
+	var store persistedStore
+	if err := json.Unmarshal(data, &store); err != nil {
+		return err
+	}
+	var maxID int64 = 2000
+	for _, item := range store.Items {
+		if item.ID == "" {
+			continue
+		}
+		s.items[item.ID] = item
+		s.byName[repositoryKey(item.Registry, item.Owner, item.Name)] = item.ID
+		if n, err := strconv.ParseInt(strings.TrimPrefix(item.ID, "repo_"), 10, 64); err == nil && n > maxID {
+			maxID = n
+		}
+	}
+	s.idSeq.Store(maxID)
+	return nil
+}
+
+func (s *Service) saveLocked() error {
+	if s.storePath == "" {
+		return nil
+	}
+	items := make([]storedConfig, 0, len(s.items))
+	for _, item := range s.items {
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+	data, err := json.MarshalIndent(persistedStore{Items: items}, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(s.storePath), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(s.storePath, data, 0o600)
 }
 
 func encryptToken(token string) string {

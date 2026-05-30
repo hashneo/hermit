@@ -97,6 +97,7 @@ actor HermitAPIClient: HermitClientProtocol {
 
     struct Config {
         let baseURL: String   // e.g. "http://127.0.0.1:8765"
+        let repositoryID: String?
         let owner:   String
         let repo:    String
         let docsPath: String
@@ -531,6 +532,7 @@ actor HermitAPIClient: HermitClientProtocol {
     /// Returns the server-assigned repo ID (e.g. "repo_2001") by fetching
     /// /api/v1/repositories and matching owner+name. Cached after first call.
     private func repoID() async throws -> String {
+        if let repositoryID = config.repositoryID, !repositoryID.isEmpty { return repositoryID }
         if let cached = resolvedRepoID { return cached }
 
         let u = url("/api/v1/repositories")

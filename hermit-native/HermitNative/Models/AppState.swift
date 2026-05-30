@@ -245,6 +245,7 @@ final class AppState: ObservableObject {
         let activeRepo = RepositoryStore.shared.repositories.first
         let cfg = HermitAPIClient.Config(
             baseURL:  serverBaseURL,
+            repositoryID: activeRepo?.serverID,
             owner:    activeRepo?.owner    ?? repoOwner,
             repo:     activeRepo?.name     ?? repoName,
             docsPath: activeRepo?.docsPath ?? docsPath,
@@ -273,6 +274,7 @@ final class AppState: ObservableObject {
         }
         let cfg = HermitAPIClient.Config(
             baseURL:  serverBaseURL,
+            repositoryID: repo.serverID,
             owner:    repo.owner,
             repo:     repo.name,
             docsPath: repo.docsPath,

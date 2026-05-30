@@ -75,7 +75,7 @@ func (a *App) Run(ctx context.Context) error {
 
 func newMux(cfg config.Config) *http.ServeMux {
 	mux := http.NewServeMux()
-	repositoryService := repository.NewService(nil)
+	repositoryService := repository.NewPersistentService(nil, cfg.DataDir)
 	repositoryService.SeedFromConfig(cfg.Repositories)
 	repositoryHandler := repository.NewHandler(repositoryService)
 	mux.HandleFunc("POST /api/v1/repositories", repositoryHandler.CreateRepository)

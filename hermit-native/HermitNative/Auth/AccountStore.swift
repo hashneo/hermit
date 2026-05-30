@@ -56,6 +56,7 @@ extension Connection: Codable {
 /// A repository belonging to an account (connection).
 struct Repository: Identifiable, Codable, Equatable {
     var id:        UUID   = UUID()
+    var serverID:  String? = nil
     var accountID: UUID           // foreign key → Connection.id
     var owner:     String         // e.g. "gitea_admin"
     var name:      String         // e.g. "hermit-rfcs"

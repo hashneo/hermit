@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -117,5 +119,37 @@ func TestRepositoryConfigCreateRejectsInvalidPAT(t *testing.T) {
 	}
 	if created.Validation.LastErrorCode == "" {
 		t.Fatalf("expected validation last error code")
+	}
+}
+
+func TestPersistentRepositoryConfigSurvivesServiceRestart(t *testing.T) {
+	dataDir := t.TempDir()
+	service := NewPersistentService(nil, dataDir)
+
+	created, err := service.Create(t.Context(), createInput{
+		Owner:          "hashicorp",
+		Name:           "gantry",
+		Registry:       "github",
+		BaseURL:        "https://api.github.com/",
+		Token:          "ghp_12345678901234567890",
+		DocsPathPolicy: "docs",
+	})
+	if err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+
+	reloaded := NewPersistentService(nil, dataDir)
+	got, ok := reloaded.Get(created.ID)
+	if !ok {
+		t.Fatalf("expected repository %s after reload", created.ID)
+	}
+	if got.Owner != "hashicorp" || got.Name != "gantry" || got.DocsPathPolicy != "docs" {
+		t.Fatalf("unexpected repository after reload: %+v", got)
+	}
+	if got.BaseURL != "https://api.github.com" {
+		t.Fatalf("base URL after reload = %q", got.BaseURL)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "repositories.json")); err != nil {
+		t.Fatalf("expected repository store file: %v", err)
 	}
 }
