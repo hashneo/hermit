@@ -30,6 +30,34 @@ After it completes:
 - Hermit server runs at `http://localhost:8080`
 - HermitNative.app is open on macOS
 
+#### First-run notes
+
+On a fresh checkout, run these once before `make dev`:
+
+```bash
+cd ui && npm install
+cd ..
+open -a Docker
+```
+
+`make dev` uses full Xcode from `/Applications/Xcode.app`, even if
+`xcode-select` points at Command Line Tools. The macOS app can build with
+ad-hoc signing and an empty `HERMIT_TEAM_ID`; physical iPad deployment still
+requires an Apple Development certificate and a provisioned device.
+
+If Homebrew Python is broken or too new for local plist handling, use the
+default repo path:
+
+```bash
+make dev PYTHON=/usr/bin/python3
+```
+
+This is also the Makefile default.
+
+If `make dev` prints `IPAD_UDID not set — skipping iPad deploy`, the macOS app
+was still built and launched. Configure `.local.mk` only when you want to deploy
+to a connected physical iPad.
+
 ---
 
 ### Manual Setup
