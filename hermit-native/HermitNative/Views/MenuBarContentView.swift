@@ -11,8 +11,7 @@ struct MenuBarContentView: View {
     @ObservedObject private var repoStore  = RepositoryStore.shared
     @ObservedObject private var accountStore = AccountStore.shared
     @ObservedObject private var advertiser = PairingAdvertiser.shared
-    @State private var serverRepos: [Repository] = []
-    @State private var repoLoadError: String? = nil
+    @StateObject private var serverRepoStore = ServerRepositoryMenuStore()
 #endif
 
 #if os(macOS)
@@ -44,7 +43,7 @@ struct MenuBarContentView: View {
                 RepoSubmenu(repo: repo, appState: appState, serverPort: serverMgr.port)
             }
         }
-        if let repoLoadError {
+        if let repoLoadError = serverRepoStore.errorMessage {
             Text("Repo sync failed: \(repoLoadError)")
         }
 
@@ -64,7 +63,7 @@ struct MenuBarContentView: View {
         Button("Refresh All") {
             RepoRFCCache.shared.invalidateAll()
             NotificationCenter.default.post(name: .hermitRefreshAll, object: nil)
-            Task { await refreshServerRepos() }
+            Task { await serverRepoStore.refresh(port: serverMgr.port, accountID: accountStore.connections.first?.id) }
         }
 
         Divider()
@@ -73,23 +72,46 @@ struct MenuBarContentView: View {
             NSApplication.shared.terminate(nil)
         }
         .keyboardShortcut("q")
-        .task(id: serverMgr.port) {
-            await refreshServerRepos()
+        .onAppear { serverRepoStore.start(portProvider: { serverMgr.port }, accountIDProvider: { accountStore.connections.first?.id }) }
+        .onChange(of: serverMgr.port) { _, port in
+            Task { await serverRepoStore.refresh(port: port, accountID: accountStore.connections.first?.id) }
         }
     }
 
     private var displayedRepos: [Repository] {
-        serverRepos.isEmpty ? repoStore.repositories : serverRepos
+        serverRepoStore.repositories.isEmpty ? repoStore.repositories : serverRepoStore.repositories
     }
 
-    private func refreshServerRepos() async {
-        guard let port = serverMgr.port,
+#else
+    var body: some View { EmptyView() }
+#endif
+}
+
+@MainActor
+private final class ServerRepositoryMenuStore: ObservableObject {
+    @Published private(set) var repositories: [Repository] = []
+    @Published private(set) var errorMessage: String? = nil
+
+    private var task: Task<Void, Never>? = nil
+
+    func start(portProvider: @escaping @MainActor () -> Int?, accountIDProvider: @escaping @MainActor () -> UUID?) {
+        guard task == nil else { return }
+        task = Task { @MainActor in
+            while !Task.isCancelled {
+                await refresh(port: portProvider(), accountID: accountIDProvider())
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+
+    func refresh(port: Int?, accountID: UUID?) async {
+        guard let port,
               let url = URL(string: "http://127.0.0.1:\(port)/api/v1/repositories") else { return }
         do {
             let (data, response) = try await URLSession.shared.data(from: url)
             guard let http = response as? HTTPURLResponse,
                   (200..<300).contains(http.statusCode) else {
-                repoLoadError = "server returned an error"
+                errorMessage = "server returned an error"
                 return
             }
             struct Item: Decodable {
@@ -107,8 +129,8 @@ struct MenuBarContentView: View {
             }
             struct Page: Decodable { let items: [Item] }
             let page = try JSONDecoder().decode(Page.self, from: data)
-            let fallbackAccountID = accountStore.connections.first?.id ?? UUID()
-            serverRepos = page.items.map {
+            let fallbackAccountID = accountID ?? UUID()
+            repositories = page.items.map {
                 Repository(serverID: $0.id,
                            accountID: fallbackAccountID,
                            owner: $0.owner,
@@ -116,14 +138,11 @@ struct MenuBarContentView: View {
                            docsPath: $0.docsPath,
                            rfcLabel: $0.rfcLabel)
             }
-            repoLoadError = nil
+            errorMessage = nil
         } catch {
-            repoLoadError = error.localizedDescription
+            errorMessage = error.localizedDescription
         }
     }
-#else
-    var body: some View { EmptyView() }
-#endif
 }
 
 // MARK: - Per-repo submenu
