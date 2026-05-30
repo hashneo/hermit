@@ -9,7 +9,10 @@ struct MenuBarContentView: View {
 #if os(macOS)
     @ObservedObject private var serverMgr  = EmbeddedServerManager.shared
     @ObservedObject private var repoStore  = RepositoryStore.shared
+    @ObservedObject private var accountStore = AccountStore.shared
     @ObservedObject private var advertiser = PairingAdvertiser.shared
+    @State private var serverRepos: [Repository] = []
+    @State private var repoLoadError: String? = nil
 #endif
 
 #if os(macOS)
@@ -34,12 +37,15 @@ struct MenuBarContentView: View {
         Divider()
 
         // ── Per-repo submenus ──────────────────────────────────────────
-        if repoStore.repositories.isEmpty {
+        if displayedRepos.isEmpty {
             Text("No repositories configured")
         } else {
-            ForEach(repoStore.repositories) { repo in
+            ForEach(displayedRepos) { repo in
                 RepoSubmenu(repo: repo, appState: appState, serverPort: serverMgr.port)
             }
+        }
+        if let repoLoadError {
+            Text("Repo sync failed: \(repoLoadError)")
         }
 
         Divider()
@@ -58,6 +64,7 @@ struct MenuBarContentView: View {
         Button("Refresh All") {
             RepoRFCCache.shared.invalidateAll()
             NotificationCenter.default.post(name: .hermitRefreshAll, object: nil)
+            Task { await refreshServerRepos() }
         }
 
         Divider()
@@ -66,6 +73,51 @@ struct MenuBarContentView: View {
             NSApplication.shared.terminate(nil)
         }
         .keyboardShortcut("q")
+        .task(id: serverMgr.port) {
+            await refreshServerRepos()
+        }
+    }
+
+    private var displayedRepos: [Repository] {
+        serverRepos.isEmpty ? repoStore.repositories : serverRepos
+    }
+
+    private func refreshServerRepos() async {
+        guard let port = serverMgr.port,
+              let url = URL(string: "http://127.0.0.1:\(port)/api/v1/repositories") else { return }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode) else {
+                repoLoadError = "server returned an error"
+                return
+            }
+            struct Item: Decodable {
+                let owner: String
+                let name: String
+                let docsPath: String
+                let rfcLabel: String
+
+                private enum CodingKeys: String, CodingKey {
+                    case owner, name
+                    case docsPath = "docs_path_policy"
+                    case rfcLabel = "rfc_label"
+                }
+            }
+            struct Page: Decodable { let items: [Item] }
+            let page = try JSONDecoder().decode(Page.self, from: data)
+            let fallbackAccountID = accountStore.connections.first?.id ?? UUID()
+            serverRepos = page.items.map {
+                Repository(accountID: fallbackAccountID,
+                           owner: $0.owner,
+                           name: $0.name,
+                           docsPath: $0.docsPath,
+                           rfcLabel: $0.rfcLabel)
+            }
+            repoLoadError = nil
+        } catch {
+            repoLoadError = error.localizedDescription
+        }
     }
 #else
     var body: some View { EmptyView() }
