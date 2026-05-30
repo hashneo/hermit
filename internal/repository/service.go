@@ -267,6 +267,18 @@ func (s *Service) Get(id string) (Config, bool) {
 	return item.Config, true
 }
 
+func (s *Service) Delete(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.items[id]
+	if !ok {
+		return false
+	}
+	delete(s.items, id)
+	delete(s.byName, repositoryKey(item.Registry, item.Owner, item.Name))
+	return true
+}
+
 func (s *Service) List() []Config {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

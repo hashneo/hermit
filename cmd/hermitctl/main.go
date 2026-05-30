@@ -128,6 +128,8 @@ func (c cli) runRepo(args []string, stdin io.Reader, stdout, stderr io.Writer) e
 		return c.repoList(stdout)
 	case "get":
 		return c.repoGet(args[1:], stdout)
+	case "remove", "delete":
+		return c.repoRemove(args[1:], stdout)
 	case "validate":
 		return c.repoValidate(args[1:], stdout)
 	case "rotate-token":
@@ -202,6 +204,21 @@ func (c cli) repoGet(args []string, stdout io.Writer) error {
 		return err
 	}
 	return printRepository(stdout, cfg, c.jsonOut)
+}
+
+func (c cli) repoRemove(args []string, stdout io.Writer) error {
+	id, err := singleID("repo remove", args)
+	if err != nil {
+		return err
+	}
+	if err := c.do(http.MethodDelete, "/api/v1/repositories/"+url.PathEscape(id), nil, nil); err != nil {
+		return err
+	}
+	if c.jsonOut {
+		return printJSON(stdout, map[string]string{"removed": id})
+	}
+	fmt.Fprintf(stdout, "removed: %s\n", id)
+	return nil
 }
 
 func (c cli) repoValidate(args []string, stdout io.Writer) error {
@@ -560,7 +577,7 @@ func usage(w io.Writer) {
 
 func repoUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: hermitctl repo <command>")
-	fmt.Fprintln(w, "commands: add, list, get, validate, rotate-token, debug")
+	fmt.Fprintln(w, "commands: add, list, get, remove, validate, rotate-token, debug")
 }
 
 func min(a, b int) int {

@@ -15,6 +15,7 @@ func TestRepositoryConfigCreateGetValidate(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/repositories", handler.CreateRepository)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}", handler.GetRepository)
+	mux.HandleFunc("DELETE /api/v1/repositories/{repositoryId}", handler.DeleteRepository)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/validate", handler.ValidateRepository)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rotate-token", handler.RotateRepositoryToken)
 
@@ -72,6 +73,20 @@ func TestRepositoryConfigCreateGetValidate(t *testing.T) {
 	}
 	if !rotated.Validation.Healthy {
 		t.Fatalf("expected healthy validation after rotation")
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/repositories/"+created.ID, nil)
+	deleteResp := httptest.NewRecorder()
+	mux.ServeHTTP(deleteResp, deleteReq)
+	if deleteResp.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d, want %d", deleteResp.Code, http.StatusNoContent)
+	}
+
+	getDeletedReq := httptest.NewRequest(http.MethodGet, "/api/v1/repositories/"+created.ID, nil)
+	getDeletedResp := httptest.NewRecorder()
+	mux.ServeHTTP(getDeletedResp, getDeletedReq)
+	if getDeletedResp.Code != http.StatusNotFound {
+		t.Fatalf("get deleted status = %d, want %d", getDeletedResp.Code, http.StatusNotFound)
 	}
 }
 

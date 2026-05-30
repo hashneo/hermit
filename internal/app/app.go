@@ -81,6 +81,7 @@ func newMux(cfg config.Config) *http.ServeMux {
 	mux.HandleFunc("POST /api/v1/repositories", repositoryHandler.CreateRepository)
 	mux.HandleFunc("GET /api/v1/repositories", repositoryHandler.ListRepositories)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}", repositoryHandler.GetRepository)
+	mux.HandleFunc("DELETE /api/v1/repositories/{repositoryId}", repositoryHandler.DeleteRepository)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/validate", repositoryHandler.ValidateRepository)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rotate-token", repositoryHandler.RotateRepositoryToken)
 

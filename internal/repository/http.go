@@ -73,6 +73,19 @@ func (h *Handler) ListRepositories(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+func (h *Handler) DeleteRepository(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("repositoryId")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "invalid_repository_id", "repositoryId path parameter is required")
+		return
+	}
+	if !h.service.Delete(id) {
+		writeError(w, http.StatusNotFound, "repository_not_found", "repository configuration was not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) ValidateRepository(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("repositoryId")
 	if id == "" {
