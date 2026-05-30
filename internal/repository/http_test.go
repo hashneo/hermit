@@ -19,7 +19,7 @@ func TestRepositoryConfigCreateGetValidate(t *testing.T) {
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/validate", handler.ValidateRepository)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rotate-token", handler.RotateRepositoryToken)
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/repositories", bytes.NewBufferString(`{"owner":"hashicorp","name":"hermit","personal_access_token":"ghp_12345678901234567890"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/repositories", bytes.NewBufferString(`{"owner":"hashicorp","name":"hermit","base_url":"https://github.example.com/api/v3/","personal_access_token":"ghp_12345678901234567890"}`))
 	createResp := httptest.NewRecorder()
 	mux.ServeHTTP(createResp, createReq)
 
@@ -36,6 +36,9 @@ func TestRepositoryConfigCreateGetValidate(t *testing.T) {
 	}
 	if created.Auth.Method != "pat" {
 		t.Fatalf("auth method = %q, want %q", created.Auth.Method, "pat")
+	}
+	if created.BaseURL != "https://github.example.com/api/v3" {
+		t.Fatalf("base URL = %q, want normalized GitHub Enterprise API URL", created.BaseURL)
 	}
 
 	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/repositories/"+created.ID, nil)

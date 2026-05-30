@@ -14,8 +14,8 @@ type fakeResolver struct {
 	owner, name, registry, branch, docsPath, token string
 }
 
-func (f *fakeResolver) ResolveRepositoryAccess(id string) (owner, name, registry, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool) {
-	return f.owner, f.name, f.registry, f.branch, f.docsPath, "hermit:rfc-ready", f.token, true
+func (f *fakeResolver) ResolveRepositoryAccess(id string) (owner, name, registry, baseURL, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool) {
+	return f.owner, f.name, f.registry, "", f.branch, f.docsPath, "hermit:rfc-ready", f.token, true
 }
 
 func TestGetDocument(t *testing.T) {

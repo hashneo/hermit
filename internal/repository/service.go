@@ -43,6 +43,7 @@ type Config struct {
 	Owner          string             `json:"owner"`
 	Name           string             `json:"name"`
 	Registry       string             `json:"registry"`
+	BaseURL        string             `json:"base_url,omitempty"`
 	DefaultBranch  string             `json:"default_branch"`
 	DocsPathPolicy string             `json:"docs_path_policy"`
 	RFCLabel       string             `json:"rfc_label"`
@@ -56,6 +57,7 @@ type createInput struct {
 	Owner          string
 	Name           string
 	Registry       string
+	BaseURL        string
 	Token          string
 	DefaultBranch  string
 	DocsPathPolicy string
@@ -229,6 +231,7 @@ func (s *Service) Create(ctx context.Context, input createInput) (Config, error)
 		Owner:          input.Owner,
 		Name:           input.Name,
 		Registry:       input.Registry,
+		BaseURL:        strings.TrimRight(strings.TrimSpace(input.BaseURL), "/"),
 		DefaultBranch:  input.DefaultBranch,
 		DocsPathPolicy: input.DocsPathPolicy,
 		RFCLabel:       input.RFCLabel,
@@ -298,16 +301,16 @@ func (s *Service) List() []Config {
 	return items
 }
 
-func (s *Service) ResolveRepositoryAccess(id string) (owner, name, registry, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool) {
+func (s *Service) ResolveRepositoryAccess(id string) (owner, name, registry, baseURL, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	item, exists := s.items[id]
 	if !exists {
-		return "", "", "", "", "", "", "", false
+		return "", "", "", "", "", "", "", "", false
 	}
 
-	return item.Owner, item.Name, item.Registry, item.DefaultBranch, item.DocsPathPolicy, item.RFCLabel, decryptToken(item.EncryptedToken), true
+	return item.Owner, item.Name, item.Registry, item.BaseURL, item.DefaultBranch, item.DocsPathPolicy, item.RFCLabel, decryptToken(item.EncryptedToken), true
 }
 
 func (s *Service) Validate(ctx context.Context, id string) (ValidationResponse, error) {

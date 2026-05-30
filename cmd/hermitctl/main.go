@@ -28,6 +28,7 @@ type repositoryConfig struct {
 	Owner          string             `json:"owner"`
 	Name           string             `json:"name"`
 	Registry       string             `json:"registry"`
+	BaseURL        string             `json:"base_url,omitempty"`
 	DefaultBranch  string             `json:"default_branch"`
 	DocsPathPolicy string             `json:"docs_path_policy"`
 	RFCLabel       string             `json:"rfc_label"`
@@ -150,6 +151,7 @@ func (c cli) repoAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) e
 	owner := fs.String("owner", "", "repository owner")
 	name := fs.String("name", "", "repository name")
 	registry := fs.String("registry", "github", "configured registry name")
+	baseURL := fs.String("base-url", "", "registry API base URL for this repository")
 	branch := fs.String("branch", "main", "default branch")
 	docsPath := fs.String("docs-path", "docs-cms/rfcs/", "legacy docs path policy")
 	token := fs.String("token", "", "PAT value; prefer --token-stdin or prompt")
@@ -169,6 +171,7 @@ func (c cli) repoAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) e
 		"owner":                 *owner,
 		"name":                  *name,
 		"registry":              *registry,
+		"base_url":              *baseURL,
 		"default_branch":        *branch,
 		"docs_path_policy":      *docsPath,
 		"personal_access_token": pat,
@@ -536,6 +539,9 @@ func printRepository(w io.Writer, repo repositoryConfig, jsonOut bool) error {
 	fmt.Fprintf(w, "id: %s\n", repo.ID)
 	fmt.Fprintf(w, "repository: %s/%s\n", repo.Owner, repo.Name)
 	fmt.Fprintf(w, "registry: %s\n", repo.Registry)
+	if repo.BaseURL != "" {
+		fmt.Fprintf(w, "base_url: %s\n", repo.BaseURL)
+	}
 	fmt.Fprintf(w, "default_branch: %s\n", repo.DefaultBranch)
 	fmt.Fprintf(w, "docs_path_policy: %s\n", repo.DocsPathPolicy)
 	fmt.Fprintf(w, "healthy: %t\n", repo.Validation.Healthy)

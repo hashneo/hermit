@@ -19,6 +19,7 @@ func (h *Handler) CreateRepository(w http.ResponseWriter, r *http.Request) {
 		Owner               string `json:"owner"`
 		Name                string `json:"name"`
 		Registry            string `json:"registry"`
+		BaseURL             string `json:"base_url"`
 		PersonalAccessToken string `json:"personal_access_token"`
 		DefaultBranch       string `json:"default_branch"`
 		DocsPathPolicy      string `json:"docs_path_policy"`
@@ -33,6 +34,7 @@ func (h *Handler) CreateRepository(w http.ResponseWriter, r *http.Request) {
 		Owner:          payload.Owner,
 		Name:           payload.Name,
 		Registry:       payload.Registry,
+		BaseURL:        payload.BaseURL,
 		Token:          payload.PersonalAccessToken,
 		DefaultBranch:  payload.DefaultBranch,
 		DocsPathPolicy: payload.DocsPathPolicy,

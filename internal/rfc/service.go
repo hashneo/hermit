@@ -106,7 +106,7 @@ func (s *Service) WithThreadResolver(tr ThreadResolverService) {
 var docuchangoRFCFilenamePattern = regexp.MustCompile(`^rfc-[0-9]{3}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$`)
 
 type RepositoryResolver interface {
-	ResolveRepositoryAccess(id string) (owner, name, registry, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool)
+	ResolveRepositoryAccess(id string) (owner, name, registry, baseURL, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool)
 }
 
 func NewServiceWithRepositoryResolver(resolver RepositoryResolver, registries map[string]string) *Service {
@@ -249,7 +249,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 		return nil, fmt.Errorf("repository resolver is not configured")
 	}
 
-	owner, name, registry, branch, docsPath, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, branch, docsPath, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return nil, fmt.Errorf("repository not found")
 	}
@@ -262,7 +262,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 		client = NewHTTPGitHubRFCClient()
 	}
 
-	baseURL := s.registryBaseURL(registry)
+	baseURL := s.registryBaseURL(registry, repoBaseURL)
 	mainItems, err := client.ListRFCs(ctx, baseURL, owner, name, branch, docsPath, token)
 	if err != nil {
 		return nil, err
@@ -367,7 +367,7 @@ func (s *Service) SubmitForReview(ctx context.Context, repositoryID, rfcPath str
 		return SubmitForReviewResult{}, fmt.Errorf("repository resolver is not configured")
 	}
 
-	owner, name, registry, branch, _, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, branch, _, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return SubmitForReviewResult{}, fmt.Errorf("repository not found")
 	}
@@ -379,7 +379,7 @@ func (s *Service) SubmitForReview(ctx context.Context, repositoryID, rfcPath str
 	if !ok {
 		client = NewHTTPGitHubRFCClient()
 	}
-	baseURL := s.registryBaseURL(registry)
+	baseURL := s.registryBaseURL(registry, repoBaseURL)
 
 	// 1. Ensure the rfc-ready label exists.
 	if err := client.EnsureLabel(ctx, baseURL, owner, name, rfcLabel, "0075ca", "RFC ready for review", token); err != nil {
@@ -430,7 +430,7 @@ func (s *Service) SubmitForReview(ctx context.Context, repositoryID, rfcPath str
 type AcceptRFCResult struct {
 	Merged           bool   `json:"merged"`
 	BlockedByCI      bool   `json:"blocked_by_ci"`
-	CommitSHA        string `json:"commit_sha,omitempty"`        // SHA of the acceptance commit on the PR branch
+	CommitSHA        string `json:"commit_sha,omitempty"`         // SHA of the acceptance commit on the PR branch
 	HandedToIronhide bool   `json:"handed_to_ironhide,omitempty"` // true when ironhide labels were applied instead of direct merge
 }
 
@@ -441,14 +441,14 @@ type AcceptRFCResult struct {
 //  2. Rewrite frontmatter status to "accepted" and commit (skipped if already accepted).
 //  3. Check whether both ironhide labels exist on the repository.
 //     - If YES: add ironhide-review and ironhide-merge labels to the PR and return
-//       HandedToIronhide=true.  Ironhide will handle merging.
+//     HandedToIronhide=true.  Ironhide will handle merging.
 //     - If NO:  attempt a direct squash-merge.  If CI blocks the merge, return
-//       BlockedByCI=true and CommitSHA so the caller can poll and retry.
+//     BlockedByCI=true and CommitSHA so the caller can poll and retry.
 func (s *Service) AcceptRFC(ctx context.Context, repositoryID string, prNumber int, filePath string) (AcceptRFCResult, error) {
 	if s.repoResolver == nil {
 		return AcceptRFCResult{}, fmt.Errorf("repository resolver is not configured")
 	}
-	owner, name, registry, _, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, _, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return AcceptRFCResult{}, fmt.Errorf("repository not found")
 	}
@@ -460,7 +460,7 @@ func (s *Service) AcceptRFC(ctx context.Context, repositoryID string, prNumber i
 	if !ok {
 		client = NewHTTPGitHubRFCClient()
 	}
-	baseURL := s.registryBaseURL(registry)
+	baseURL := s.registryBaseURL(registry, repoBaseURL)
 
 	// 1. Get the PR head branch and current commit SHA.
 	headRef, headSHA, err := client.GetPRHead(ctx, baseURL, owner, name, prNumber, token)
@@ -698,7 +698,7 @@ func (s *Service) GetCIStatus(ctx context.Context, repositoryID, commitSHA strin
 	if s.repoResolver == nil {
 		return CIStatusResult{Status: "pending"}, fmt.Errorf("repository resolver is not configured")
 	}
-	owner, name, registry, _, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, _, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return CIStatusResult{Status: "pending"}, fmt.Errorf("repository not found")
 	}
@@ -707,7 +707,7 @@ func (s *Service) GetCIStatus(ctx context.Context, repositoryID, commitSHA strin
 	if !ok {
 		client = NewHTTPGitHubRFCClient()
 	}
-	baseURL := s.registryBaseURL(registry)
+	baseURL := s.registryBaseURL(registry, repoBaseURL)
 
 	status, err := client.GetCIStatus(ctx, baseURL, owner, name, commitSHA, token)
 	if err != nil {
@@ -771,7 +771,7 @@ func (s *Service) RenderPRRFC(ctx context.Context, repositoryID string, prNumber
 		return DocumentView{}, fmt.Errorf("repository resolver is not configured")
 	}
 
-	owner, name, registry, _, docsPath, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, _, docsPath, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return DocumentView{}, fmt.Errorf("repository not found")
 	}
@@ -784,7 +784,7 @@ func (s *Service) RenderPRRFC(ctx context.Context, repositoryID string, prNumber
 		client = NewHTTPGitHubRFCClient()
 	}
 
-	baseURL := s.registryBaseURL(registry)
+	baseURL := s.registryBaseURL(registry, repoBaseURL)
 
 	// List PR files to find the RFC path.
 	prFiles, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, rfcLabel, token)
@@ -816,7 +816,7 @@ func (s *Service) RenderRFCByRepository(ctx context.Context, repositoryID, rfcID
 		return DocumentView{}, fmt.Errorf("repository resolver is not configured")
 	}
 
-	owner, name, registry, branch, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, branch, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return DocumentView{}, fmt.Errorf("repository not found")
 	}
@@ -829,7 +829,7 @@ func (s *Service) RenderRFCByRepository(ctx context.Context, repositoryID, rfcID
 		client = NewHTTPGitHubRFCClient()
 	}
 
-	baseURL := s.registryBaseURL(registry)
+	baseURL := s.registryBaseURL(registry, repoBaseURL)
 	if prNumber, filePath, ok := parsePRCatalogID(rfcID); ok {
 		view, err := client.GetRFCFromPullRequest(ctx, baseURL, owner, name, prNumber, filePath, token)
 		if err != nil {
@@ -842,7 +842,10 @@ func (s *Service) RenderRFCByRepository(ctx context.Context, repositoryID, rfcID
 	return client.GetRFC(ctx, baseURL, owner, name, branch, rfcID, token)
 }
 
-func (s *Service) registryBaseURL(registry string) string {
+func (s *Service) registryBaseURL(registry, repoBaseURL string) string {
+	if strings.TrimSpace(repoBaseURL) != "" {
+		return strings.TrimRight(strings.TrimSpace(repoBaseURL), "/")
+	}
 	if baseURL, ok := s.registryBases[registry]; ok && strings.TrimSpace(baseURL) != "" {
 		return baseURL
 	}
