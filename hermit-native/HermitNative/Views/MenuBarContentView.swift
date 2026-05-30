@@ -44,7 +44,8 @@ struct MenuBarContentView: View {
             }
         }
         if let repoLoadError = serverRepoStore.errorMessage {
-            Text("Repo sync failed: \(repoLoadError)")
+            Label("Repo sync failed", systemImage: "network.slash")
+            Text(repoLoadError).foregroundStyle(.secondary)
         }
 
         Divider()
@@ -140,9 +141,30 @@ private final class ServerRepositoryMenuStore: ObservableObject {
             }
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = menuErrorMessage(error)
         }
     }
+}
+
+private func menuErrorMessage(_ error: Error) -> String {
+    let nsError = error as NSError
+    if nsError.domain == NSURLErrorDomain {
+        switch nsError.code {
+        case NSURLErrorCannotFindHost:
+            return "DNS failure: cannot resolve host. Check VPN or network DNS."
+        case NSURLErrorDNSLookupFailed:
+            return "DNS lookup failed. Check VPN or network DNS."
+        case NSURLErrorNotConnectedToInternet:
+            return "Network offline. Check your connection."
+        case NSURLErrorCannotConnectToHost:
+            return "Cannot connect to host. Check VPN or server reachability."
+        case NSURLErrorTimedOut:
+            return "Network request timed out."
+        default:
+            return "Network error: \(nsError.localizedDescription)"
+        }
+    }
+    return error.localizedDescription
 }
 
 // MARK: - Per-repo submenu
@@ -207,7 +229,7 @@ private struct RepoSubmenu: View {
             }
 
         case .failed(let msg):
-            Text("Failed to load")
+            Label("Failed to load", systemImage: "network.slash")
             Text(msg).foregroundStyle(.secondary)
         }
 
@@ -284,7 +306,7 @@ final class RepoRFCLoader: ObservableObject {
                 RepoRFCCache.shared.store(sections, for: repo.id)
                 if !Task.isCancelled { state = .loaded(sections) }
             } catch {
-                if !Task.isCancelled { state = .failed(error.localizedDescription) }
+                if !Task.isCancelled { state = .failed(menuErrorMessage(error)) }
             }
         }
         await loadTask?.value
