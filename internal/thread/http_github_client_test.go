@@ -94,6 +94,105 @@ func TestHTTPGitHubClient_CreateThreadPostsInlineComment(t *testing.T) {
 	}
 }
 
+func TestHTTPGitHubClient_CreateThread_422ReturnsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/pulls/") {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"message":"pull_request_review_thread.line is not part of the diff"}`))
+			return
+		}
+		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	// Use "api.github.com" in the base URL to exercise the GitHub code path.
+	client := NewHTTPGitHubClient(
+		resolverStub{owner: "owner", name: "repo", reg: "gh", token: "tok", found: true},
+		map[string]string{"gh": server.URL + "/api.github.com"},
+	)
+
+	_, _, err := client.CreateThread(context.Background(), Thread{
+		RepositoryID: "repo_1",
+		PRNumber:     42,
+		Anchor: Anchor{
+			LineStart:       5,
+			LineEnd:         5,
+			TextFingerprint: "unchanged-line",
+			FilePath:        "docs-cms/rfcs/rfc-001.md",
+		},
+		Messages: []Message{{Body: "comment on unchanged line"}},
+	})
+	if err == nil {
+		t.Fatal("expected error for 422, got nil")
+	}
+	if !strings.Contains(err.Error(), "422") {
+		t.Fatalf("expected error to mention 422, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "not part of the PR diff") {
+		t.Fatalf("expected error to explain the line is not in the diff, got: %v", err)
+	}
+}
+
+func TestHTTPGitHubClient_CreateThread_GitHub_PostsInlineComment(t *testing.T) {
+	reviewCalled := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/pulls/42/reviews") {
+			reviewCalled = true
+			var payload struct {
+				Event    string `json:"event"`
+				Comments []struct {
+					Path string `json:"path"`
+					Line int    `json:"line"`
+					Side string `json:"side"`
+					Body string `json:"body"`
+				} `json:"comments"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode payload: %v", err)
+			}
+			if payload.Comments[0].Line != 13 {
+				t.Fatalf("expected line 13, got %d", payload.Comments[0].Line)
+			}
+			if payload.Comments[0].Side != "RIGHT" {
+				t.Fatalf("expected side RIGHT, got %q", payload.Comments[0].Side)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": int64(1234)})
+			return
+		}
+		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	client := NewHTTPGitHubClient(
+		resolverStub{owner: "owner", name: "repo", reg: "gh", token: "test-token", found: true},
+		map[string]string{"gh": server.URL + "/api.github.com"},
+	)
+
+	threadID, commentID, err := client.CreateThread(context.Background(), Thread{
+		RepositoryID: "repo_1",
+		PRNumber:     42,
+		Anchor: Anchor{
+			LineStart:       12,
+			LineEnd:         13,
+			TextFingerprint: "hello-world",
+			FilePath:        "docs-cms/rfcs/rfc-001.md",
+		},
+		Messages: []Message{{Body: "first comment"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateThread error: %v", err)
+	}
+	if !reviewCalled {
+		t.Fatal("expected GitHub reviews API to be called")
+	}
+	if commentID != "1234" {
+		t.Fatalf("expected comment id 1234, got %q", commentID)
+	}
+	if threadID != "repo_1:42:1234" {
+		t.Fatalf("unexpected thread handle: %q", threadID)
+	}
+}
+
 func TestHTTPGitHubClient_ListThreads_IncludesReplies(t *testing.T) {
 	t0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	t1 := t0.Add(time.Minute)
