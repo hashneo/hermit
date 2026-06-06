@@ -124,7 +124,11 @@ final class AppState: ObservableObject {
             pat             = detected.pat
             serverMode      = .embeddedLocal
 #if os(iOS)
-            serverBaseURL   = ""   // set by mDNS discovery on iPad
+            // On the simulator there is no mDNS pairing, so seed serverBaseURL
+            // directly from the bundled config so makeAPIClient() can return a
+            // client on first load (rather than waiting for a pairing event that
+            // never arrives).
+            serverBaseURL   = detected.baseURL
 #else
             serverBaseURL   = ""   // set by EmbeddedServerManager after server starts
 #endif
@@ -144,6 +148,21 @@ final class AppState: ObservableObject {
                     AccountStore.shared.updateTokenOnly(conn, token: detected.pat)
                 }
             }
+#if os(iOS)
+            // Seed RepositoryStore from bundled config so the repo switcher is
+            // populated on the simulator (no mDNS replaceAll(fromMDNS:) fires here).
+            if RepositoryStore.shared.repositories.isEmpty {
+                let accountID = AccountStore.shared.connections.first?.id
+                              ?? UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+                RepositoryStore.shared.add(
+                    accountID: accountID,
+                    owner:     detected.owner,
+                    name:      detected.repo,
+                    docsPath:  detected.docsPath,
+                    rfcLabel:  detected.rfcLabel
+                )
+            }
+#endif
             debugLog("loaded from bundled config — \(detected.owner)/\(detected.repo) @ \(detected.baseURL)")
             pendingHandoffRFCID = UserDefaults.standard.string(forKey: RestoreKey.rfcID)
             return

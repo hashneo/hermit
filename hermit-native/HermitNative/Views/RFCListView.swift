@@ -37,6 +37,20 @@ struct RFCListView: View {
         }
     }
 
+    // MARK: - Grouped sections
+
+    private var pullRequestRFCs: [RFC] {
+        filtered.filter { if case .pullRequest = $0.source { true } else { false } }
+    }
+
+    private var mainBranchRFCs: [RFC] {
+        filtered.filter { if case .mainBranch = $0.source { true } else { false } }
+    }
+
+    private var statusGroups: [RFCStatusGroup] {
+        RFCStatusGroup.group(mainBranchRFCs)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Filter chips
@@ -60,11 +74,27 @@ struct RFCListView: View {
                     description: Text(searchText.isEmpty ? "No RFCs found." : "Try a different search term.")
                 )
             } else {
-                List(filtered, selection: $selectedRFC) { rfc in
-                    RFCRow(rfc: rfc, canSubmit: client != nil && rfc.lifecycleStatus == "draft") {
-                        submitTarget = rfc
+                List(selection: $selectedRFC) {
+                    if !pullRequestRFCs.isEmpty {
+                        Section("In Review") {
+                            ForEach(pullRequestRFCs) { rfc in
+                                RFCRow(rfc: rfc, canSubmit: client != nil && rfc.lifecycleStatus == "draft") {
+                                    submitTarget = rfc
+                                }
+                                .tag(rfc)
+                            }
+                        }
                     }
-                    .tag(rfc)
+                    ForEach(statusGroups.filter { !$0.rfcs.isEmpty }, id: \.header) { group in
+                        Section(group.header) {
+                            ForEach(group.rfcs) { rfc in
+                                RFCRow(rfc: rfc, canSubmit: client != nil && rfc.lifecycleStatus == "draft") {
+                                    submitTarget = rfc
+                                }
+                                .tag(rfc)
+                            }
+                        }
+                    }
                 }
                 .listStyle(.plain)
             }
@@ -75,6 +105,7 @@ struct RFCListView: View {
             await onRefresh?()
             isRefreshing = false
         }
+        .frame(minWidth: 280)
         .sheet(item: $submitTarget) { rfc in
             if let client {
                 SubmitForReviewSheet(rfc: rfc, client: client) {
@@ -83,6 +114,29 @@ struct RFCListView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - RFC status grouping (shared by RFCListView and MenuBarContentView)
+
+struct RFCStatusGroup {
+    let header: String
+    let systemImage: String
+    let rfcs: [RFC]
+
+    /// Ordered groups: Accepted → Draft → Implemented → Superseded → Rejected → Other
+    static func group(_ rfcs: [RFC]) -> [RFCStatusGroup] {
+        func pick(_ statuses: [String]) -> [RFC] {
+            rfcs.filter { statuses.contains($0.lifecycleStatus ?? "unknown") }
+        }
+        return [
+            RFCStatusGroup(header: "Accepted",    systemImage: "checkmark.circle",            rfcs: pick(["accepted"])),
+            RFCStatusGroup(header: "Draft",        systemImage: "pencil.circle",               rfcs: pick(["draft"])),
+            RFCStatusGroup(header: "Implemented",  systemImage: "checkmark.seal.fill",         rfcs: pick(["implemented"])),
+            RFCStatusGroup(header: "Superseded",   systemImage: "arrow.triangle.2.circlepath", rfcs: pick(["superseded"])),
+            RFCStatusGroup(header: "Rejected",     systemImage: "xmark.circle",                rfcs: pick(["rejected"])),
+            RFCStatusGroup(header: "Other",        systemImage: "doc.text",                    rfcs: pick(["unknown"])),
+        ]
     }
 }
 

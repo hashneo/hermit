@@ -543,13 +543,17 @@ struct MarkdownBlockView: View {
         let bodyFont = UIFont.preferredFont(forTextStyle: .body)
         let markerColor = UIColor.secondaryLabel
 #endif
-        let baseIndent: CGFloat = 20
         let depthOffset = CGFloat(depth) * 20
-        let indent: CGFloat = baseIndent + depthOffset
+
+        // Measure the actual marker width so the tab stop is always wide enough.
+        // Add 6pt padding between marker and body text.
+        let markerWidth = (marker as NSString).size(withAttributes: [.font: bodyFont]).width
+        let tabLocation = depthOffset + markerWidth + 6
+
         let para = NSMutableParagraphStyle()
         para.firstLineHeadIndent = depthOffset
-        para.headIndent = indent
-        para.tabStops = [NSTextTab(textAlignment: .left, location: indent)]
+        para.headIndent = tabLocation
+        para.tabStops = [NSTextTab(textAlignment: .left, location: tabLocation)]
 
         let result = NSMutableAttributedString()
         // Marker + tab

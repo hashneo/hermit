@@ -150,29 +150,6 @@ private struct RepoSubmenu: View {
     }
 }
 
-// MARK: - Status grouping
-
-private struct RFCStatusGroup {
-    let header: String
-    let systemImage: String
-    let rfcs: [RFC]
-
-    /// Ordered groups: Implemented → Accepted → Draft → Superseded → Rejected → Unknown
-    static func group(_ rfcs: [RFC]) -> [RFCStatusGroup] {
-        func pick(_ statuses: [String]) -> [RFC] {
-            rfcs.filter { statuses.contains($0.lifecycleStatus ?? "unknown") }
-        }
-        return [
-            RFCStatusGroup(header: "Accepted",      systemImage: "checkmark.circle",              rfcs: pick(["accepted"])),
-            RFCStatusGroup(header: "Draft",         systemImage: "pencil.circle",                 rfcs: pick(["draft"])),
-            RFCStatusGroup(header: "Implemented",   systemImage: "checkmark.seal.fill",           rfcs: pick(["implemented"])),
-            RFCStatusGroup(header: "Superseded",    systemImage: "arrow.triangle.2.circlepath",   rfcs: pick(["superseded"])),
-            RFCStatusGroup(header: "Rejected",      systemImage: "xmark.circle",                  rfcs: pick(["rejected"])),
-            RFCStatusGroup(header: "Other",         systemImage: "doc.text",                      rfcs: pick(["unknown"])),
-        ]
-    }
-}
-
 // MARK: - Per-repo RFC loader
 
 /// Loads RFCs for a single repository. Results are cached in RepoRFCCache

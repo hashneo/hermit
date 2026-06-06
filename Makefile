@@ -1,4 +1,4 @@
-.PHONY: build run debug clean ui-build validate-config validate-config-structure validate-config-access gitea-up gitea-down gitea-logs gitea-reset gitea-seed-pr native-build native-build-macos native-build-ipad native-test native-clean native-open gomobile-build setup-xcconfig dev ipad-deploy reset
+.PHONY: build run debug clean ui-build validate-config validate-config-structure validate-config-access gitea-up gitea-down gitea-logs gitea-reset gitea-seed-pr native-build native-build-macos native-build-ipad native-test native-clean native-open gomobile-build setup-xcconfig dev ipad-deploy ipad-sim-deploy reset
 
 # Include machine-local overrides (device IDs, etc.) — gitignored.
 -include .local.mk
@@ -118,6 +118,8 @@ NATIVE_DIR        := hermit-native
 NATIVE_PROJECT    := $(NATIVE_DIR)/HermitNative.xcodeproj
 NATIVE_SCHEME     := HermitNative
 NATIVE_BUILD_DIR  := $(NATIVE_DIR)/build
+IPAD_SIM_NAME     ?= iPad Pro 13-inch (M4)
+IPAD_SIM_UDID     ?= $(shell DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl list devices available | grep "$(IPAD_SIM_NAME)" | head -1 | grep -oE '[A-F0-9-]{36}')
 NATIVE_APP_SRC    := $(NATIVE_BUILD_DIR)/Build/Products/Debug/HermitNative.app
 NATIVE_APP_DEST   := HermitNative.app
 XCODE             := DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild
@@ -148,39 +150,43 @@ native-build-macos: gomobile-build native-embed-config ## Build the native app f
 		-destination "platform=macOS" \
 		-configuration Debug \
 		-derivedDataPath $(NATIVE_BUILD_DIR) \
-		build | xcpretty 2>/dev/null || $(XCODE) \
-		-project $(NATIVE_PROJECT) \
-		-scheme $(NATIVE_SCHEME) \
-		-destination "platform=macOS" \
-		-configuration Debug \
-		-derivedDataPath $(NATIVE_BUILD_DIR) \
 		build
 	@echo "Copying HermitNative.app to project root..."
 	@rm -rf $(NATIVE_APP_DEST)
 	@cp -R $(NATIVE_APP_SRC) $(NATIVE_APP_DEST)
 
 native-build-ipad: ## Build the native app for iPad simulator
-	@echo "Building HermitNative for iPad simulator..."
+	@echo "Building HermitNative for iPad simulator ($(IPAD_SIM_NAME), UDID=$(IPAD_SIM_UDID))..."
 	$(XCODE) \
 		-project $(NATIVE_PROJECT) \
 		-scheme $(NATIVE_SCHEME) \
-		-destination "platform=iOS Simulator,name=iPad Pro 13-inch (M4)" \
+		-destination "platform=iOS Simulator,id=$(IPAD_SIM_UDID)" \
 		-configuration Debug \
 		-derivedDataPath $(NATIVE_BUILD_DIR) \
-		build | xcpretty 2>/dev/null || $(XCODE) \
-		-project $(NATIVE_PROJECT) \
-		-scheme $(NATIVE_SCHEME) \
-		-destination "platform=iOS Simulator,name=iPad Pro 13-inch (M4)" \
-		-configuration Debug \
-		-derivedDataPath $(NATIVE_BUILD_DIR) \
-		build
+		build 2>&1
+
+IPAD_SIM_APP_BUNDLE := $(NATIVE_BUILD_DIR)/Build/Products/Debug-iphonesimulator/HermitNative.app
+
+ipad-sim-deploy: native-build-ipad ## Build and deploy to iPad simulator (boots simulator if needed)
+	@echo "Deploying HermitNative to iPad simulator '$(IPAD_SIM_NAME)' ($(IPAD_SIM_UDID))..."
+	@if [ -z "$(IPAD_SIM_UDID)" ]; then \
+		echo "ERROR: No available simulator named '$(IPAD_SIM_NAME)'."; \
+		echo "Run: DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl list devices available"; \
+		exit 1; \
+	fi
+	@DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl boot "$(IPAD_SIM_UDID)" 2>/dev/null || true
+	@open -a Simulator
+	@DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl install "$(IPAD_SIM_UDID)" $(IPAD_SIM_APP_BUNDLE)
+	@BUNDLE_ID=$$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" $(IPAD_SIM_APP_BUNDLE)/Info.plist); \
+	DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl launch "$(IPAD_SIM_UDID)" "$$BUNDLE_ID"; \
+	echo "Launched $$BUNDLE_ID in simulator $(IPAD_SIM_UDID)"
 
 native-test: ## Run the native app test suite
 	@echo "Testing HermitNative..."
 	$(XCODE) \
 		-project $(NATIVE_PROJECT) \
 		-scheme $(NATIVE_SCHEME) \
-		-destination "platform=iOS Simulator,name=iPad Pro 13-inch (M4)" \
+		-destination "platform=iOS Simulator,name=$(IPAD_SIM_NAME)" \
 		-derivedDataPath $(NATIVE_BUILD_DIR) \
 		test
 

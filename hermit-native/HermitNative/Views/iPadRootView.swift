@@ -216,7 +216,7 @@ struct iPadRootView: View {
             .overlay { listOverlay }
             .toolbar { listToolbarItems }
         } detail: {
-            detailView(showInlineThread: true)
+            detailView(showInlineThread: false)
         }
     }
 
@@ -228,37 +228,37 @@ struct iPadRootView: View {
                 .navigationTitle(appState.selectedRFC?.title ?? "Hermit")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    // RFC picker — left side
+                    // RFC picker — left side, uses popover for full-width control
                     ToolbarItem(placement: .topBarLeading) {
-                        Menu {
-                            if store.isLoading {
-                                Label("Loading…", systemImage: "arrow.clockwise")
-                            } else if store.rfcs.isEmpty {
-                                Label("No RFCs found", systemImage: "doc.text")
-                            } else {
-                                ForEach(store.rfcs) { rfc in
-                                    Button {
-                                        appState.selectedRFC = rfc
-                                        appState.selectedLine = nil
-                                        appState.selectedLineEnd = nil
-                                    } label: {
-                                        Label(rfc.title, systemImage: rfcIcon(rfc))
-                                    }
-                                }
-                            }
-                            Divider()
-                            Button { Task { await store.load() } } label: {
-                                Label("Refresh", systemImage: "arrow.clockwise")
-                            }
+                        Button {
+                            showRFCPicker = true
                         } label: {
-                            Label("RFCs", systemImage: "list.bullet.rectangle")
+                            HStack(spacing: 4) {
+                                Image(systemName: "list.bullet.rectangle")
+                                Text(appState.selectedRFC?.title ?? "Select RFC")
+                                    .lineLimit(1)
+                                    .font(.subheadline)
+                                Image(systemName: "chevron.down")
+                                    .imageScale(.small)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .popover(isPresented: $showRFCPicker, arrowEdge: .top) {
+                            RFCPickerPopover(
+                                rfcs: store.rfcs,
+                                isLoading: store.isLoading,
+                                selectedRFC: $appState.selectedRFC,
+                                isPresented: $showRFCPicker,
+                                onRefresh: { Task { await store.load() } }
+                            )
+                            .environmentObject(appState)
                         }
                     }
-                    // Repo switcher — also left side
-                    ToolbarItem(placement: .topBarLeading) {
+                    // Repo switcher — right side
+                    ToolbarItem(placement: .topBarTrailing) {
                         repoSwitcherMenu
                     }
-                    // Right side
+                    // Other trailing items
                     ToolbarItemGroup(placement: .topBarTrailing) {
                         if store.isLoading { ProgressView().controlSize(.small) }
                         // Thread button — only for PR RFCs
@@ -432,4 +432,87 @@ private struct ConnectionStatusBar: View {
         return "Connected"
     }
 }
+
+// MARK: - RFC Picker Popover (portrait mode)
+
+private struct RFCPickerPopover: View {
+    let rfcs: [RFC]
+    let isLoading: Bool
+    @Binding var selectedRFC: RFC?
+    @Binding var isPresented: Bool
+    let onRefresh: () -> Void
+
+    @State private var searchText = ""
+
+    private var filtered: [RFC] {
+        guard !searchText.isEmpty else { return rfcs }
+        return rfcs.filter { $0.title.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    private var prRFCs: [RFC] {
+        filtered.filter { if case .pullRequest = $0.source { true } else { false } }
+    }
+
+    private var mainRFCs: [RFC] {
+        filtered.filter { if case .mainBranch = $0.source { true } else { false } }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView("Loading RFCs…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if rfcs.isEmpty {
+                    ContentUnavailableView("No RFCs", systemImage: "doc.text")
+                } else {
+                    List(selection: Binding(
+                        get: { selectedRFC },
+                        set: { rfc in
+                            if let rfc {
+                                selectedRFC = rfc
+                                isPresented = false
+                            }
+                        }
+                    )) {
+                        if !prRFCs.isEmpty {
+                            Section("In Review") {
+                                ForEach(prRFCs) { rfc in
+                                    Label(rfc.title, systemImage: "arrow.triangle.pull")
+                                        .tag(rfc)
+                                }
+                            }
+                        }
+                        ForEach(RFCStatusGroup.group(mainRFCs).filter { !$0.rfcs.isEmpty }, id: \.header) { group in
+                            Section(group.header) {
+                                ForEach(group.rfcs) { rfc in
+                                    Label(rfc.title, systemImage: group.systemImage)
+                                        .tag(rfc)
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                }
+            }
+            .navigationTitle("RFCs")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, prompt: "Search RFCs")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        onRefresh()
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { isPresented = false }
+                }
+            }
+        }
+        .frame(minWidth: 360, minHeight: 480)
+    }
+}
+
 #endif
