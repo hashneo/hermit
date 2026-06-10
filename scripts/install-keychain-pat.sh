@@ -107,7 +107,7 @@ with open(sys.argv[1]) as f:
     for line in f:
         stripped = line.strip()
         if stripped.startswith('listen_address:'):
-            val = stripped.split(':', 1)[1].strip().strip('"\'')
+            val = stripped.split(':', 1)[1].strip().strip("\"'")
             port = val.split(':')[-1]
             print(f"http://localhost:{port}")
             break
@@ -116,7 +116,9 @@ PY
 HERMIT_SERVER_URL="${HERMIT_SERVER_URL:-http://localhost:8080}"
 
 # Extract the first gitea-backed repo
-read -r REPO_OWNER REPO_NAME DOCS_PATH RFC_LABEL < <("${PYTHON}" - "${HERMIT_YAML}" <<'PY'
+# Note: avoid < <(...) process substitution with heredoc — bash 3.2 (macOS) can't parse it.
+# Capture output into a variable first, then use a herestring for read.
+_repo_info=$("${PYTHON}" - "${HERMIT_YAML}" <<'PY'
 import sys
 with open(sys.argv[1]) as f:
     content = f.read()
@@ -166,6 +168,7 @@ for r in repos:
         break
 PY
 )
+read -r REPO_OWNER REPO_NAME DOCS_PATH RFC_LABEL <<< "$_repo_info"
 
 REPO_OWNER="${REPO_OWNER:-gitea_admin}"
 REPO_NAME="${REPO_NAME:-hermit-rfcs}"
