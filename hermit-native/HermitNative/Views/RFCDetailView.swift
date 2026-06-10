@@ -116,12 +116,50 @@ struct RFCDetailView: View {
             // hermit-ec7: export/print/share + lifecycle toolbar
             RFCLifecycleToolbar(
                 rfc: currentRFC,
+                fileURL: resolvedFileURL,
                 callerPermission: callerPermission,
                 onApprove: handleApprove,
                 onMarkImplemented: handleMarkImplemented,
                 onApprovePR: handleApprovePR,
                 allThreadsResolved: commentStore?.comments.allSatisfy(\.resolved) ?? true,
                 prApproved: prApproved,
+                prAlreadyAccepted: prAlreadyAccepted,
+                onAcceptRFC: {
+                    guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient(),
+                          case .pullRequest(let pr) = rfc.source else {
+                        return AcceptRFCResult(merged: false, blockedByCI: false, commitSHA: "")
+                    }
+                    let result: AcceptRFCResult
+                    do {
+                        result = try await client.acceptRFC(prNumber: pr.number, filePath: resolvedFilePath)
+                    } catch {
+                        actionError = error.localizedDescription
+                        return AcceptRFCResult(merged: false, blockedByCI: false, commitSHA: "")
+                    }
+                    if result.merged {
+                        reloadToken = UUID()
+                    }
+                    return result
+                },
+                onPollCI: { sha in
+                    guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient() else { return false }
+                    for _ in 0..<40 {
+                        try? await Task.sleep(for: .seconds(15))
+                        let status = (try? await client.getCIStatus(commitSHA: sha)) ?? "pending"
+                        if status == "success" { return true }
+                        if status == "failure" { return false }
+                    }
+                    return false
+                },
+                isBehind: isBehind,
+                onUpdateBranch: {
+                    guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient(),
+                          case .pullRequest(let pr) = rfc.source else { return }
+                    try? await client.updateBranch(prNumber: pr.number)
+                    if let status = try? await client.getMergeStatus(prNumber: pr.number) {
+                        isBehind = status
+                    }
+                },
                 markdownSource: markdown
             )
         }

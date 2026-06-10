@@ -26,6 +26,9 @@ func isPrivilegedPermission(_ permission: String) -> Bool {
 /// hidden based on current status and the caller's permission level.
 struct RFCLifecycleToolbar: ToolbarContent {
     let rfc: RFC
+    /// For PR RFCs: the direct blob URL to the RFC file on the PR branch.
+    /// When non-empty, used by "Open RFC File" instead of the PR landing page URL.
+    var fileURL: String = ""
     /// Permission level fetched asynchronously by RFCDetailView after load.
     var callerPermission: String = "none"
     var onApprove: (() async -> Void)?        = nil
@@ -36,11 +39,27 @@ struct RFCLifecycleToolbar: ToolbarContent {
     var allThreadsResolved: Bool = false
     /// hermit-cns: true when the PR already has an approval review.
     var prApproved: Bool = false
+    /// True when the PR RFC frontmatter already says status: accepted but the PR is not yet merged.
+    var prAlreadyAccepted: Bool = false
+    /// Accept RFC: rewrites status to "accepted" on PR branch and attempts squash-merge.
+    var onAcceptRFC: (() async -> AcceptRFCResult)? = nil
+    /// Poll CI checks for the given commit SHA. Returns true when CI passed.
+    var onPollCI: ((String) async -> Bool)? = nil
+    /// True when the PR branch is behind the base branch.
+    var isBehind: Bool = false
+    /// Called when the user taps "Update Branch".
+    var onUpdateBranch: (() async -> Void)? = nil
     /// Populated once markdown loads, used for export/print.
     var markdownSource: String = ""
 
     @State private var isActioning = false
     @State private var pendingAction: LifecycleAction? = nil
+    /// Non-nil when the accept commit was made but merge is blocked pending CI.
+    @State private var awaitingMergeSHA: String? = nil
+    /// True once CI passed (manual path) — enables the Merge button.
+    @State private var ciPassed = false
+    /// True after ironhide labels were applied — show confirmation badge.
+    @State private var handedToIronhide = false
 
     // MARK: - Lifecycle action model
 
@@ -49,12 +68,16 @@ struct RFCLifecycleToolbar: ToolbarContent {
         case approve
         case markImplemented
         case approvePR
+        case acceptRFC
+        case updateBranch
 
         var id: String {
             switch self {
             case .approve:          return "approve"
             case .markImplemented:  return "markImplemented"
             case .approvePR:        return "approvePR"
+            case .acceptRFC:        return "acceptRFC"
+            case .updateBranch:     return "updateBranch"
             }
         }
 
@@ -63,6 +86,8 @@ struct RFCLifecycleToolbar: ToolbarContent {
             case .approve:          return "Approve RFC"
             case .markImplemented:  return "Mark as Implemented"
             case .approvePR:        return "Approve Pull Request"
+            case .acceptRFC:        return "Accept RFC"
+            case .updateBranch:     return "Update Branch"
             }
         }
 
@@ -77,6 +102,12 @@ struct RFCLifecycleToolbar: ToolbarContent {
             case .approvePR:
                 return "Approving this pull request will submit a GitHub approval review on your behalf, " +
                        "marking the RFC PR as ready to merge."
+            case .acceptRFC:
+                return "This will squash-merge the pull request. " +
+                       "If CI checks are required, Hermit will wait for them to pass before merging."
+            case .updateBranch:
+                return "This will merge the latest changes from the base branch into this PR branch. " +
+                       "A merge commit will be created on your behalf."
             }
         }
 
@@ -85,6 +116,8 @@ struct RFCLifecycleToolbar: ToolbarContent {
             case .approve:          return "Approve"
             case .markImplemented:  return "Mark Implemented"
             case .approvePR:        return "Approve PR"
+            case .acceptRFC:        return "Merge"
+            case .updateBranch:     return "Update Branch"
             }
         }
     }
@@ -109,6 +142,12 @@ struct RFCLifecycleToolbar: ToolbarContent {
 
     private var canMarkImplemented: Bool {
         isMainBranch && status == "accepted" && isPrivilegedPermission(callerPermission)
+    }
+
+    /// Accept & Merge is available to anyone with threads resolved —
+    /// GitHub will reject the merge if the token lacks permission.
+    private var canAcceptRFC: Bool {
+        isPullRequest && allThreadsResolved && awaitingMergeSHA == nil
     }
 
     /// hermit-cns: Approve PR is available when the caller has admin/maintain,
@@ -184,35 +223,112 @@ struct RFCLifecycleToolbar: ToolbarContent {
                 }
             }
 
-            // hermit-cns: PR RFCs — Approve PR button.
-            // Shown when: caller has admin/maintain, all threads are resolved,
-            // and the PR has not already been approved.
+            // PR RFCs — Accept & Merge / Merge / CI waiting / Ironhide / Approve PR / Update Branch
             if isPullRequest {
+                if handedToIronhide {
+                    Button {} label: {
+                        Label("Handed to Ironhide", systemImage: "checkmark.shield.fill")
+                            .foregroundStyle(.green)
+                    }
+                    .disabled(true)
+                    .help("Ironhide labels applied. Ironhide will review and merge this PR automatically.")
+                } else if let sha = awaitingMergeSHA {
+                    if ciPassed {
+                        Button {
+                            pendingAction = .acceptRFC
+                        } label: {
+                            if isActioning {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Label("Merge", systemImage: "arrow.triangle.merge")
+                            }
+                        }
+                        .disabled(isActioning)
+                        .help("CI checks passed — merge the pull request")
+                    } else {
+                        Button {} label: {
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.small)
+                                Text("Waiting for CI…")
+                            }
+                        }
+                        .disabled(true)
+                        .help("CI checks are running. Hermit will enable the Merge button when they pass.")
+                        .task(id: sha) {
+                            let passed = await onPollCI?(sha) ?? false
+                            if passed {
+                                ciPassed = true
+                            } else {
+                                awaitingMergeSHA = nil
+                            }
+                        }
+                    }
+                } else if prAlreadyAccepted {
+                    Button {
+                        pendingAction = .acceptRFC
+                    } label: {
+                        if isActioning {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("Merge", systemImage: "arrow.triangle.merge")
+                        }
+                    }
+                    .disabled(isActioning)
+                    .help("RFC is already marked Accepted — merge the pull request")
+                } else {
+                    Button {
+                        pendingAction = .acceptRFC
+                    } label: {
+                        if isActioning {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("Accept & Merge", systemImage: "checkmark.seal.fill")
+                        }
+                    }
+                    .disabled(!canAcceptRFC || isActioning)
+                    .help(!allThreadsResolved
+                          ? "Resolve all review comments before accepting"
+                          : "Mark this RFC as Accepted and merge the PR")
+                }
+
+                // Approve PR — for submitting a GitHub review approval
                 Button {
                     pendingAction = .approvePR
                 } label: {
                     if isActioning {
                         ProgressView().controlSize(.small)
                     } else {
-                        Label("Approve PR", systemImage: "checkmark.seal.fill")
+                        Label("Approve PR", systemImage: "checkmark.seal")
                     }
                 }
                 .disabled(!canApprovePR || isActioning)
-                .help(
-                    prApproved
-                        ? "You have already approved this PR"
-                        : !allThreadsResolved
-                            ? "Resolve all review comments before approving"
-                            : !isPrivilegedPermission(callerPermission)
-                                ? "Requires admin or maintain permission"
-                                : "Approve and mark this RFC PR ready to merge"
-                )
+                .help(prApproved
+                      ? "You have already approved this PR"
+                      : !allThreadsResolved
+                          ? "Resolve all review comments before approving"
+                          : !isPrivilegedPermission(callerPermission)
+                              ? "Requires admin or maintain permission"
+                              : "Approve and mark this RFC PR ready to merge")
+
+                // Update Branch — only shown when PR is behind base
+                if isBehind {
+                    Button {
+                        pendingAction = .updateBranch
+                    } label: {
+                        if isActioning {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("Update Branch", systemImage: "arrow.triangle.2.circlepath")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    .disabled(isActioning)
+                    .help("This branch is out-of-date with the base branch. Tap to merge the latest changes in.")
+                }
             }
         }
 
-        // Confirmation dialog anchor — hidden view that carries the lifecycle
-        // confirmation dialog, since .confirmationDialog cannot be applied
-        // directly to ToolbarItemGroup on macOS.
+        // Confirmation dialog anchor
         ToolbarItem(placement: .automatic) {
             Text("")
                 .frame(width: 0, height: 0)
@@ -234,6 +350,18 @@ struct RFCLifecycleToolbar: ToolbarContent {
                                 case .approve:         await runAction(onApprove)
                                 case .markImplemented: await runAction(onMarkImplemented)
                                 case .approvePR:       await runAction(onApprovePR)
+                                case .acceptRFC:
+                                    isActioning = true
+                                    if let result = await onAcceptRFC?() {
+                                        if result.handedToIronhide {
+                                            handedToIronhide = true
+                                        } else if result.blockedByCI {
+                                            awaitingMergeSHA = result.commitSHA
+                                            ciPassed = false
+                                        }
+                                    }
+                                    isActioning = false
+                                case .updateBranch:    await runAction(onUpdateBranch)
                                 }
                             }
                         }
@@ -248,6 +376,34 @@ struct RFCLifecycleToolbar: ToolbarContent {
                 }
         }
 
+        // Open in Browser — shows PR + file entries for PR RFCs, single entry for main-branch
+        ToolbarItem(placement: .automatic) {
+            Menu {
+                if !fileURL.isEmpty {
+                    Button {
+                        openURL(rfc.htmlURL)
+                    } label: {
+                        Label("Open Pull Request", systemImage: "arrow.up.right.square")
+                    }
+                    Button {
+                        openURL(fileURL)
+                    } label: {
+                        Label("Open RFC File", systemImage: "doc.text")
+                    }
+                } else {
+                    Button {
+                        openURL(rfc.htmlURL)
+                    } label: {
+                        Label("Open in Browser", systemImage: "safari")
+                    }
+                }
+            } label: {
+                Label("Open in Browser", systemImage: "safari")
+            }
+            .disabled(fileURL.isEmpty && rfc.htmlURL.isEmpty)
+            .help("Open this RFC or its pull request in your browser")
+        }
+
         // Share button
         ToolbarItem(placement: .automatic) {
             ShareLink(item: rfcShareURL()) {
@@ -258,6 +414,15 @@ struct RFCLifecycleToolbar: ToolbarContent {
     }
 
     // MARK: - Private helpers
+
+    private func openURL(_ string: String) {
+        guard !string.isEmpty, let url = URL(string: string) else { return }
+#if os(macOS)
+        NSWorkspace.shared.open(url)
+#else
+        UIApplication.shared.open(url)
+#endif
+    }
 
     private func runAction(_ action: (() async -> Void)?) async {
         guard let action else { return }
