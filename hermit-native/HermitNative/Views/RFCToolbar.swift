@@ -410,7 +410,7 @@ struct RFCLifecycleToolbar: ToolbarContent {
         }
     }
 
-    private func listAttributedString(items: [[MarkdownInline]], ordered: Bool) -> NSAttributedString {
+    private func listAttributedString(items: [MarkdownBlock.ListItem], ordered: Bool) -> NSAttributedString {
         let bodyFont = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         let indent: CGFloat = 20
         let para = NSMutableParagraphStyle()
@@ -419,7 +419,7 @@ struct RFCLifecycleToolbar: ToolbarContent {
         para.tabStops = [NSTextTab(textAlignment: .left, location: indent)]
 
         let result = NSMutableAttributedString()
-        for (i, inlines) in items.enumerated() {
+        for (i, item) in items.enumerated() {
             if i > 0 { result.append(NSAttributedString(string: "\n")) }
             let marker = ordered ? "\(i + 1).\t" : "•\t"
             result.append(NSAttributedString(string: marker, attributes: [
@@ -427,7 +427,7 @@ struct RFCLifecycleToolbar: ToolbarContent {
                 .foregroundColor: NSColor.secondaryLabelColor,
                 .paragraphStyle: para
             ]))
-            let body = NSMutableAttributedString(attributedString: inlines.nsAttributedString(font: bodyFont))
+            let body = NSMutableAttributedString(attributedString: item.inlines.nsAttributedString(font: bodyFont))
             body.addAttribute(.paragraphStyle, value: para,
                               range: NSRange(location: 0, length: body.length))
             result.append(body)
