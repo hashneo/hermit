@@ -19,6 +19,7 @@
 		B001AC01 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001AC00 /* AccountStore.swift */; };
 		B0010012 /* GitHubAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010013 /* GitHubAPIClient.swift */; };
 		B0010014 /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010015 /* AIProvider.swift */; };
+		B00100A2 /* TemplateAIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100A3 /* TemplateAIProvider.swift */; };
 		B0010016 /* AppleIntelligenceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010017 /* AppleIntelligenceProvider.swift */; };
 		B0010018 /* OpenAIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010019 /* OpenAIProvider.swift */; };
 		B001001A /* RFCInterviewPrompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001001B /* RFCInterviewPrompts.swift */; };
@@ -30,6 +31,7 @@
 		B0010024 /* VoiceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010025 /* VoiceEngine.swift */; };
 		B0010026 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010027 /* SpeechRecognizer.swift */; };
 		B0010028 /* SpeechSynthesizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010029 /* SpeechSynthesizer.swift */; };
+		B001FF10 /* LiveVoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001FF11 /* LiveVoiceSession.swift */; };
 		B001002A /* WaveformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001002B /* WaveformView.swift */; };
 		B001002C /* WebViewRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001002D /* WebViewRenderer.swift */; };
 		B001002E /* MarkdownRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001002F /* MarkdownRenderer.swift */; };
@@ -79,6 +81,7 @@
 		B001AC00 /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
 		B0010013 /* GitHubAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubAPIClient.swift; sourceTree = "<group>"; };
 		B0010015 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
+		B00100A3 /* TemplateAIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemplateAIProvider.swift; sourceTree = "<group>"; };
 		B0010017 /* AppleIntelligenceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleIntelligenceProvider.swift; sourceTree = "<group>"; };
 		B0010019 /* OpenAIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIProvider.swift; sourceTree = "<group>"; };
 		B001001B /* RFCInterviewPrompts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCInterviewPrompts.swift; sourceTree = "<group>"; };
@@ -90,6 +93,7 @@
 		B0010025 /* VoiceEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceEngine.swift; sourceTree = "<group>"; };
 		B0010027 /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
 		B0010029 /* SpeechSynthesizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSynthesizer.swift; sourceTree = "<group>"; };
+		B001FF11 /* LiveVoiceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVoiceSession.swift; sourceTree = "<group>"; };
 		B001002B /* WaveformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformView.swift; sourceTree = "<group>"; };
 		B001002D /* WebViewRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewRenderer.swift; sourceTree = "<group>"; };
 		B001002F /* MarkdownRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRenderer.swift; sourceTree = "<group>"; };
@@ -228,6 +232,7 @@
 			isa = PBXGroup;
 			children = (
 				B0010015 /* AIProvider.swift */,
+				B00100A3 /* TemplateAIProvider.swift */,
 				B0010017 /* AppleIntelligenceProvider.swift */,
 				B0010019 /* OpenAIProvider.swift */,
 				B001001B /* RFCInterviewPrompts.swift */,
@@ -253,6 +258,7 @@
 				B0010025 /* VoiceEngine.swift */,
 				B0010027 /* SpeechRecognizer.swift */,
 				B0010029 /* SpeechSynthesizer.swift */,
+				B001FF11 /* LiveVoiceSession.swift */,
 				B001002B /* WaveformView.swift */,
 			);
 			path = Voice;
@@ -405,6 +411,7 @@
 				B001004B /* GiteaAutoConfig.swift in Sources */,
 				B0010012 /* GitHubAPIClient.swift in Sources */,
 				B0010014 /* AIProvider.swift in Sources */,
+				B00100A2 /* TemplateAIProvider.swift in Sources */,
 				B0010016 /* AppleIntelligenceProvider.swift in Sources */,
 				B0010018 /* OpenAIProvider.swift in Sources */,
 				B001001A /* RFCInterviewPrompts.swift in Sources */,
@@ -416,6 +423,7 @@
 				B0010024 /* VoiceEngine.swift in Sources */,
 				B0010026 /* SpeechRecognizer.swift in Sources */,
 				B0010028 /* SpeechSynthesizer.swift in Sources */,
+				B001FF10 /* LiveVoiceSession.swift in Sources */,
 				B001002A /* WaveformView.swift in Sources */,
 				B001002C /* WebViewRenderer.swift in Sources */,
 				B001002E /* MarkdownRenderer.swift in Sources */,

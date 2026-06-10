@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 import UniformTypeIdentifiers
 import PDFKit
 
@@ -124,7 +126,8 @@ struct RFCLifecycleToolbar: ToolbarContent {
     // MARK: - Toolbar body
 
     var body: some ToolbarContent {
-        // Export / Print group
+        // Export / Print group — macOS only (NSSavePanel / NSPrintOperation)
+#if os(macOS)
         ToolbarItem(placement: .automatic) {
             Menu {
                 // hermit-1mg / hermit-fdq: must dispatch via Task { @MainActor in }
@@ -142,6 +145,7 @@ struct RFCLifecycleToolbar: ToolbarContent {
             }
             .help("Export or print this RFC")
         }
+#endif // os(macOS)
 
         // Lifecycle transition buttons
         ToolbarItemGroup(placement: .automatic) {
@@ -266,6 +270,23 @@ struct RFCLifecycleToolbar: ToolbarContent {
     // the RFC window.  directoryURL defaults to ~/Downloads so users find
     // their exports without hunting through the filesystem.
 
+    // hermit-ixk: share the real GitHub/Gitea web URL so recipients can open
+    // the file in a browser without needing Hermit installed.
+    // rfc.htmlURL is populated by the server's CatalogItem.html_url field.
+    // Fall back to a hermit:// deep-link only when htmlURL is empty (e.g. for
+    // RFCs fetched by an older server build that predates this field).
+    private func rfcShareURL() -> URL {
+        if !rfc.htmlURL.isEmpty, let webURL = URL(string: rfc.htmlURL) {
+            return webURL
+        }
+        // Fallback: hermit:// deep-link (opens in Hermit on devices that have it).
+        let path = rfc.path.isEmpty ? rfc.id : rfc.path
+        let encoded = path.addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed) ?? path
+        return URL(string: "hermit://rfcs/\(encoded)") ?? URL(string: "hermit://rfcs")!
+    }
+
+#if os(macOS)
     @MainActor
     private func exportPDF() {
         guard let data = renderToPDF() else { return }
@@ -595,22 +616,6 @@ struct RFCLifecycleToolbar: ToolbarContent {
         }
     }
 
-    // hermit-ixk: share the real GitHub/Gitea web URL so recipients can open
-    // the file in a browser without needing Hermit installed.
-    // rfc.htmlURL is populated by the server's CatalogItem.html_url field.
-    // Fall back to a hermit:// deep-link only when htmlURL is empty (e.g. for
-    // RFCs fetched by an older server build that predates this field).
-    private func rfcShareURL() -> URL {
-        if !rfc.htmlURL.isEmpty, let webURL = URL(string: rfc.htmlURL) {
-            return webURL
-        }
-        // Fallback: hermit:// deep-link (opens in Hermit on devices that have it).
-        let path = rfc.path.isEmpty ? rfc.id : rfc.path
-        let encoded = path.addingPercentEncoding(
-            withAllowedCharacters: .urlPathAllowed) ?? path
-        return URL(string: "hermit://rfcs/\(encoded)") ?? URL(string: "hermit://rfcs")!
-    }
-
     private func pdfFilename() -> String {
         let base = URL(fileURLWithPath: rfc.path)
             .deletingPathExtension().lastPathComponent
@@ -622,10 +627,12 @@ struct RFCLifecycleToolbar: ToolbarContent {
             .deletingPathExtension().lastPathComponent
         return base.isEmpty ? "rfc.rtf" : "\(base).rtf"
     }
+#endif // os(macOS)
 }
 
 // MARK: - PrintableRFCView
 
+#if os(macOS)
 /// A gutter-free, comment-free SwiftUI view that renders a parsed RFC for
 /// printing or PDF export.  Uses the same `MarkdownBlockView` blocks as
 /// `GutterMarkdownView` but omits the 28pt gutter column and all comment UI.
@@ -646,3 +653,4 @@ private struct PrintableRFCView: View {
         .frame(width: width, alignment: .leading)
     }
 }
+#endif // os(macOS)

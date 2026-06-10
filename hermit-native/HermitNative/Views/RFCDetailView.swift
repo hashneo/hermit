@@ -30,19 +30,10 @@ struct RFCDetailView: View {
     // Observed so toolbar re-evaluates when comments load/change.
     @ObservedObject private var liveStore: CommentStore
 
-    init(rfc: RFC, repo: Repository? = nil, commentStore: CommentStore? = nil, onLineTapped: ((Int, Int) -> Void)? = nil) {
-        self.rfc = rfc
-        self.repo = repo
-        self.commentStore = commentStore
-        self.onLineTapped = onLineTapped
-        self.liveStore = commentStore ?? CommentStore()
-    }
-
     @State private var markdown: String = ""
     @State private var isLoading = true
     @State private var errorMessage: String? = nil
     @State private var actionError: String? = nil  // merge/accept errors surfaced as alert
-    @State private var isReadingMode = false  // hermit-8q5
     @State private var isBehind = false       // true when PR branch is behind base
     /// For PR RFCs: the GitHub blob URL pointing directly to the RFC file on the PR branch.
     @State private var resolvedFileURL: String = ""
@@ -73,6 +64,7 @@ struct RFCDetailView: View {
         self._isReadingMode = isReadingMode
         self.hasSidebar   = hasSidebar
         self._currentRFC  = State(initialValue: rfc)
+        self.liveStore    = commentStore ?? CommentStore()
     }
 
     var body: some View {
@@ -88,49 +80,6 @@ struct RFCDetailView: View {
         }
         .navigationTitle(currentRFC.title)
         .toolbar {
-            RFCLifecycleToolbar(
-                rfc: rfc,
-                fileURL: resolvedFileURL,
-                prAlreadyAccepted: prAlreadyAccepted,
-                onAcceptRFC: {
-                    guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient(),
-                          case .pullRequest(let pr) = rfc.source else {
-                        return AcceptRFCResult(merged: false, blockedByCI: false, commitSHA: "")
-                    }
-                    let result: AcceptRFCResult
-                    do {
-                        result = try await client.acceptRFC(prNumber: pr.number, filePath: resolvedFilePath)
-                    } catch {
-                        actionError = error.localizedDescription
-                        return AcceptRFCResult(merged: false, blockedByCI: false, commitSHA: "")
-                    }
-                    if result.merged {
-                        reloadToken = UUID()
-                    }
-                    return result
-                },
-                onPollCI: { sha in
-                    guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient() else { return false }
-                    for _ in 0..<40 {
-                        try? await Task.sleep(for: .seconds(15))
-                        let status = (try? await client.getCIStatus(commitSHA: sha)) ?? "pending"
-                        if status == "success" { return true }
-                        if status == "failure" { return false }
-                    }
-                    return false
-                },
-                allThreadsResolved: liveStore.visibleComments.isEmpty,
-                isBehind: isBehind,
-                onUpdateBranch: {
-                    guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient(),
-                          case .pullRequest(let pr) = rfc.source else { return }
-                    try? await client.updateBranch(prNumber: pr.number)
-                    if let status = try? await client.getMergeStatus(prNumber: pr.number) {
-                        isBehind = status
-                    }
-                },
-                markdownSource: $markdown
-            )
             ToolbarItem(placement: .automatic) {
                 HStack(spacing: 4) {
                     Button { scrollToPrev() } label: { Image(systemName: "chevron.up") }
