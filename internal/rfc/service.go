@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
@@ -243,30 +244,45 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 		return nil, err
 	}
 
-	items := make([]CatalogItem, 0, len(mainItems))
-	for _, item := range mainItems {
-		lifecycleStatus := "unknown"
-		title := item.Title
-		if view, viewErr := client.GetRFC(ctx, baseURL, owner, name, branch, item.Path, token); viewErr == nil {
-			title = view.Title
-			meta, _ := parseFrontmatter(view.MarkdownSource)
-			lifecycleStatus = normalizeLifecycleStatus(meta["status"])
-		}
-		title = normalizeRFCTitle(title, item.Path)
-
-		items = append(items, CatalogItem{
-			ID:              item.ID,
-			Title:           title,
-			Path:            item.Path,
-			SourceType:      "main",
-			SourceLabel:     "Main branch",
-			AllowedActions:  []string{"view"},
-			LifecycleStatus: lifecycleStatus,
-			Commentable:     false,
-			StatusMutable:   true,
-			HTMLURL:         item.HTMLURL,
-		})
+	items := make([]CatalogItem, len(mainItems))
+	var wg sync.WaitGroup
+	for idx, item := range mainItems {
+		wg.Add(1)
+		go func(idx int, item CatalogItem) {
+			defer wg.Done()
+			lifecycleStatus := "unknown"
+			title := item.Title
+			if view, viewErr := client.GetRFC(ctx, baseURL, owner, name, branch, item.Path, token); viewErr == nil {
+				title = view.Title
+				meta, _ := parseFrontmatter(view.MarkdownSource)
+				lifecycleStatus = normalizeLifecycleStatus(meta["status"])
+			}
+			title = normalizeRFCTitle(title, item.Path)
+			items[idx] = CatalogItem{
+				ID:              item.ID,
+				Title:           title,
+				Path:            item.Path,
+				SourceType:      "main",
+				SourceLabel:     "Main branch",
+				AllowedActions:  []string{"view"},
+				LifecycleStatus: lifecycleStatus,
+				Commentable:     false,
+				StatusMutable:   true,
+				HTMLURL:         item.HTMLURL,
+			}
+		}(idx, item)
 	}
+	wg.Wait()
+
+	// Drop any zero-value slots (shouldn't occur, but guard against panics if
+	// mainItems was modified between allocation and goroutine execution).
+	filled := items[:0]
+	for _, it := range items {
+		if it.ID != "" {
+			filled = append(filled, it)
+		}
+	}
+	items = filled
 
 	prItems, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, rfcLabel, token)
 	if err != nil {

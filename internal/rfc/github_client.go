@@ -11,6 +11,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 )
 
 type GitHubRFCClient interface {
@@ -65,7 +66,7 @@ type HTTPGitHubRFCClient struct {
 }
 
 func NewHTTPGitHubRFCClient() *HTTPGitHubRFCClient {
-	return &HTTPGitHubRFCClient{client: &http.Client{}}
+	return &HTTPGitHubRFCClient{client: &http.Client{Timeout: 20 * time.Second}}
 }
 
 func (c *HTTPGitHubRFCClient) ListRFCs(ctx context.Context, baseURL, owner, name, branch, docsPath, token string) ([]CatalogItem, error) {
