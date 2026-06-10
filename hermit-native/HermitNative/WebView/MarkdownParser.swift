@@ -137,6 +137,7 @@ enum MarkdownParser {
             if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
                 let blockStart = i
                 var items: [MarkdownBlock.ListItem] = []
+                var afterBlank = false
                 while i < lines.count {
                     let raw = lines[i]
                     let bl = raw.trimmingCharacters(in: .whitespaces)
@@ -144,9 +145,27 @@ enum MarkdownParser {
                         let indent = raw.prefix(while: { $0 == " " }).count
                         let depth = indent / 2
                         items.append(MarkdownBlock.ListItem(depth: depth, inlines: parseInline(String(bl.dropFirst(2)))))
+                        afterBlank = false
                         i += 1
                     } else if bl.isEmpty {
-                        i += 1; break
+                        // Only continue past a blank line if the next non-blank line
+                        // is another list marker (loose list).
+                        var j = i + 1
+                        while j < lines.count && lines[j].trimmingCharacters(in: .whitespaces).isEmpty { j += 1 }
+                        let nextTrimmed = j < lines.count ? lines[j].trimmingCharacters(in: .whitespaces) : ""
+                        if nextTrimmed.hasPrefix("- ") || nextTrimmed.hasPrefix("* ") {
+                            afterBlank = true
+                            i += 1  // skip blank line and continue
+                        } else {
+                            i += 1; break
+                        }
+                    } else if !items.isEmpty && !afterBlank && raw.hasPrefix(" ") {
+                        // Indented continuation — no blank line before it, so it
+                        // belongs to the last item. Append with a space separator.
+                        let last = items.removeLast()
+                        let combined = last.inlines + [.text(" ")] + parseInline(bl)
+                        items.append(MarkdownBlock.ListItem(depth: last.depth, inlines: combined))
+                        i += 1
                     } else {
                         break
                     }
@@ -160,6 +179,7 @@ enum MarkdownParser {
             if trimmed.range(of: olPattern, options: .regularExpression) != nil {
                 let blockStart = i
                 var items: [MarkdownBlock.ListItem] = []
+                var afterBlank = false
                 while i < lines.count {
                     let raw = lines[i]
                     let bl = raw.trimmingCharacters(in: .whitespaces)
@@ -168,9 +188,27 @@ enum MarkdownParser {
                         let depth = indent / 2
                         let text = bl.replacingOccurrences(of: olPattern, with: "", options: .regularExpression)
                         items.append(MarkdownBlock.ListItem(depth: depth, inlines: parseInline(text)))
+                        afterBlank = false
                         i += 1
                     } else if bl.isEmpty {
-                        i += 1; break
+                        // Only continue past a blank line if the next non-blank line
+                        // is another list marker (loose list).
+                        var j = i + 1
+                        while j < lines.count && lines[j].trimmingCharacters(in: .whitespaces).isEmpty { j += 1 }
+                        let nextTrimmed = j < lines.count ? lines[j].trimmingCharacters(in: .whitespaces) : ""
+                        if nextTrimmed.range(of: olPattern, options: .regularExpression) != nil {
+                            afterBlank = true
+                            i += 1  // skip blank line and continue
+                        } else {
+                            i += 1; break
+                        }
+                    } else if !items.isEmpty && !afterBlank && raw.hasPrefix(" ") {
+                        // Indented continuation — no blank line before it, so it
+                        // belongs to the last item. Append with a space separator.
+                        let last = items.removeLast()
+                        let combined = last.inlines + [.text(" ")] + parseInline(bl)
+                        items.append(MarkdownBlock.ListItem(depth: last.depth, inlines: combined))
+                        i += 1
                     } else {
                         break
                     }
