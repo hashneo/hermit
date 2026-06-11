@@ -234,6 +234,20 @@ func (a *threadResolverAdapter) ListOpen(repositoryID string, prNumber int) []st
 }
 
 func (a *threadResolverAdapter) Resolve(ctx context.Context, repositoryID string, prNumber int, githubThreadID string) error {
+	// Post an acceptance comment on the thread before resolving it so reviewers
+	// can see why the conversation was closed without their explicit action.
+	_, replyErr := a.svc.Reply(ctx, thread.ReplyRequest{
+		RepositoryID: repositoryID,
+		PRNumber:     prNumber,
+		ThreadID:     githubThreadID,
+		Body:         "This RFC has been accepted. Resolving this comment.",
+		Author:       "hermit-bot",
+	})
+	if replyErr != nil {
+		slog.Warn("threadResolverAdapter: failed to post acceptance reply (non-fatal)",
+			"threadID", githubThreadID, "error", replyErr)
+	}
+
 	_, err := a.svc.Resolve(ctx, thread.ResolveRequest{
 		RepositoryID: repositoryID,
 		PRNumber:     prNumber,
