@@ -13,10 +13,7 @@ import HermitServer
 private let hermitLog = OSLog(subsystem: "com.hashicorp.hermit", category: "EmbeddedServer")
 
 /// Resolve a writable log path that works under both sandboxed and non-sandboxed builds.
-/// Sandboxed builds cannot write to /tmp; use the app's temp directory instead.
 private let hermitLogPath: String = {
-    // FileManager.default.temporaryDirectory resolves to the sandbox-safe temp dir
-    // when sandboxed, and /var/folders/… (writable) when not.
     let url = FileManager.default.temporaryDirectory.appendingPathComponent("hermit-native-debug.log")
     return url.path
 }()

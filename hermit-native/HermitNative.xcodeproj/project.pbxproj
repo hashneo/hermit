@@ -32,6 +32,7 @@
 		B0010026 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010027 /* SpeechRecognizer.swift */; };
 		B0010028 /* SpeechSynthesizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010029 /* SpeechSynthesizer.swift */; };
 		B001FF10 /* LiveVoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001FF11 /* LiveVoiceSession.swift */; };
+		B001FF12 /* PRReviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001FF13 /* PRReviewSheet.swift */; };
 		B001002A /* WaveformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001002B /* WaveformView.swift */; };
 		B001002C /* WebViewRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001002D /* WebViewRenderer.swift */; };
 		B001002E /* MarkdownRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001002F /* MarkdownRenderer.swift */; };
@@ -64,6 +65,7 @@
 		B001D004 /* HermitActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D001 /* HermitActivity.swift */; };
 		B001D005 /* BookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D006 /* BookmarkStore.swift */; };
 		B001D007 /* DevConfig in Resources */ = {isa = PBXBuildFile; fileRef = B001D008 /* DevConfig */; };
+		B001LOG1 /* com.hashicorp.hermit.plist in Resources */ = {isa = PBXBuildFile; fileRef = B001LOG2 /* com.hashicorp.hermit.plist */; };
 		B001D009 /* ThreadPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D00A /* ThreadPopoverView.swift */; };
 		B001D010 /* ConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D011 /* ConfigStore.swift */; };
 		F51CA0CA0595C036D8E2D00B /* CommentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 702547F1AF611276712EA42C /* CommentStore.swift */; };
@@ -94,6 +96,7 @@
 		B0010027 /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
 		B0010029 /* SpeechSynthesizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSynthesizer.swift; sourceTree = "<group>"; };
 		B001FF11 /* LiveVoiceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVoiceSession.swift; sourceTree = "<group>"; };
+		B001FF13 /* PRReviewSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRReviewSheet.swift; sourceTree = "<group>"; };
 		B001002B /* WaveformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformView.swift; sourceTree = "<group>"; };
 		B001002D /* WebViewRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewRenderer.swift; sourceTree = "<group>"; };
 		B001002F /* MarkdownRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRenderer.swift; sourceTree = "<group>"; };
@@ -128,6 +131,7 @@
 		B001D003 /* SpotlightDonor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightDonor.swift; sourceTree = "<group>"; };
 		B001D006 /* BookmarkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkStore.swift; sourceTree = "<group>"; };
 		B001D008 /* DevConfig */ = {isa = PBXFileReference; lastKnownFileType = folder; path = DevConfig; sourceTree = "<group>"; };
+		B001LOG2 /* com.hashicorp.hermit.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "com.hashicorp.hermit.plist"; sourceTree = "<group>"; };
 		B001D00A /* ThreadPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadPopoverView.swift; sourceTree = "<group>"; };
 		B001D011 /* ConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigStore.swift; sourceTree = "<group>"; };
 		HERMIT0001 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
@@ -299,6 +303,7 @@
 				702547F1AF611276712EA42C /* CommentStore.swift */,
 				7DEF0D01EB6E30FF8CF74D70 /* GutterMarkdownView.swift */,
 				41AFAD009AFAE5101431EBE5 /* SelectableTextView.swift */,
+				B001FF13 /* PRReviewSheet.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -306,6 +311,7 @@
 		B001009B /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				B001LOG2 /* com.hashicorp.hermit.plist */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -388,6 +394,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B001D007 /* DevConfig in Resources */,
+				B001LOG1 /* com.hashicorp.hermit.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -424,6 +431,7 @@
 				B0010026 /* SpeechRecognizer.swift in Sources */,
 				B0010028 /* SpeechSynthesizer.swift in Sources */,
 				B001FF10 /* LiveVoiceSession.swift in Sources */,
+				B001FF12 /* PRReviewSheet.swift in Sources */,
 				B001002A /* WaveformView.swift in Sources */,
 				B001002C /* WebViewRenderer.swift in Sources */,
 				B001002E /* MarkdownRenderer.swift in Sources */,

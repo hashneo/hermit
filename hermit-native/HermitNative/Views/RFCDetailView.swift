@@ -14,6 +14,9 @@ struct RFCDetailView: View {
     var repo: Repository? = nil
     var commentStore: CommentStore? = nil
     var onLineTapped: ((Int, Int) -> Void)? = nil
+    /// Called after the PR is successfully squash-merged so the parent can
+    /// deselect the RFC and reload the list from the main branch.
+    var onMerged: (() -> Void)? = nil
 
     // hermit-d42: isReadingMode is a @Binding so the parent (MenuBarRFCBrowserView)
     // can react to changes and hide/show the NavigationSplitView sidebar.
@@ -51,16 +54,34 @@ struct RFCDetailView: View {
     @State private var currentRFC: RFC         // mutable copy so status refreshes after transition
     // hermit-cns: PR RFC approval state
     @State private var prApproved: Bool = false
+    @State private var isCIPassing: Bool = false
+    // PR review state — count of outstanding CHANGES_REQUESTED reviews
+    @State private var pendingReviewCount: Int = 0
+    @State private var currentUserLogin: String = ""
+    @State private var prAuthorLogin: String = ""
+
+    private struct ReviewSheetContext: Identifiable {
+        let id = UUID()
+        let client: any HermitClientProtocol
+        let prNumber: Int
+        let submitMode: PRReviewSheet.SubmitMode
+        // Line-comment fields — only used when submitMode == .lineComment
+        let filePath: String
+        let firstLineFingerprint: String
+    }
+    @State private var reviewSheetContext: ReviewSheetContext? = nil
 
     init(rfc: RFC, repo: Repository? = nil,
          commentStore: CommentStore? = nil,
          onLineTapped: ((Int, Int) -> Void)? = nil,
+         onMerged: (() -> Void)? = nil,
          isReadingMode: Binding<Bool> = .constant(false),
          hasSidebar: Bool = false) {
         self.rfc          = rfc
         self.repo         = repo
         self.commentStore = commentStore
         self.onLineTapped = onLineTapped
+        self.onMerged     = onMerged
         self._isReadingMode = isReadingMode
         self.hasSidebar   = hasSidebar
         self._currentRFC  = State(initialValue: rfc)
@@ -118,28 +139,54 @@ struct RFCDetailView: View {
                 rfc: currentRFC,
                 fileURL: resolvedFileURL,
                 callerPermission: callerPermission,
-                onApprove: handleApprove,
                 onMarkImplemented: handleMarkImplemented,
-                onApprovePR: handleApprovePR,
-                allThreadsResolved: commentStore?.comments.allSatisfy(\.resolved) ?? true,
-                prApproved: prApproved,
-                prAlreadyAccepted: prAlreadyAccepted,
-                onAcceptRFC: {
+                onApproveAndMerge: {
                     guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient(),
                           case .pullRequest(let pr) = rfc.source else {
                         return AcceptRFCResult(merged: false, blockedByCI: false, commitSHA: "")
                     }
-                    let result: AcceptRFCResult
+                    // Only approve if not the PR author — GitHub forbids self-approval.
+                    let isOwnPR = !prAuthorLogin.isEmpty && !currentUserLogin.isEmpty
+                                  && prAuthorLogin == currentUserLogin
+                    if !isOwnPR {
+                        do {
+                            try await client.approve(prNumber: pr.number)
+                            prApproved = true
+                        } catch {
+                            actionError = error.localizedDescription
+                            return AcceptRFCResult(merged: false, blockedByCI: false, commitSHA: "")
+                        }
+                    }
+                    // Accept (rewrite frontmatter) + attempt merge for everyone.
                     do {
-                        result = try await client.acceptRFC(prNumber: pr.number, filePath: resolvedFilePath)
+                        let result = try await client.acceptRFC(prNumber: pr.number, filePath: resolvedFilePath)
+                        // Mark accepted immediately so Merge button enables without waiting for reload.
+                        prAlreadyAccepted = true
+                        if isOwnPR { prApproved = true }
+                        if result.merged { onMerged?() } else { reloadToken = UUID() }
+                        return result
                     } catch {
                         actionError = error.localizedDescription
                         return AcceptRFCResult(merged: false, blockedByCI: false, commitSHA: "")
                     }
-                    if result.merged {
-                        reloadToken = UUID()
+                },
+                allThreadsResolved: commentStore?.comments.allSatisfy(\.resolved) ?? true,
+                prApproved: prApproved,
+                isCIPassing: isCIPassing,
+                prAlreadyAccepted: prAlreadyAccepted,
+                onMergePR: {
+                    guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient(),
+                          case .pullRequest(let pr) = rfc.source else {
+                        return MergePRResult(merged: false, blockedByCI: false)
                     }
-                    return result
+                    do {
+                        let result = try await client.mergePR(prNumber: pr.number)
+                        if result.merged { onMerged?() }
+                        return result
+                    } catch {
+                        actionError = error.localizedDescription
+                        return MergePRResult(merged: false, blockedByCI: false)
+                    }
                 },
                 onPollCI: { sha in
                     guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient() else { return false }
@@ -160,7 +207,60 @@ struct RFCDetailView: View {
                         isBehind = status
                     }
                 },
+                pendingReviewCount: pendingReviewCount,
+                onOpenReviews: {
+                    guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient(),
+                          case .pullRequest(let pr) = currentRFC.source else { return }
+                    let isOwnPR = !prAuthorLogin.isEmpty && !currentUserLogin.isEmpty
+                                  && prAuthorLogin == currentUserLogin
+                    let filePath = resolvedFilePath.isEmpty ? rfc.path : resolvedFilePath
+                    let firstLine = markdown.components(separatedBy: "\n").first ?? ""
+                    reviewSheetContext = ReviewSheetContext(
+                        client: client,
+                        prNumber: pr.number,
+                        submitMode: isOwnPR ? .lineComment : .requestChanges,
+                        filePath: filePath,
+                        firstLineFingerprint: Self.makeFingerprint(firstLine)
+                    )
+                },
+                isContentLoading: isLoading,
                 markdownSource: markdown
+            )
+        }
+        .sheet(item: $reviewSheetContext) { ctx in
+            PRReviewSheet(
+                rfcTitle: currentRFC.title,
+                currentUserLogin: currentUserLogin,
+                submitMode: ctx.submitMode,
+                onSubmit: { body in
+                    if ctx.submitMode == .lineComment {
+                        _ = try await ctx.client.createReviewComment(
+                            prNumber: ctx.prNumber,
+                            body: body,
+                            filePath: ctx.filePath,
+                            lineStart: 1,
+                            lineEnd: 1,
+                            textFingerprint: ctx.firstLineFingerprint
+                        )
+                    } else {
+                        try await ctx.client.requestChanges(prNumber: ctx.prNumber, body: body)
+                        await refreshPendingReviewCount(client: ctx.client, prNumber: ctx.prNumber)
+                    }
+                },
+                onDismiss: { reviewID in
+                    try await ctx.client.dismissReview(prNumber: ctx.prNumber, reviewID: reviewID, message: "Review dismissed.")
+                    await refreshPendingReviewCount(client: ctx.client, prNumber: ctx.prNumber)
+                },
+                onRefresh: {
+                    try await ctx.client.listPRReviews(prNumber: ctx.prNumber)
+                },
+                onFetchThreads: {
+                    try await ctx.client.listReviewComments(prNumber: ctx.prNumber)
+                },
+                onDeleteThread: { threadID in
+                    try await ctx.client.deleteReviewComment(prNumber: ctx.prNumber, threadId: threadID)
+                },
+                isAccepted: prAlreadyAccepted
             )
         }
         .overlay(lifecycleErrorBanner, alignment: .top)
@@ -233,7 +333,8 @@ struct RFCDetailView: View {
                     onLineTapped: onLineTapped,
                     onLinkTapped: { url in handleLinkTap(url) },
                     viewportHeight: viewportHeight,
-                    scrollToLine: $scrollToLine
+                    scrollToLine: $scrollToLine,
+                    isAccepted: prAlreadyAccepted
                 )
                 .environmentObject(liveStore)
                 .padding(.horizontal, 32)
@@ -279,6 +380,9 @@ struct RFCDetailView: View {
                 markdown = try await client.fetchRFCContent(path: rfc.path, ref: "main")
             case .pullRequest(let pr):
                 markdown = try await client.fetchPRRFCContent(prNumber: pr.number)
+                if let login = try? await client.fetchPRAuthorLogin(prNumber: pr.number), !login.isEmpty {
+                    prAuthorLogin = login
+                }
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -348,7 +452,12 @@ struct RFCDetailView: View {
             callerPermission = "none"
         }
 
-        // For PR RFCs also fetch the current review state.
+        // Fetch current user login for review sheet ownership checks.
+        if let login = try? await client.fetchCurrentUser(), !login.isEmpty {
+            currentUserLogin = login
+        }
+
+        // For PR RFCs also fetch the current review state, CI status, and pending review count.
         if case .pullRequest(let pr) = rfc.source {
             do {
                 let state = try await client.getReviewState(prNumber: pr.number)
@@ -356,7 +465,32 @@ struct RFCDetailView: View {
             } catch {
                 prApproved = false
             }
+            // Fetch CI status for the PR head commit
+            if !pr.headSHA.isEmpty {
+                let ci = (try? await client.getCIStatus(commitSHA: pr.headSHA)) ?? "pending"
+                isCIPassing = ci == "success"
+            } else {
+                isCIPassing = false
+            }
+            await refreshPendingReviewCount(client: client, prNumber: pr.number)
         }
+    }
+
+    // MARK: - Review count refresh
+
+    @MainActor
+    func refreshPendingReviewCount(client: any HermitClientProtocol, prNumber: Int) async {
+        let reviews = (try? await client.listPRReviews(prNumber: prNumber)) ?? []
+        pendingReviewCount = reviews.filter { $0.isChangesRequested }.count
+    }
+
+    // MARK: - Fingerprint helper (mirrors CommentStore.makeFingerprint)
+
+    private static func makeFingerprint(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        let truncated = trimmed.count > 40 ? String(trimmed.prefix(40)) : trimmed
+        let slug = truncated.lowercased().replacingOccurrences(of: " ", with: "-")
+        return slug.isEmpty ? "line" : slug
     }
 
     // MARK: - Lifecycle transition handlers
@@ -431,19 +565,5 @@ struct RFCDetailView: View {
 #else
         UIApplication.shared.open(url)
 #endif
-    }
-
-    // hermit-cns: Approve the GitHub PR for a PR RFC.
-    // Uses the existing review/approve endpoint which submits a GitHub approval
-    // review.  On success, updates prApproved so the button disables itself.
-    private func handleApprovePR() async {
-        guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient() else { return }
-        guard case .pullRequest(let pr) = rfc.source else { return }
-        do {
-            try await client.approve(prNumber: pr.number)
-            prApproved = true
-        } catch {
-            lifecycleError = error.localizedDescription
-        }
     }
 }

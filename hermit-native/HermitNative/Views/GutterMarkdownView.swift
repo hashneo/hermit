@@ -13,13 +13,17 @@ struct GutterMarkdownView: View {
     var viewportHeight: CGFloat = 800
     /// Set to a line number to scroll that block into view, then reset to nil.
     @Binding var scrollToLine: Int?
+    /// When true (RFC accepted), comment badges, selection bubbles, and the inline
+    /// compose row are all hidden — the document becomes read-only for commenting.
+    var isAccepted: Bool = false
 
-    init(blocks: [MarkdownBlock], onLineTapped: ((Int, Int) -> Void)? = nil, onLinkTapped: ((URL) -> Void)? = nil, viewportHeight: CGFloat = 800, scrollToLine: Binding<Int?> = .constant(nil)) {
+    init(blocks: [MarkdownBlock], onLineTapped: ((Int, Int) -> Void)? = nil, onLinkTapped: ((URL) -> Void)? = nil, viewportHeight: CGFloat = 800, scrollToLine: Binding<Int?> = .constant(nil), isAccepted: Bool = false) {
         self.blocks = blocks
         self.onLineTapped = onLineTapped
         self.onLinkTapped = onLinkTapped
         self.viewportHeight = viewportHeight
         self._scrollToLine = scrollToLine
+        self.isAccepted = isAccepted
     }
 
     @EnvironmentObject private var commentStore: CommentStore
@@ -97,14 +101,16 @@ struct GutterMarkdownView: View {
         let line = block.sourceLine
         let isSelected = selectedLine == line
         let threads = commentStore.comments(for: line, lineEnd: block.sourceLineEnd, blockRanges: blockRanges)
-        let count = threads.count
-        let outdatedThreads = threads.filter { $0.outdated }
-        let currentThreads  = threads.filter { !$0.outdated }
+        // When the RFC is accepted, treat all threads as absent for badge/compose purposes.
+        let visibleThreads = isAccepted ? [] : threads
+        let count = visibleThreads.count
+        let outdatedThreads = visibleThreads.filter { $0.outdated }
+        let currentThreads  = visibleThreads.filter { !$0.outdated }
         let outdatedCount   = outdatedThreads.count
         let currentCount    = currentThreads.count
-        let allResolved     = count > 0 && threads.allSatisfy { $0.resolved }
+        let allResolved     = count > 0 && visibleThreads.allSatisfy { $0.resolved }
         let anyOutdated     = outdatedCount > 0
-        let hasBubble = bubbleLine == line && !bubbleText.isEmpty
+        let hasBubble = !isAccepted && bubbleLine == line && !bubbleText.isEmpty
 
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 0) {
@@ -178,7 +184,7 @@ struct GutterMarkdownView: View {
                 }
             }
 
-            if isSelected {
+            if isSelected && !isAccepted {
                 inlineCompose(for: line)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -265,7 +271,8 @@ struct GutterMarkdownView: View {
             ), arrowEdge: .trailing) {
                 ThreadPopoverView(line: line, lineEnd: lineEnd, isEditing: $popoverIsEditing,
                                   containerWidth: contentWidth, containerHeight: viewportHeight,
-                                  blockRanges: blockRanges, outdatedOnly: outdatedOnly)
+                                  blockRanges: blockRanges, outdatedOnly: outdatedOnly,
+                                  isAccepted: isAccepted)
                     .environmentObject(commentStore)
             }
 #else
@@ -275,7 +282,8 @@ struct GutterMarkdownView: View {
             )) {
                 ThreadPopoverView(line: line, lineEnd: lineEnd, isEditing: $popoverIsEditing,
                                   containerWidth: contentWidth, containerHeight: viewportHeight,
-                                  blockRanges: blockRanges, outdatedOnly: outdatedOnly)
+                                  blockRanges: blockRanges, outdatedOnly: outdatedOnly,
+                                  isAccepted: isAccepted)
                     .environmentObject(commentStore)
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)

@@ -1,10 +1,27 @@
 import Foundation
+import os.log
 
 // MARK: - hermit-u1k: HermitAPIClient — consumes the Hermit REST API
 //
 // The sole API client for the Hermit native app.
 // All GitHub interactions flow through the Go backend — there is no
 // direct GitHub API path in the native client.
+
+// MARK: - Shared logger
+//
+// Uses OSLog so output appears in Console.app and via:
+//   log stream --predicate 'subsystem == "com.hashicorp.hermit"' --level debug
+//
+// Debug/info messages require the subsystem logging config to be enabled — see
+// Resources/com.hashicorp.hermit.plist (installed by make dev).
+// Error/fault messages are always captured without any config.
+
+private let _apiLog   = OSLog(subsystem: "com.hashicorp.hermit", category: "APIClient")
+private let _mergeLog = OSLog(subsystem: "com.hashicorp.hermit", category: "Merge")
+
+private func hLog(_ msg: String, log: OSLog = _apiLog, type: OSLogType = .debug) {
+    os_log("%{public}@", log: log, type: type, msg)
+}
 
 // MARK: - Shared API protocol
 
@@ -15,6 +32,7 @@ protocol HermitClientProtocol: Actor {
     func listMainBranchRFCs() async throws -> [RFCFile]
     func fetchRFCContent(path: String, ref: String) async throws -> String
     func fetchPRRFCContent(prNumber: Int) async throws -> String
+    func fetchPRAuthorLogin(prNumber: Int) async throws -> String
     func listFilesOnRef(docsPath: String, ref: String) async throws -> [String]
     func listPRChangedFiles(prNumber: Int, docsPath: String) async throws -> [String]
 
@@ -50,8 +68,15 @@ protocol HermitClientProtocol: Actor {
 
     // Accept RFC: rewrites frontmatter to "accepted" on the PR branch and squash-merges.
     func acceptRFC(prNumber: Int, filePath: String) async throws -> AcceptRFCResult
+    // Merge PR: squash-merges without any frontmatter rewrite (use after CI unblocks).
+    func mergePR(prNumber: Int) async throws -> MergePRResult
     // Poll GitHub CI check status for a commit SHA.
     func getCIStatus(commitSHA: String) async throws -> String  // "pending" | "success" | "failure"
+
+    // PR reviews — request changes, list, dismiss.
+    func requestChanges(prNumber: Int, body: String) async throws
+    func listPRReviews(prNumber: Int) async throws -> [PRReview]
+    func dismissReview(prNumber: Int, reviewID: Int64, message: String) async throws
 
     // Lifecycle transitions on main-branch RFCs (require admin/maintain permission).
     func approveRFC(rfcID: String) async throws -> LifecycleTransitionResult
@@ -173,6 +198,14 @@ actor HermitAPIClient: HermitClientProtocol {
         struct RFCDoc: Decodable { let markdown_source: String }
         return (try? JSONDecoder().decode(RFCDoc.self, from: data))?.markdown_source
             ?? String(data: data, encoding: .utf8) ?? ""
+    }
+
+    func fetchPRAuthorLogin(prNumber: Int) async throws -> String {
+        let repoID = try await repoID()
+        let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/rfc/render")
+        let data = try await get(u)
+        struct RFCDoc: Decodable { let pr_author_login: String? }
+        return (try? JSONDecoder().decode(RFCDoc.self, from: data))?.pr_author_login ?? ""
     }
 
     // MARK: - listFilesOnRef
@@ -330,6 +363,25 @@ actor HermitAPIClient: HermitClientProtocol {
         return try JSONDecoder().decode(AcceptRFCResult.self, from: data)
     }
 
+    // MARK: - mergePR
+
+    func mergePR(prNumber: Int) async throws -> MergePRResult {
+        let repoID = try await repoID()
+        let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/merge")
+        hLog("mergePR: POST \(u.path) for PR #\(prNumber)", log: _mergeLog, type: .info)
+        let data = try await post(u, body: [:] as [String: String])
+        let rawBody = String(data: data, encoding: .utf8) ?? "<unreadable>"
+        hLog("mergePR: response body: \(rawBody)", log: _mergeLog, type: .info)
+        do {
+            let result = try JSONDecoder().decode(MergePRResult.self, from: data)
+            hLog("mergePR: decoded — merged=\(result.merged) blockedByCI=\(result.blockedByCI)", log: _mergeLog, type: .info)
+            return result
+        } catch {
+            hLog("mergePR: JSON decode failed: \(error) — body: \(rawBody)", log: _mergeLog, type: .fault)
+            throw error
+        }
+    }
+
     // MARK: - getCIStatus
 
     func getCIStatus(commitSHA: String) async throws -> String {
@@ -338,6 +390,34 @@ actor HermitAPIClient: HermitClientProtocol {
         let data = try await get(u)
         struct Response: Decodable { let status: String }
         return (try? JSONDecoder().decode(Response.self, from: data))?.status ?? "pending"
+    }
+
+    // MARK: - requestChanges
+
+    func requestChanges(prNumber: Int, body: String) async throws {
+        let repoID = try await repoID()
+        let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/review/request-changes")
+        _ = try await post(u, body: ["body": body])
+    }
+
+    // MARK: - listPRReviews
+
+    func listPRReviews(prNumber: Int) async throws -> [PRReview] {
+        let repoID = try await repoID()
+        let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/review/list")
+        let data = try await get(u)
+        struct Response: Decodable { let items: [PRReview] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode(Response.self, from: data))?.items ?? []
+    }
+
+    // MARK: - dismissReview
+
+    func dismissReview(prNumber: Int, reviewID: Int64, message: String) async throws {
+        let repoID = try await repoID()
+        let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/review/\(reviewID)/dismiss")
+        _ = try await put(u, body: ["message": message])
     }
 
     // MARK: - approveRFC
@@ -482,7 +562,11 @@ actor HermitAPIClient: HermitClientProtocol {
     private func get(_ url: URL) async throws -> Data {
         var req = URLRequest(url: url)
         req.setValue("Bearer \(config.pat)", forHTTPHeaderField: "Authorization")
+        hLog("GET \(url.path)")
         let (data, resp) = try await session.data(for: req)
+        if let http = resp as? HTTPURLResponse {
+            hLog("GET \(url.path) → \(http.statusCode)")
+        }
         try checkResponse(resp, data: data)
         return data
     }
@@ -493,7 +577,15 @@ actor HermitAPIClient: HermitClientProtocol {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(config.pat)", forHTTPHeaderField: "Authorization")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        hLog("POST \(url.path)")
         let (data, resp) = try await session.data(for: req)
+        if let http = resp as? HTTPURLResponse {
+            hLog("POST \(url.path) → \(http.statusCode)")
+            if !(200..<300).contains(http.statusCode) {
+                let body = String(data: data, encoding: .utf8) ?? "<unreadable>"
+                hLog("POST \(url.path) \(http.statusCode) error body: \(body)", type: .error)
+            }
+        }
         try checkResponse(resp, data: data)
         return data
     }
@@ -502,7 +594,11 @@ actor HermitAPIClient: HermitClientProtocol {
         var req = URLRequest(url: url)
         req.httpMethod = "DELETE"
         req.setValue("Bearer \(config.pat)", forHTTPHeaderField: "Authorization")
+        hLog("DELETE \(url.path)")
         let (data, resp) = try await session.data(for: req)
+        if let http = resp as? HTTPURLResponse {
+            hLog("DELETE \(url.path) → \(http.statusCode)")
+        }
         // 204 No Content is success; checkResponse handles errors
         if let http = resp as? HTTPURLResponse, http.statusCode == 204 { return }
         try checkResponse(resp, data: data)
@@ -523,9 +619,44 @@ actor HermitAPIClient: HermitClientProtocol {
     private func checkResponse(_ response: URLResponse, data: Data) throws {
         guard let http = response as? HTTPURLResponse else { return }
         guard (200..<300).contains(http.statusCode) else {
-            let msg = String(data: data, encoding: .utf8) ?? "unknown error"
+            let msg = Self.extractErrorMessage(from: data) ?? String(data: data, encoding: .utf8) ?? "unknown error"
             throw HermitAPIError.httpError(statusCode: http.statusCode, message: msg)
         }
+    }
+
+    /// Pulls the human-readable `message` field out of a Hermit error JSON body.
+    /// The raw message may itself embed a deeper GitHub error JSON — strip that too.
+    /// Input example: "submit request changes: github request changes failed: 422 {\"message\":\"Review Can not...\",\"errors\":[...]}"
+    /// Output:        "Review Can not request changes on your own pull request"
+    private static func extractErrorMessage(from data: Data) -> String? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let msg = obj["message"] as? String else { return nil }
+
+        // Try to find and parse an embedded JSON blob in the message (GitHub error payload).
+        // GitHub errors arrive as: "... failed: 422 {\"message\":\"...\",\"errors\":[...]}"
+        if let braceIdx = msg.range(of: " {", options: .backwards) {
+            let jsonPart = String(msg[braceIdx.lowerBound...]).trimmingCharacters(in: .whitespaces)
+            if let jsonData = jsonPart.data(using: .utf8),
+               let inner = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
+                // Prefer the errors array first, then fall back to message
+                if let errors = inner["errors"] as? [String], let first = errors.first, !first.isEmpty {
+                    return first
+                }
+                if let innerMsg = inner["message"] as? String, !innerMsg.isEmpty {
+                    return innerMsg
+                }
+            }
+            // JSON parse failed — just strip the blob and any trailing HTTP code
+            var clean = String(msg[msg.startIndex..<braceIdx.lowerBound])
+                .trimmingCharacters(in: .whitespaces)
+            // Also strip trailing ": NNN" (HTTP status code)
+            if let codeRange = clean.range(of: #":\s*\d{3}$"#, options: .regularExpression) {
+                clean = String(clean[clean.startIndex..<codeRange.lowerBound])
+                    .trimmingCharacters(in: .whitespaces)
+            }
+            return clean.isEmpty ? msg : clean
+        }
+        return msg
     }
 }
 

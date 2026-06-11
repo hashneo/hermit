@@ -269,6 +269,8 @@ struct ThreadPopoverView: View {
     /// When set, only show threads matching the outdated flag.
     /// nil = show all (legacy behaviour), true = outdated only, false = current only.
     var outdatedOnly: Bool? = nil
+    /// When true (RFC accepted), the reply field and resolve/re-open buttons are hidden.
+    var isAccepted: Bool = false
     @EnvironmentObject private var commentStore: CommentStore
 
     @State private var replyText: [String: String] = [:]
@@ -403,7 +405,7 @@ struct ThreadPopoverView: View {
 
                 Divider()
 
-                if let root = rootThread, !root.resolved {
+                if let root = rootThread, !root.resolved, !isAccepted {
                     let isOriginalAuthor = !commentStore.currentUserLogin.isEmpty &&
                                           root.user == commentStore.currentUserLogin
                     let isBotAuthor = root.user.hasSuffix("[bot]")
@@ -436,8 +438,8 @@ struct ThreadPopoverView: View {
                     replyField(for: root)
                 }
 
-                // Re-open button — shown to anyone when the thread is resolved.
-                if let root = rootThread, root.resolved {
+                // Re-open button — shown to anyone when the thread is resolved (not when RFC is accepted).
+                if let root = rootThread, root.resolved, !isAccepted {
                     let isUnresolvingThis = resolving[root.id] == true
                     Divider()
                     HStack {

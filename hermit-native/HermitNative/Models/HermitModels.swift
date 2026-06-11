@@ -69,6 +69,27 @@ struct ReviewState: Equatable {
     let reviewers: [String]
 }
 
+/// A formal GitHub PR review (APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED).
+struct PRReview: Decodable, Identifiable {
+    let id: Int64
+    let state: String          // "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED"
+    let body: String
+    let user: String
+    let submittedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case state
+        case body
+        case user          = "user"
+        case submittedAt   = "submitted_at"
+    }
+
+    var isChangesRequested: Bool { state == "CHANGES_REQUESTED" || state == "REQUEST_CHANGES" }
+    var isApproved: Bool { state == "APPROVED" }
+    var isDismissed: Bool { state == "DISMISSED" }
+}
+
 struct SubmitForReviewResult: Decodable {
     let prNumber: Int
     let htmlURL: String
@@ -99,6 +120,24 @@ struct AcceptRFCResult: Decodable {
         self.blockedByCI = blockedByCI
         self.commitSHA = commitSHA
         self.handedToIronhide = handedToIronhide
+    }
+}
+
+struct MergePRResult: Decodable {
+    let merged: Bool
+    let blockedByCI: Bool
+    let commitSHA: String?
+
+    enum CodingKeys: String, CodingKey {
+        case merged      = "merged"
+        case blockedByCI = "blocked_by_ci"
+        case commitSHA   = "commit_sha"
+    }
+
+    init(merged: Bool, blockedByCI: Bool, commitSHA: String? = nil) {
+        self.merged = merged
+        self.blockedByCI = blockedByCI
+        self.commitSHA = commitSHA
     }
 }
 

@@ -374,6 +374,9 @@ struct iPadRootView: View {
                 RFCDetailView(rfc: rfc, commentStore: commentStore, onLineTapped: { line, lineEnd in
                     appState.selectedLine = line
                     appState.selectedLineEnd = lineEnd
+                }, onMerged: {
+                    appState.selectedRFC = nil
+                    Task { await store.load() }
                 })
                 if showInlineThread, case .pullRequest(let pr) = rfc.source {
                     Divider()

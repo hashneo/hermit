@@ -31,24 +31,35 @@ struct RFCLifecycleToolbar: ToolbarContent {
     var fileURL: String = ""
     /// Permission level fetched asynchronously by RFCDetailView after load.
     var callerPermission: String = "none"
-    var onApprove: (() async -> Void)?        = nil
     var onMarkImplemented: (() async -> Void)? = nil
-    /// hermit-cns: for PR RFCs, called when the Approve PR button is tapped.
-    var onApprovePR: (() async -> Void)? = nil
+    /// For PR RFCs: approves the PR and marks the RFC as accepted, then merges.
+    var onApproveAndMerge: (() async -> AcceptRFCResult)? = nil
     /// hermit-cns: true when all review threads on the PR are resolved.
     var allThreadsResolved: Bool = false
     /// hermit-cns: true when the PR already has an approval review.
     var prApproved: Bool = false
+    /// True when CI checks on the PR head commit are passing.
+    var isCIPassing: Bool = false
     /// True when the PR RFC frontmatter already says status: accepted but the PR is not yet merged.
     var prAlreadyAccepted: Bool = false
-    /// Accept RFC: rewrites status to "accepted" on PR branch and attempts squash-merge.
-    var onAcceptRFC: (() async -> AcceptRFCResult)? = nil
+    /// Merge PR: squash-merges without any frontmatter rewrite (used after CI unblocks or when already accepted).
+    var onMergePR: (() async -> MergePRResult)? = nil
     /// Poll CI checks for the given commit SHA. Returns true when CI passed.
     var onPollCI: ((String) async -> Bool)? = nil
     /// True when the PR branch is behind the base branch.
     var isBehind: Bool = false
     /// Called when the user taps "Update Branch".
     var onUpdateBranch: (() async -> Void)? = nil
+    /// Number of outstanding REQUEST_CHANGES reviews. Gates Accept & Merge.
+    var pendingReviewCount: Int = 0
+    /// Called when the user taps the Reviews button — caller presents the reviews sheet.
+    var onOpenReviews: (() -> Void)? = nil
+    /// Login of the PR author — used to hide Approve & Merge for the author's own PRs.
+    var prAuthorLogin: String = ""
+    /// Login of the authenticated user.
+    var currentUserLogin: String = ""
+    /// True while the parent view is loading content — disables all action buttons.
+    var isContentLoading: Bool = false
     /// Populated once markdown loads, used for export/print.
     var markdownSource: String = ""
 
@@ -65,46 +76,39 @@ struct RFCLifecycleToolbar: ToolbarContent {
 
     /// Represents a lifecycle state change awaiting user confirmation.
     enum LifecycleAction: Identifiable {
-        case approve
         case markImplemented
-        case approvePR
-        case acceptRFC
+        case approveAndMerge
+        case mergePR
         case updateBranch
 
         var id: String {
             switch self {
-            case .approve:          return "approve"
             case .markImplemented:  return "markImplemented"
-            case .approvePR:        return "approvePR"
-            case .acceptRFC:        return "acceptRFC"
+            case .approveAndMerge:  return "approveAndMerge"
+            case .mergePR:          return "mergePR"
             case .updateBranch:     return "updateBranch"
             }
         }
 
         var title: String {
             switch self {
-            case .approve:          return "Approve RFC"
             case .markImplemented:  return "Mark as Implemented"
-            case .approvePR:        return "Approve Pull Request"
-            case .acceptRFC:        return "Accept RFC"
+            case .approveAndMerge:  return "Approve & Merge"
+            case .mergePR:          return "Merge Pull Request"
             case .updateBranch:     return "Update Branch"
             }
         }
 
         var message: String {
             switch self {
-            case .approve:
-                return "Approving this RFC will move it from Draft to Accepted. " +
-                       "This signals community consensus and cannot be undone without admin intervention."
             case .markImplemented:
                 return "Marking this RFC as Implemented indicates the described work is complete. " +
                        "This is a terminal state and cannot be undone without admin intervention."
-            case .approvePR:
-                return "Approving this pull request will submit a GitHub approval review on your behalf, " +
-                       "marking the RFC PR as ready to merge."
-            case .acceptRFC:
-                return "This will squash-merge the pull request. " +
-                       "If CI checks are required, Hermit will wait for them to pass before merging."
+            case .approveAndMerge:
+                return "This will approve the pull request and mark the RFC as Accepted, then attempt to squash-merge it. " +
+                       "If CI checks are still running, a Merge button will appear once they pass."
+            case .mergePR:
+                return "CI checks have passed. This will squash-merge the pull request."
             case .updateBranch:
                 return "This will merge the latest changes from the base branch into this PR branch. " +
                        "A merge commit will be created on your behalf."
@@ -113,10 +117,9 @@ struct RFCLifecycleToolbar: ToolbarContent {
 
         var confirmLabel: String {
             switch self {
-            case .approve:          return "Approve"
             case .markImplemented:  return "Mark Implemented"
-            case .approvePR:        return "Approve PR"
-            case .acceptRFC:        return "Merge"
+            case .approveAndMerge:  return "Approve & Merge"
+            case .mergePR:          return "Merge"
             case .updateBranch:     return "Update Branch"
             }
         }
@@ -136,25 +139,25 @@ struct RFCLifecycleToolbar: ToolbarContent {
 
     private var status: String { rfc.lifecycleStatus ?? "unknown" }
 
-    private var canApprove: Bool {
-        isMainBranch && status == "draft" && isPrivilegedPermission(callerPermission)
-    }
-
     private var canMarkImplemented: Bool {
         isMainBranch && status == "accepted" && isPrivilegedPermission(callerPermission)
     }
 
-    /// Accept & Merge is available to anyone with threads resolved —
-    /// GitHub will reject the merge if the token lacks permission.
-    private var canAcceptRFC: Bool {
-        isPullRequest && allThreadsResolved && awaitingMergeSHA == nil
+    private var isOwnPR: Bool {
+        !prAuthorLogin.isEmpty && !currentUserLogin.isEmpty && prAuthorLogin == currentUserLogin
     }
 
-    /// hermit-cns: Approve PR is available when the caller has admin/maintain,
-    /// all review threads are resolved, and the PR has not already been approved.
-    private var canApprovePR: Bool {
-        isPullRequest && isPrivilegedPermission(callerPermission) &&
-        allThreadsResolved && !prApproved
+    /// Approve & Merge is available when: privileged, threads resolved, no pending reviews,
+    /// not already approved, and Merge isn't already independently unlocked.
+    private var canApproveAndMerge: Bool {
+        isPullRequest && isPrivilegedPermission(callerPermission)
+        && allThreadsResolved && pendingReviewCount == 0
+        && !prApproved && awaitingMergeSHA == nil && !canMergePR
+    }
+
+    /// Merge is available once the PR is approved and CI is passing.
+    private var canMergePR: Bool {
+        isPullRequest && prApproved && isCIPassing && awaitingMergeSHA == nil
     }
 
     /// Terminal states — no transitions permitted from any role.
@@ -188,39 +191,21 @@ struct RFCLifecycleToolbar: ToolbarContent {
 
         // Lifecycle transition buttons
         ToolbarItemGroup(placement: .automatic) {
-            // Main-branch RFCs: draft → accepted → implemented
-            if isMainBranch && !isTerminal {
-                if status == "draft" {
-                    Button {
-                        pendingAction = .approve
-                    } label: {
-                        if isActioning {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Approve", systemImage: "checkmark.seal")
-                        }
+            // Main-branch RFCs: accepted → implemented only (approve goes through PR flow)
+            if isMainBranch && !isTerminal && status == "accepted" {
+                Button {
+                    pendingAction = .markImplemented
+                } label: {
+                    if isActioning {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Mark Implemented", systemImage: "checkmark.circle.fill")
                     }
-                    .disabled(!canApprove || isActioning)
-                    .help(canApprove
-                          ? "Approve this RFC (moves status to Accepted)"
-                          : "Requires admin or maintain permission on this repository")
                 }
-
-                if status == "accepted" {
-                    Button {
-                        pendingAction = .markImplemented
-                    } label: {
-                        if isActioning {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Mark Implemented", systemImage: "checkmark.circle.fill")
-                        }
-                    }
-                    .disabled(!canMarkImplemented || isActioning)
-                    .help(canMarkImplemented
-                          ? "Mark this RFC as Implemented"
-                          : "Requires admin or maintain permission on this repository")
-                }
+                .disabled(!canMarkImplemented || isActioning || isContentLoading)
+                .help(canMarkImplemented
+                      ? "Mark this RFC as Implemented"
+                      : "Requires admin or maintain permission on this repository")
             }
 
             // PR RFCs — Accept & Merge / Merge / CI waiting / Ironhide / Approve PR / Update Branch
@@ -232,83 +217,108 @@ struct RFCLifecycleToolbar: ToolbarContent {
                     }
                     .disabled(true)
                     .help("Ironhide labels applied. Ironhide will review and merge this PR automatically.")
-                } else if let sha = awaitingMergeSHA {
-                    if ciPassed {
+                } else {
+                    // Approve & Merge — hidden once Merge is unlocked or we're awaiting post-accept CI
+                    if awaitingMergeSHA == nil && !canMergePR && !prAlreadyAccepted {
                         Button {
-                            pendingAction = .acceptRFC
+                            pendingAction = .approveAndMerge
+                        } label: {
+                            if isActioning {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Label("Approve & Merge", systemImage: "checkmark.seal.fill")
+                            }
+                        }
+                        .disabled(!canApproveAndMerge || isActioning || isContentLoading)
+                        .help(pendingReviewCount > 0
+                              ? "\(pendingReviewCount) outstanding request-changes review\(pendingReviewCount == 1 ? "" : "s") must be dismissed first"
+                              : !allThreadsResolved
+                                  ? "Resolve all review comments before approving"
+                                  : prApproved
+                                      ? "PR is already approved — use Merge once CI passes"
+                                      : !isPrivilegedPermission(callerPermission)
+                                          ? "Requires admin or maintain permission"
+                                          : "Approve the PR and mark this RFC as Accepted")
+                    }
+
+                    // Merge — always visible for PR RFCs; enabled when approved + CI passing,
+                    // or after Accept & Merge triggered CI polling and it passed,
+                    // or when RFC is already marked accepted.
+                    if let sha = awaitingMergeSHA {
+                        // Post-accept CI polling state
+                        if ciPassed {
+                            Button {
+                                pendingAction = .mergePR
+                            } label: {
+                                if isActioning {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Label("Merge", systemImage: "arrow.triangle.merge")
+                                        .foregroundStyle(.green)
+                                }
+                            }
+                            .disabled(isActioning || isContentLoading)
+                            .help("CI checks passed — merge the pull request")
+                        } else {
+                            Button {} label: {
+                                HStack(spacing: 6) {
+                                    ProgressView().controlSize(.small)
+                                    Text("Waiting for CI…")
+                                }
+                            }
+                            .disabled(true)
+                            .help("CI checks are running. Hermit will enable the Merge button when they pass.")
+                            .task(id: sha) {
+                                let passed = await onPollCI?(sha) ?? false
+                                if passed {
+                                    ciPassed = true
+                                } else {
+                                    awaitingMergeSHA = nil
+                                }
+                            }
+                        }
+                    } else {
+                        Button {
+                            pendingAction = .mergePR
                         } label: {
                             if isActioning {
                                 ProgressView().controlSize(.small)
                             } else {
                                 Label("Merge", systemImage: "arrow.triangle.merge")
+                                    .foregroundStyle(canMergePR || prAlreadyAccepted ? .green : .secondary)
                             }
                         }
-                        .disabled(isActioning)
-                        .help("CI checks passed — merge the pull request")
-                    } else {
-                        Button {} label: {
-                            HStack(spacing: 6) {
-                                ProgressView().controlSize(.small)
-                                Text("Waiting for CI…")
-                            }
-                        }
-                        .disabled(true)
-                        .help("CI checks are running. Hermit will enable the Merge button when they pass.")
-                        .task(id: sha) {
-                            let passed = await onPollCI?(sha) ?? false
-                            if passed {
-                                ciPassed = true
-                            } else {
-                                awaitingMergeSHA = nil
-                            }
-                        }
+                        .disabled(!canMergePR && !prAlreadyAccepted || isActioning || isContentLoading)
+                        .help(canMergePR || prAlreadyAccepted
+                              ? "RFC is approved — merge the pull request"
+                              : !prApproved
+                                  ? "PR must be approved before merging"
+                                  : "Waiting for CI checks to pass")
                     }
-                } else if prAlreadyAccepted {
-                    Button {
-                        pendingAction = .acceptRFC
-                    } label: {
-                        if isActioning {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Merge", systemImage: "arrow.triangle.merge")
-                        }
-                    }
-                    .disabled(isActioning)
-                    .help("RFC is already marked Accepted — merge the pull request")
-                } else {
-                    Button {
-                        pendingAction = .acceptRFC
-                    } label: {
-                        if isActioning {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Accept & Merge", systemImage: "checkmark.seal.fill")
-                        }
-                    }
-                    .disabled(!canAcceptRFC || isActioning)
-                    .help(!allThreadsResolved
-                          ? "Resolve all review comments before accepting"
-                          : "Mark this RFC as Accepted and merge the PR")
                 }
 
-                // Approve PR — for submitting a GitHub review approval
+                // Reviews — opens the review sheet for both authors and reviewers.
                 Button {
-                    pendingAction = .approvePR
+                    onOpenReviews?()
                 } label: {
-                    if isActioning {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Label("Approve PR", systemImage: "checkmark.seal")
+                    ZStack(alignment: .topTrailing) {
+                        Label("Reviews", systemImage: "exclamationmark.bubble")
+                        if pendingReviewCount > 0 {
+                            Text("\(pendingReviewCount)")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 2)
+                                .background(.red, in: Capsule())
+                                .offset(x: 6, y: -6)
+                        }
                     }
                 }
-                .disabled(!canApprovePR || isActioning)
-                .help(prApproved
-                      ? "You have already approved this PR"
-                      : !allThreadsResolved
-                          ? "Resolve all review comments before approving"
-                          : !isPrivilegedPermission(callerPermission)
-                              ? "Requires admin or maintain permission"
-                              : "Approve and mark this RFC PR ready to merge")
+                .foregroundStyle(pendingReviewCount > 0 ? .red : .primary)
+                .disabled(isContentLoading)
+                .help(pendingReviewCount > 0
+                      ? "\(pendingReviewCount) outstanding request-changes review\(pendingReviewCount == 1 ? "" : "s") — merge is blocked"
+                      : "View reviews or add a comment")
 
                 // Update Branch — only shown when PR is behind base
                 if isBehind {
@@ -322,7 +332,7 @@ struct RFCLifecycleToolbar: ToolbarContent {
                                 .foregroundStyle(.orange)
                         }
                     }
-                    .disabled(isActioning)
+                    .disabled(isActioning || isContentLoading)
                     .help("This branch is out-of-date with the base branch. Tap to merge the latest changes in.")
                 }
             }
@@ -347,18 +357,26 @@ struct RFCLifecycleToolbar: ToolbarContent {
                             pendingAction = nil
                             Task {
                                 switch captured {
-                                case .approve:         await runAction(onApprove)
                                 case .markImplemented: await runAction(onMarkImplemented)
-                                case .approvePR:       await runAction(onApprovePR)
-                                case .acceptRFC:
+                                case .approveAndMerge:
                                     isActioning = true
-                                    if let result = await onAcceptRFC?() {
+                                    if let result = await onApproveAndMerge?() {
                                         if result.handedToIronhide {
                                             handedToIronhide = true
                                         } else if result.blockedByCI {
                                             awaitingMergeSHA = result.commitSHA
                                             ciPassed = false
                                         }
+                                    }
+                                    isActioning = false
+                                case .mergePR:
+                                    isActioning = true
+                                    if let result = await onMergePR?() {
+                                        if result.blockedByCI {
+                                            // CI still blocking — keep waiting state, reset ciPassed
+                                            ciPassed = false
+                                        }
+                                        // result.merged == true: caller handles reload
                                     }
                                     isActioning = false
                                 case .updateBranch:    await runAction(onUpdateBranch)
