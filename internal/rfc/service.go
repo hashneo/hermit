@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
@@ -526,8 +527,10 @@ func (s *Service) AcceptRFC(ctx context.Context, repositoryID string, prNumber i
 		return AcceptRFCResult{}, fmt.Errorf("resolve review threads: %w", err)
 	}
 
-	// 4e. Manual path: attempt immediate squash-merge.
-	merged, blockedByCI, err := client.MergePR(ctx, baseURL, owner, name, prNumber, token)
+	// 4e. Manual path: attempt squash-merge with retry/backoff so that a
+	// brief lag in GitHub's branch-protection "conversations resolved" gate
+	// does not cause a spurious blocked_by_ci=true response.
+	merged, blockedByCI, err := s.mergeWithRetry(ctx, client, baseURL, owner, name, prNumber, token, repositoryID)
 	if err != nil {
 		return AcceptRFCResult{}, fmt.Errorf("merge PR: %w", err)
 	}
@@ -565,6 +568,81 @@ func (s *Service) resolveOpenThreads(ctx context.Context, repositoryID string, p
 }
 
 
+// mergeWithRetry calls client.MergePR up to maxMergeAttempts times.
+//
+// GitHub's branch-protection "require conversation resolution" gate can lag a
+// few seconds behind the GraphQL resolveReviewThread mutation.  A 405 response
+// immediately after resolveOpenThreads does NOT necessarily mean CI is
+// blocking — it may be a transient timing window.
+//
+// Before each retry the method re-verifies (via threadResolver.ListOpen) that
+// the PR truly has zero open conversations.  If open threads re-appear they
+// are re-resolved before sleeping.  If the final attempt also returns 405 the
+// result is forwarded to the caller unchanged (BlockedByCI=true).
+func (s *Service) mergeWithRetry(
+	ctx context.Context,
+	client GitHubRFCClient,
+	baseURL, owner, name string,
+	prNumber int,
+	token, repositoryID string,
+) (merged bool, blockedByCI bool, err error) {
+	const maxMergeAttempts = 4
+	const retryDelay = 3 * time.Second
+
+	for attempt := 1; attempt <= maxMergeAttempts; attempt++ {
+		// Re-verify conversations before every attempt so we are certain GitHub
+		// sees zero open threads at the moment we call the merge API.
+		if s.threadResolver != nil {
+			if open := s.threadResolver.ListOpen(repositoryID, prNumber); len(open) > 0 {
+				slog.Info("mergeWithRetry: open threads detected before attempt, resolving",
+					"attempt", attempt, "count", len(open), "prNumber", prNumber)
+				if resolveErr := s.resolveOpenThreads(ctx, repositoryID, prNumber, owner, name); resolveErr != nil {
+					return false, false, fmt.Errorf("re-resolve threads on attempt %d: %w", attempt, resolveErr)
+				}
+			}
+		}
+
+		merged, blockedByCI, err = client.MergePR(ctx, baseURL, owner, name, prNumber, token)
+		if err != nil {
+			return
+		}
+		if merged {
+			slog.Info("mergeWithRetry: merged successfully", "attempt", attempt, "prNumber", prNumber)
+			return
+		}
+		if !blockedByCI {
+			// 409 conflict or similar — not a timing issue, don't retry.
+			return
+		}
+
+		// 405: verify threads are clear so we can distinguish timing from a real block.
+		if s.threadResolver != nil {
+			if open := s.threadResolver.ListOpen(repositoryID, prNumber); len(open) > 0 {
+				// Genuine conversation block — not timing. Surface as error.
+				return false, false, fmt.Errorf(
+					"merge blocked: %d unresolved conversation(s) remain after resolution attempt", len(open))
+			}
+		}
+
+		if attempt == maxMergeAttempts {
+			slog.Error("mergeWithRetry: all attempts exhausted, merge still returning 405",
+				"prNumber", prNumber, "maxAttempts", maxMergeAttempts)
+			break
+		}
+
+		slog.Info("mergeWithRetry: merge returned 405 but conversations are clear, "+
+			"waiting for branch-protection to catch up",
+			"attempt", attempt, "maxAttempts", maxMergeAttempts, "retryDelay", retryDelay,
+			"prNumber", prNumber)
+		select {
+		case <-ctx.Done():
+			return false, false, ctx.Err()
+		case <-time.After(retryDelay):
+		}
+	}
+	return
+}
+
 type MergePRResult struct {
 	Merged      bool   `json:"merged"`
 	BlockedByCI bool   `json:"blocked_by_ci"`
@@ -599,7 +677,7 @@ func (s *Service) MergePR(ctx context.Context, repositoryID string, prNumber int
 		return MergePRResult{}, fmt.Errorf("resolve review threads: %w", err)
 	}
 
-	merged, blockedByCI, err := client.MergePR(ctx, baseURL, owner, name, prNumber, token)
+	merged, blockedByCI, err := s.mergeWithRetry(ctx, client, baseURL, owner, name, prNumber, token, repositoryID)
 	if err != nil {
 		slog.Error("MergePR service: github merge failed", "owner", owner, "repo", name, "prNumber", prNumber, "error", err)
 		return MergePRResult{}, fmt.Errorf("merge PR: %w", err)
