@@ -156,17 +156,18 @@ func (c *HTTPGitHubClient) ListThreads(ctx context.Context, repositoryID string,
 		}
 
 		threads = append(threads, Thread{
-			ID:             threadHandle,
-			RepositoryID:   repositoryID,
-			PRNumber:       prNumber,
-			Status:         status,
-			Outdated:       outdated,
-			Anchor:         anchor,
-			GitHubThreadID: threadHandle,
-			Messages:       msgs,
-			Sync:           Sync{State: SyncStateSynced},
-			CreatedAt:      root.CreatedAt,
-			UpdatedAt:      root.UpdatedAt,
+			ID:                    threadHandle,
+			RepositoryID:          repositoryID,
+			PRNumber:              prNumber,
+			Status:                status,
+			Outdated:              outdated,
+			Anchor:                anchor,
+			GitHubThreadID:        threadHandle,
+			Messages:              msgs,
+			Sync:                  Sync{State: SyncStateSynced},
+			CreatedAt:             root.CreatedAt,
+			UpdatedAt:             root.UpdatedAt,
+			upstreamResolvedKnown: resolvedByRootID != nil,
 		})
 	}
 

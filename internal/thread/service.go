@@ -3,6 +3,7 @@ package thread
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -55,6 +56,15 @@ type Thread struct {
 	Sync           Sync      `json:"sync"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+
+	// upstreamResolvedKnown is true when the resolved state was obtained
+	// directly from the upstream platform (GitHub GraphQL fetchResolvedThreadIDs).
+	// When true the ResolvedStore local overlay must NOT override it — GitHub
+	// is authoritative.  When false (Gitea or failed GraphQL fetch) the local
+	// overlay is applied to supply resolved state that the platform cannot
+	// report itself.  This field is intentionally unexported and never
+	// serialised to JSON.
+	upstreamResolvedKnown bool
 }
 
 type CreateRequest struct {
@@ -134,12 +144,25 @@ func (s *Service) List(repositoryID string, prNumber int) []Thread {
 	defer cancel()
 	threads, err := s.client.ListThreads(ctx, repositoryID, prNumber)
 	if err != nil {
+		slog.Error("thread.Service.List: ListThreads failed",
+			"repositoryID", repositoryID, "prNumber", prNumber, "error", err)
 		return nil
 	}
-	// Overlay locally-stored resolved status for platforms (e.g. Gitea) that
-	// don't have a native resolve concept.
+	// Overlay locally-stored resolved status, but ONLY for threads whose
+	// resolved state was NOT obtained from the upstream platform.
+	//
+	// When upstreamResolvedKnown is true (GitHub GraphQL returned resolved
+	// state), GitHub is authoritative and the local ResolvedStore must not
+	// override it — doing so would hide threads that were re-opened on
+	// GitHub directly, causing pre-merge resolution to silently skip them.
+	//
+	// When upstreamResolvedKnown is false (Gitea or a failed GraphQL fetch),
+	// the local store is the only source of resolved state, so we apply it.
 	if s.resolved != nil {
 		for i := range threads {
+			if threads[i].upstreamResolvedKnown {
+				continue // GitHub is authoritative; never override with local cache
+			}
 			if s.resolved.IsResolved(threads[i].ID) {
 				threads[i].Status = ThreadStatusResolved
 			}
