@@ -26,6 +26,7 @@ func TestApproveSetsReviewState(t *testing.T) {
 		t.Fatalf("approve status = %d, want %d", resp.Code, http.StatusOK)
 	}
 
+	// The approve response still contains an internal State for backward compat.
 	var approved State
 	if err := json.Unmarshal(resp.Body.Bytes(), &approved); err != nil {
 		t.Fatalf("decode approve response: %v", err)
@@ -42,15 +43,16 @@ func TestApproveSetsReviewState(t *testing.T) {
 		t.Fatalf("review get status = %d, want %d", getResp.Code, http.StatusOK)
 	}
 
-	var current State
+	// GetReviewState returns ReviewStateResponse: { approved: bool, reviewers: [] }
+	var current ReviewStateResponse
 	if err := json.Unmarshal(getResp.Body.Bytes(), &current); err != nil {
 		t.Fatalf("decode get response: %v", err)
 	}
-	if current.State != StateApproved {
-		t.Fatalf("stored state = %q, want %q", current.State, StateApproved)
+	if !current.Approved {
+		t.Fatalf("stored approved = false, want true")
 	}
-	if current.Reviewer != "alice" {
-		t.Fatalf("reviewer = %q, want %q", current.Reviewer, "alice")
+	if len(current.Reviewers) == 0 || current.Reviewers[0] != "alice" {
+		t.Fatalf("reviewers = %v, want [alice]", current.Reviewers)
 	}
 }
 
@@ -69,3 +71,4 @@ func TestApproveRejectsInvalidPRNumber(t *testing.T) {
 		t.Fatalf("status = %d, want %d", resp.Code, http.StatusBadRequest)
 	}
 }
+

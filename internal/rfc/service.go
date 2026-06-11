@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	stdhtml "html"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -73,13 +74,32 @@ type DocumentView struct {
 	Title          string `json:"title"`
 	Path           string `json:"path"`
 	MarkdownSource string `json:"markdown_source"`
+	PRAuthorLogin  string `json:"pr_author_login,omitempty"`
+}
+
+// ThreadResolverService is an optional dependency that lets MergePR (and
+// AcceptRFC) resolve all open PR review threads before attempting a merge.
+// Defined as an interface so the rfc package has no hard import of the thread
+// package and existing tests require no changes.
+type ThreadResolverService interface {
+	// ListOpen returns the GitHubThreadIDs of every unresolved thread on the PR.
+	ListOpen(repositoryID string, prNumber int) []string
+	// Resolve resolves the thread identified by githubThreadID.
+	Resolve(ctx context.Context, repositoryID string, prNumber int, githubThreadID string) error
 }
 
 type Service struct {
-	rfcDir        string
-	repoResolver  RepositoryResolver
-	githubClients map[string]GitHubRFCClient
-	registryBases map[string]string
+	rfcDir         string
+	repoResolver   RepositoryResolver
+	githubClients  map[string]GitHubRFCClient
+	registryBases  map[string]string
+	threadResolver ThreadResolverService // optional; nil disables pre-merge resolution
+}
+
+// WithThreadResolver injects a thread resolver used to resolve all open review
+// conversations before a merge is attempted.
+func (s *Service) WithThreadResolver(tr ThreadResolverService) {
+	s.threadResolver = tr
 }
 
 var docuchangoRFCFilenamePattern = regexp.MustCompile(`^rfc-[0-9]{3}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$`)
@@ -487,13 +507,105 @@ func (s *Service) AcceptRFC(ctx context.Context, repositoryID string, prNumber i
 		return AcceptRFCResult{HandedToIronhide: true, CommitSHA: sha}, nil
 	}
 
-	// 4b. Manual path: attempt immediate squash-merge.
+	// 4b. Dismiss any pending bot reviews (e.g. copilot) so they don't block the merge.
+	if err := client.DismissBotReviews(ctx, baseURL, owner, name, prNumber, token); err != nil {
+		// Non-fatal: log and continue. A failed dismissal should not abort the accept flow.
+		_ = fmt.Errorf("dismiss bot reviews (non-fatal): %w", err)
+	}
+
+	// 4c. Dismiss any outstanding human REQUEST_CHANGES reviews — the RFC has been formally
+	// accepted so reviewer objections are considered resolved by the accept decision.
+	if err := client.DismissHumanRequestChangesReviews(ctx, baseURL, owner, name, prNumber, token); err != nil {
+		// Non-fatal: same reasoning as bot dismissal above.
+		_ = fmt.Errorf("dismiss human request-changes reviews (non-fatal): %w", err)
+	}
+
+	// 4d. Resolve all open review threads so branch-protection "require
+	// conversation resolution" does not block the squash-merge.
+	if err := s.resolveOpenThreads(ctx, repositoryID, prNumber, owner, name); err != nil {
+		return AcceptRFCResult{}, fmt.Errorf("resolve review threads: %w", err)
+	}
+
+	// 4e. Manual path: attempt immediate squash-merge.
 	merged, blockedByCI, err := client.MergePR(ctx, baseURL, owner, name, prNumber, token)
 	if err != nil {
 		return AcceptRFCResult{}, fmt.Errorf("merge PR: %w", err)
 	}
 
 	return AcceptRFCResult{Merged: merged, BlockedByCI: blockedByCI, CommitSHA: sha}, nil
+}
+
+// resolveOpenThreads resolves every open review thread on the PR and verifies
+// that none remain. Returns an error if any thread cannot be resolved or if
+// open threads are still present after resolution.  A nil threadResolver is a
+// no-op (e.g. Gitea repos or tests that have not injected one).
+func (s *Service) resolveOpenThreads(ctx context.Context, repositoryID string, prNumber int, owner, name string) error {
+	if s.threadResolver == nil {
+		return nil
+	}
+	openIDs := s.threadResolver.ListOpen(repositoryID, prNumber)
+	if len(openIDs) == 0 {
+		return nil
+	}
+	slog.Info("resolveOpenThreads: resolving open threads before merge",
+		"owner", owner, "repo", name, "prNumber", prNumber, "count", len(openIDs))
+	for _, id := range openIDs {
+		slog.Info("resolveOpenThreads: resolving thread", "threadID", id)
+		if err := s.threadResolver.Resolve(ctx, repositoryID, prNumber, id); err != nil {
+			return fmt.Errorf("resolve thread %s: %w", id, err)
+		}
+	}
+	// Verify.
+	if remaining := s.threadResolver.ListOpen(repositoryID, prNumber); len(remaining) > 0 {
+		slog.Error("resolveOpenThreads: threads still open after resolve attempt",
+			"owner", owner, "repo", name, "prNumber", prNumber, "remaining", len(remaining))
+		return fmt.Errorf("%d review conversation(s) could not be resolved before merging", len(remaining))
+	}
+	return nil
+}
+
+
+type MergePRResult struct {
+	Merged      bool   `json:"merged"`
+	BlockedByCI bool   `json:"blocked_by_ci"`
+	CommitSHA   string `json:"commit_sha,omitempty"`
+}
+
+// MergePR attempts a direct squash-merge of the given PR without any
+// frontmatter rewrite. Intended for use after AcceptRFC when CI was blocking
+// the initial merge attempt and the caller has confirmed CI is now green.
+func (s *Service) MergePR(ctx context.Context, repositoryID string, prNumber int) (MergePRResult, error) {
+	if s.repoResolver == nil {
+		return MergePRResult{}, fmt.Errorf("repository resolver is not configured")
+	}
+	owner, name, registry, _, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	if !ok {
+		return MergePRResult{}, fmt.Errorf("repository not found")
+	}
+	if token == "" {
+		return MergePRResult{}, fmt.Errorf("repository token unavailable")
+	}
+
+	client, ok := s.githubClients[registry]
+	if !ok {
+		client = NewHTTPGitHubRFCClient()
+	}
+	baseURL := s.registryBaseURL(registry)
+
+	// Resolve all open review threads before merging so that branch-protection
+	// rules requiring "all conversations resolved" do not block the merge.
+	if err := s.resolveOpenThreads(ctx, repositoryID, prNumber, owner, name); err != nil {
+		slog.Error("MergePR service: failed to resolve threads", "owner", owner, "repo", name, "prNumber", prNumber, "error", err)
+		return MergePRResult{}, fmt.Errorf("resolve review threads: %w", err)
+	}
+
+	merged, blockedByCI, err := client.MergePR(ctx, baseURL, owner, name, prNumber, token)
+	if err != nil {
+		slog.Error("MergePR service: github merge failed", "owner", owner, "repo", name, "prNumber", prNumber, "error", err)
+		return MergePRResult{}, fmt.Errorf("merge PR: %w", err)
+	}
+	slog.Info("MergePR service: done", "owner", owner, "repo", name, "prNumber", prNumber, "merged", merged, "blockedByCI", blockedByCI)
+	return MergePRResult{Merged: merged, BlockedByCI: blockedByCI}, nil
 }
 
 // CIStatusResult is returned by GetCIStatus.

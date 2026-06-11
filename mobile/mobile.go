@@ -16,8 +16,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -60,6 +62,21 @@ var (
 	cancelFunc context.CancelFunc
 	doneCh     chan struct{}
 )
+
+// SetLogFile redirects the Go server's structured logger (slog) to append to
+// the given file path. Call this before Start so all server logs land in the
+// same file as the Swift esLog output. Safe to call multiple times — each call
+// replaces the previous handler.
+func SetLogFile(path string) string {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Sprintf("error: open log file: %s", err)
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	})))
+	return "ok"
+}
 
 // Start initialises and runs the embedded Hermit server on a random free port.
 // configJSON must be a JSON-encoded StartConfig.

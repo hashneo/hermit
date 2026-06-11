@@ -33,6 +33,14 @@ type GitHubRFCClient interface {
 	CommitFileOnBranch(ctx context.Context, baseURL, owner, name, branch, filePath, content, message, token string) (sha string, err error)
 	MergePR(ctx context.Context, baseURL, owner, name string, prNumber int, token string) (merged bool, blockedByCI bool, err error)
 	GetCIStatus(ctx context.Context, baseURL, owner, name, commitSHA, token string) (status string, err error) // "pending" | "success" | "failure"
+	// DismissBotReviews dismisses any pending or approved reviews submitted by bot accounts
+	// (login suffix "[bot]") on the given PR. This prevents copilot/automation reviews from
+	// blocking a merge after the RFC has been accepted. Non-bot reviews are left untouched.
+	DismissBotReviews(ctx context.Context, baseURL, owner, name string, prNumber int, token string) error
+	// DismissHumanRequestChangesReviews dismisses all CHANGES_REQUESTED reviews from human
+	// accounts (i.e. not ending in "[bot]"). Called during AcceptRFC so that outstanding
+	// reviewer objections are cleared before the squash-merge.
+	DismissHumanRequestChangesReviews(ctx context.Context, baseURL, owner, name string, prNumber int, token string) error
 
 	// Ironhide path — check whether labels exist on the repo, then apply them to a PR.
 	// LabelExists returns true when the label is already defined on the repository.
@@ -318,6 +326,9 @@ func (c *HTTPGitHubRFCClient) GetRFCFromPullRequest(ctx context.Context, baseURL
 		Head struct {
 			SHA string `json:"sha"`
 		} `json:"head"`
+		User struct {
+			Login string `json:"login"`
+		} `json:"user"`
 	}
 	if err := json.NewDecoder(prResp.Body).Decode(&pull); err != nil {
 		return DocumentView{}, err
@@ -340,7 +351,12 @@ func (c *HTTPGitHubRFCClient) GetRFCFromPullRequest(ctx context.Context, baseURL
 		return DocumentView{}, fmt.Errorf("rfc file not found in pull request")
 	}
 
-	return c.GetRFC(ctx, baseURL, owner, name, pull.Head.SHA, requestedPath, token)
+	view, err := c.GetRFC(ctx, baseURL, owner, name, pull.Head.SHA, requestedPath, token)
+	if err != nil {
+		return DocumentView{}, err
+	}
+	view.PRAuthorLogin = pull.User.Login
+	return view, nil
 }
 
 func (c *HTTPGitHubRFCClient) listPullRequestFiles(ctx context.Context, apiBase, owner, name string, prNumber int, token string) ([]struct {
@@ -699,8 +715,8 @@ func (c *HTTPGitHubRFCClient) CommitFileOnBranch(ctx context.Context, baseURL, o
 
 // MergePR squash-merges the PR. Returns:
 //   - merged=true, blockedByCI=false on success
-//   - merged=false, blockedByCI=true when GitHub rejects with 405 (checks pending/failed)
-//   - error for other failures
+//   - merged=false, blockedByCI=true when GitHub rejects with 405 due to pending/failed CI checks
+//   - error for other failures, including unresolved conversations (405 + "conversation" in body)
 func (c *HTTPGitHubRFCClient) MergePR(ctx context.Context, baseURL, owner, name string, prNumber int, token string) (bool, bool, error) {
 	apiBase := strings.TrimRight(baseURL, "/")
 	u := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/merge", apiBase, owner, name, prNumber)
@@ -723,6 +739,15 @@ func (c *HTTPGitHubRFCClient) MergePR(ctx context.Context, baseURL, owner, name 
 	case http.StatusOK, http.StatusCreated:
 		return true, false, nil
 	case http.StatusMethodNotAllowed:
+		// GitHub returns 405 for multiple branch-protection violations.
+		// Read the body to distinguish them: "conversation" in the message
+		// means unresolved review threads are blocking the merge — that is
+		// not a CI problem and must not be treated as a polling opportunity.
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		msg := strings.ToLower(strings.TrimSpace(string(b)))
+		if strings.Contains(msg, "conversation") || strings.Contains(msg, "unresolved") {
+			return false, false, fmt.Errorf("merge blocked: unresolved review conversations must be resolved before merging")
+		}
 		return false, true, nil
 	case http.StatusConflict:
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
@@ -731,6 +756,137 @@ func (c *HTTPGitHubRFCClient) MergePR(ctx context.Context, baseURL, owner, name 
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		return false, false, fmt.Errorf("merge PR failed: %d %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
+}
+
+// DismissBotReviews lists all reviews on the PR and dismisses any submitted by bot
+// accounts (login ends with "[bot]"). The dismiss message explains that the RFC was
+// accepted and the automated review is no longer relevant.
+// Non-bot reviews and reviews in a state that cannot be dismissed (e.g. COMMENTED) are
+// skipped silently.
+func (c *HTTPGitHubRFCClient) DismissBotReviews(ctx context.Context, baseURL, owner, name string, prNumber int, token string) error {
+	apiBase := strings.TrimRight(baseURL, "/")
+
+	// 1. List all reviews for the PR.
+	listURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews", apiBase, owner, name, prNumber)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
+	if err != nil {
+		return err
+	}
+	setGitHubHeaders(req, token)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("list reviews failed: %d %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+
+	var reviews []struct {
+		ID    int64  `json:"id"`
+		State string `json:"state"` // APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED | PENDING
+		User  struct {
+			Login string `json:"login"`
+		} `json:"user"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&reviews); err != nil {
+		return fmt.Errorf("decode reviews: %w", err)
+	}
+
+	// 2. Dismiss any bot reviews that are in a dismissible state (APPROVED or CHANGES_REQUESTED).
+	for _, r := range reviews {
+		if !strings.HasSuffix(r.User.Login, "[bot]") {
+			continue
+		}
+		if r.State != "APPROVED" && r.State != "CHANGES_REQUESTED" {
+			continue
+		}
+		dismissURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews/%d/dismissals", apiBase, owner, name, prNumber, r.ID)
+		body, _ := json.Marshal(map[string]string{
+			"message": "RFC accepted — automated review dismissed.",
+		})
+		dreq, err := http.NewRequestWithContext(ctx, http.MethodPut, dismissURL, strings.NewReader(string(body)))
+		if err != nil {
+			return err
+		}
+		setGitHubHeaders(dreq, token)
+		dreq.Header.Set("Content-Type", "application/json")
+		dresp, err := c.client.Do(dreq)
+		if err != nil {
+			return err
+		}
+		dresp.Body.Close()
+		// 200 = dismissed; anything else we surface as an error.
+		if dresp.StatusCode != http.StatusOK {
+			return fmt.Errorf("dismiss review %d (user %s) failed: %d", r.ID, r.User.Login, dresp.StatusCode)
+		}
+	}
+	return nil
+}
+
+// DismissHumanRequestChangesReviews dismisses all CHANGES_REQUESTED reviews from human
+// accounts (not bots) on the given PR. Called during AcceptRFC so that reviewer
+// objections that were formally addressed are cleared before the squash-merge.
+func (c *HTTPGitHubRFCClient) DismissHumanRequestChangesReviews(ctx context.Context, baseURL, owner, name string, prNumber int, token string) error {
+	apiBase := strings.TrimRight(baseURL, "/")
+
+	// List all reviews.
+	listURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews", apiBase, owner, name, prNumber)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
+	if err != nil {
+		return err
+	}
+	setGitHubHeaders(req, token)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("list reviews failed: %d %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+
+	var reviews []struct {
+		ID    int64  `json:"id"`
+		State string `json:"state"`
+		User  struct {
+			Login string `json:"login"`
+		} `json:"user"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&reviews); err != nil {
+		return fmt.Errorf("decode reviews: %w", err)
+	}
+
+	for _, r := range reviews {
+		// Skip bots — those are handled by DismissBotReviews.
+		if strings.HasSuffix(r.User.Login, "[bot]") {
+			continue
+		}
+		if r.State != "CHANGES_REQUESTED" {
+			continue
+		}
+		dismissURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews/%d/dismissals", apiBase, owner, name, prNumber, r.ID)
+		body, _ := json.Marshal(map[string]string{
+			"message": "RFC accepted — changes requested review dismissed.",
+		})
+		dreq, err := http.NewRequestWithContext(ctx, http.MethodPut, dismissURL, strings.NewReader(string(body)))
+		if err != nil {
+			return err
+		}
+		setGitHubHeaders(dreq, token)
+		dreq.Header.Set("Content-Type", "application/json")
+		dresp, err := c.client.Do(dreq)
+		if err != nil {
+			return err
+		}
+		dresp.Body.Close()
+		if dresp.StatusCode != http.StatusOK {
+			return fmt.Errorf("dismiss review %d (user %s) failed: %d", r.ID, r.User.Login, dresp.StatusCode)
+		}
+	}
+	return nil
 }
 
 // GetCIStatus returns the aggregate check status for a commit SHA.

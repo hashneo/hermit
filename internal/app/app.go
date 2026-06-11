@@ -97,15 +97,19 @@ func newMux(cfg config.Config) *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/rfcs/{rfcId}", rfcHandler.RenderRepositoryRFCByID)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rfcs/{rfcId}/submit-for-review", rfcHandler.SubmitForReview)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/accept", rfcHandler.AcceptRFC)
+	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/merge", rfcHandler.MergePR)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/ci-status", rfcHandler.GetCIStatus)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rfcs/{rfcId}/approve", rfcHandler.ApproveRFC)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rfcs/{rfcId}/mark-implemented", rfcHandler.MarkImplemented)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/caller-permission", rfcHandler.GetCallerPermission)
 
-	reviewService := review.NewServiceWithMergeClient(nil, review.NewHTTPMergeClient(repositoryService, registryBaseURLs))
+	reviewService := review.NewServiceWithResolver(repositoryService, registryBaseURLs, review.NewHTTPMergeClient(repositoryService, registryBaseURLs))
 	reviewHandler := review.NewHandler(reviewService)
 	mux.HandleFunc("GET "+review.ReviewStatePath(), reviewHandler.GetReviewState)
 	mux.HandleFunc("POST "+review.ReviewApprovePath(), reviewHandler.Approve)
+	mux.HandleFunc("POST "+review.ReviewRequestChangesPath(), reviewHandler.RequestChanges)
+	mux.HandleFunc("GET "+review.ReviewListPath(), reviewHandler.ListReviews)
+	mux.HandleFunc("PUT "+review.ReviewDismissPath(), reviewHandler.DismissReview)
 	mux.HandleFunc("GET "+review.ReviewMergeStatusPath(), reviewHandler.GetMergeStatus)
 	mux.HandleFunc("PUT "+review.ReviewUpdateBranchPath(), reviewHandler.UpdateBranch)
 
@@ -121,6 +125,10 @@ func newMux(cfg config.Config) *http.ServeMux {
 	mux.HandleFunc("POST "+thread.ThreadUnresolvePath(), threadHandler.UnresolveThread)
 	mux.HandleFunc("DELETE "+thread.ThreadDeletePath(), threadHandler.DeleteThread)
 	mux.HandleFunc("DELETE "+thread.ThreadMessageDeletePath(), threadHandler.DeleteMessage)
+
+	// Wire thread resolution into the RFC service so open conversations are
+	// resolved automatically before any merge attempt.
+	rfcService.WithThreadResolver(&threadResolverAdapter{svc: threadService})
 
 	syncHandler := syncstatus.NewHandler()
 	mux.HandleFunc("GET "+syncstatus.Path(), syncHandler.GetSyncStatus)
@@ -206,4 +214,30 @@ func meHandler(cfg config.Config) http.HandlerFunc {
 
 		http.Error(w, `{"error":"could_not_resolve_user"}`, http.StatusBadGateway)
 	}
+}
+
+// threadResolverAdapter adapts *thread.Service to rfc.ThreadResolverService
+// so the RFC service can resolve open conversations before merging.
+type threadResolverAdapter struct {
+	svc *thread.Service
+}
+
+func (a *threadResolverAdapter) ListOpen(repositoryID string, prNumber int) []string {
+	threads := a.svc.List(repositoryID, prNumber)
+	var ids []string
+	for _, t := range threads {
+		if t.Status == thread.ThreadStatusOpen && t.GitHubThreadID != "" {
+			ids = append(ids, t.GitHubThreadID)
+		}
+	}
+	return ids
+}
+
+func (a *threadResolverAdapter) Resolve(ctx context.Context, repositoryID string, prNumber int, githubThreadID string) error {
+	_, err := a.svc.Resolve(ctx, thread.ResolveRequest{
+		RepositoryID: repositoryID,
+		PRNumber:     prNumber,
+		ThreadID:     githubThreadID,
+	})
+	return err
 }

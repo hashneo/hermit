@@ -2,6 +2,7 @@ package rfc
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -155,6 +156,28 @@ func (h *Handler) AcceptRFC(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	writeJSON(w, http.StatusOK, result)
+}
+
+// MergePR squash-merges the pull request directly, without any frontmatter
+// rewrite. Intended for use after AcceptRFC when CI was blocking the initial
+// merge attempt.
+func (h *Handler) MergePR(w http.ResponseWriter, r *http.Request) {
+	repositoryID, prNumber, ok := parsePRPathParams(w, r)
+	if !ok {
+		return
+	}
+
+	slog.Info("MergePR: starting", "repositoryID", repositoryID, "prNumber", prNumber)
+	result, err := h.service.MergePR(r.Context(), repositoryID, prNumber)
+	if err != nil {
+		slog.Error("MergePR: failed", "repositoryID", repositoryID, "prNumber", prNumber, "error", err)
+		writeError(w, http.StatusBadGateway, "merge_pr_failed", err.Error())
+		return
+	}
+
+	slog.Info("MergePR: success", "repositoryID", repositoryID, "prNumber", prNumber,
+		"merged", result.Merged, "blockedByCI", result.BlockedByCI, "commitSHA", result.CommitSHA)
 	writeJSON(w, http.StatusOK, result)
 }
 
