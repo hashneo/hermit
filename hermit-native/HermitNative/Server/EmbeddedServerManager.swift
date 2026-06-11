@@ -73,6 +73,12 @@ final class EmbeddedServerManager: ObservableObject {
 
         // hermit-nnn: log config JSON with PATs redacted, then log the raw result
         esLog("MobileStart config: \(redactPATs(in: config))")
+
+        // Redirect Go slog to the same debug log file before starting the server
+        // so that all server-side structured logs land alongside Swift esLog output.
+        let logResult = MobileSetLogFile(hermitLogPath)
+        esLog("MobileSetLogFile result: \(logResult)")
+
         esLog("Calling MobileStart…")
 
         let result = MobileStart(config)

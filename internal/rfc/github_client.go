@@ -713,49 +713,66 @@ func (c *HTTPGitHubRFCClient) CommitFileOnBranch(ctx context.Context, baseURL, o
 	return c.CommitFile(ctx, baseURL, owner, name, branch, filePath, content, message, token)
 }
 
-// MergePR squash-merges the PR. Returns:
+// MergePR merges the PR using the first merge method accepted by the repository.
+//
+// Methods are tried in preference order: merge → squash → rebase.
+// A 405 with "not allowed" in the body means the method is disabled on the
+// repository — the next method is tried.  A 405 without "not allowed" signals
+// a branch-protection block (pending CI, unresolved conversations, etc.) and
+// is returned as merged=false, blockedByCI=true without further retries.
+//
+// Returns:
 //   - merged=true, blockedByCI=false on success
-//   - merged=false, blockedByCI=true when GitHub rejects with 405 due to pending/failed CI checks
-//   - error for other failures, including unresolved conversations (405 + "conversation" in body)
+//   - merged=false, blockedByCI=true when GitHub rejects with 405 for a non-method reason
+//   - error for other failures, including unresolved conversations or exhausted methods
 func (c *HTTPGitHubRFCClient) MergePR(ctx context.Context, baseURL, owner, name string, prNumber int, token string) (bool, bool, error) {
 	apiBase := strings.TrimRight(baseURL, "/")
 	u := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/merge", apiBase, owner, name, prNumber)
-	body, err := json.Marshal(map[string]string{"merge_method": "squash"})
-	if err != nil {
-		return false, false, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, strings.NewReader(string(body)))
-	if err != nil {
-		return false, false, err
-	}
-	setGitHubHeaders(req, token)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return false, false, err
-	}
-	defer resp.Body.Close()
-	switch resp.StatusCode {
-	case http.StatusOK, http.StatusCreated:
-		return true, false, nil
-	case http.StatusMethodNotAllowed:
-		// GitHub returns 405 for multiple branch-protection violations.
-		// Read the body to distinguish them: "conversation" in the message
-		// means unresolved review threads are blocking the merge — that is
-		// not a CI problem and must not be treated as a polling opportunity.
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		msg := strings.ToLower(strings.TrimSpace(string(b)))
-		if strings.Contains(msg, "conversation") || strings.Contains(msg, "unresolved") {
-			return false, false, fmt.Errorf("merge blocked: unresolved review conversations must be resolved before merging")
+
+	// Try merge methods in order.  "merge" (merge commit) is attempted first
+	// because it is the most widely enabled method; "squash" is common but some
+	// repositories disable it; "rebase" is a valid fallback.
+	methods := []string{"merge", "squash", "rebase"}
+	for _, method := range methods {
+		payload, err := json.Marshal(map[string]string{"merge_method": method})
+		if err != nil {
+			return false, false, err
 		}
-		return false, true, nil
-	case http.StatusConflict:
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, strings.NewReader(string(payload)))
+		if err != nil {
+			return false, false, err
+		}
+		setGitHubHeaders(req, token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := c.client.Do(req)
+		if err != nil {
+			return false, false, err
+		}
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return false, false, fmt.Errorf("merge conflict: %s", strings.TrimSpace(string(b)))
-	default:
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return false, false, fmt.Errorf("merge PR failed: %d %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		resp.Body.Close()
+
+		switch resp.StatusCode {
+		case http.StatusOK, http.StatusCreated:
+			return true, false, nil
+		case http.StatusMethodNotAllowed:
+			msg := strings.ToLower(strings.TrimSpace(string(b)))
+			if strings.Contains(msg, "conversation") || strings.Contains(msg, "unresolved") {
+				return false, false, fmt.Errorf("merge blocked: unresolved review conversations must be resolved before merging")
+			}
+			if strings.Contains(msg, "not allowed") {
+				// This specific merge method is disabled on the repository; try the next one.
+				continue
+			}
+			// Some other branch-protection block (required checks, approvals, etc.)
+			return false, true, nil
+		case http.StatusConflict:
+			return false, false, fmt.Errorf("merge conflict: %s", strings.TrimSpace(string(b)))
+		default:
+			return false, false, fmt.Errorf("merge PR failed: %d %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		}
 	}
+	// All three methods returned 405 "not allowed".
+	return false, false, fmt.Errorf("merge PR failed: no merge method is enabled on this repository (tried merge, squash, rebase)")
 }
 
 // DismissBotReviews lists all reviews on the PR and dismisses any submitted by bot
