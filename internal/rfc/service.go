@@ -656,7 +656,7 @@ func (s *Service) MergePR(ctx context.Context, repositoryID string, prNumber int
 	if s.repoResolver == nil {
 		return MergePRResult{}, fmt.Errorf("repository resolver is not configured")
 	}
-	owner, name, registry, _, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, _, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return MergePRResult{}, fmt.Errorf("repository not found")
 	}
@@ -668,7 +668,7 @@ func (s *Service) MergePR(ctx context.Context, repositoryID string, prNumber int
 	if !ok {
 		client = NewHTTPGitHubRFCClient()
 	}
-	baseURL := s.registryBaseURL(registry)
+	baseURL := s.registryBaseURL(registry, repoBaseURL)
 
 	// Resolve all open review threads before merging so that branch-protection
 	// rules requiring "all conversations resolved" do not block the merge.
@@ -1232,8 +1232,9 @@ func (s *Service) resolveRepoClient(repositoryID string) (owner, name, registry,
 		err = fmt.Errorf("repository resolver is not configured")
 		return
 	}
+	var repoBaseURL string
 	var ok bool
-	owner, name, registry, branch, docsPath, rfcLabel, token, ok = s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, branch, docsPath, rfcLabel, token, ok = s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		err = fmt.Errorf("repository not found")
 		return
@@ -1247,7 +1248,7 @@ func (s *Service) resolveRepoClient(repositoryID string) (owner, name, registry,
 	if !exists {
 		client = NewHTTPGitHubRFCClient()
 	}
-	baseURL = s.registryBaseURL(registry)
+	baseURL = s.registryBaseURL(registry, repoBaseURL)
 	return
 }
 

@@ -108,7 +108,7 @@ func (s *Service) resolveRepo(repositoryID string) (baseURL, owner, name, token 
 	if s.resolver == nil {
 		return "", "", "", "", fmt.Errorf("repository resolver not configured")
 	}
-	resolvedOwner, resolvedName, registry, _, _, _, resolvedToken, ok := s.resolver.ResolveRepositoryAccess(repositoryID)
+	resolvedOwner, resolvedName, registry, _, _, _, _, resolvedToken, ok := s.resolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return "", "", "", "", fmt.Errorf("repository not found: %s", repositoryID)
 	}
@@ -224,4 +224,3 @@ func (s *Service) GetMergeStatus(ctx context.Context, repositoryID string, prNum
 func (s *Service) UpdateBranch(ctx context.Context, repositoryID string, prNumber int) error {
 	return s.mergeClient.UpdateBranch(ctx, repositoryID, prNumber)
 }
-
