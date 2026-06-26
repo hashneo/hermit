@@ -2,6 +2,8 @@
 
 # Include machine-local overrides (device IDs, etc.) — gitignored.
 -include .local.mk
+# Include local feature flags. Do not put secrets in this file.
+-include .env
 
 APP_NAME := hermit
 BIN_DIR := bin
@@ -13,6 +15,7 @@ GITEA_SSH_PORT := 2222
 GITEA_DATA_DIR := ./data/gitea
 GITEA_SEED_SCRIPT := ./scripts/seed-gitea-pr.sh
 GITEA_TOKEN_SCRIPT := ./scripts/gitea-token.sh
+HERMIT_ENABLE_GITEA ?= 0
 
 .DEFAULT_GOAL := build
 
@@ -234,10 +237,14 @@ setup-xcconfig: ## Auto-create hermit-native/Local.xcconfig from signing identit
 	echo "  Bundle ID: $$BUNDLE_ID"; \
 	echo "  Written to $$XCCONFIG"
 
-dev: ## Zero-to-demo: start Gitea (idempotent), seed PRs, install PAT to Keychain, build + deploy app
+dev: ## Zero-to-demo: optionally start Gitea, build + deploy app
 	@$(MAKE) setup-xcconfig
-	@$(MAKE) gitea-up
-	@bash scripts/install-keychain-pat.sh $(if $(NO_KEYCHAIN),--no-keychain)
+	@if [ "$(HERMIT_ENABLE_GITEA)" = "1" ]; then \
+		$(MAKE) gitea-up; \
+		bash scripts/install-keychain-pat.sh $(if $(NO_KEYCHAIN),--no-keychain); \
+	else \
+		echo "HERMIT_ENABLE_GITEA=$(HERMIT_ENABLE_GITEA) — skipping local Gitea and Gitea PAT setup"; \
+	fi
 	@$(MAKE) build
 	@$(MAKE) native-build-macos
 	@$(MAKE) native-seed-prefs
@@ -250,10 +257,14 @@ dev: ## Zero-to-demo: start Gitea (idempotent), seed PRs, install PAT to Keychai
 	@printf '\n\033[1;32m══════════════════════════════════════════\033[0m\n'
 	@printf '\033[1;32m  Hermit is running\033[0m\n'
 	@printf '\033[1;32m══════════════════════════════════════════\033[0m\n'
-	@printf '  Gitea:   \033[4mhttp://localhost:$(GITEA_HTTP_PORT)\033[0m\n'
-	@printf '  Server:  \033[4mhttp://localhost:$(GITEA_HTTP_PORT)\033[0m (embedded; port assigned at runtime)\n'
-	@TOKEN=$$(grep -o 'GITEA_TOKEN=.*' .tmp/gitea-token-export.sh 2>/dev/null | cut -d= -f2 || echo "(not found)"); \
-		printf '  PAT:     \033[1;33m%s\033[0m\n' "$$TOKEN"
+	@if [ "$(HERMIT_ENABLE_GITEA)" = "1" ]; then \
+		printf '  Gitea:   \033[4mhttp://localhost:$(GITEA_HTTP_PORT)\033[0m\n'; \
+		TOKEN=$$(grep -o 'GITEA_TOKEN=.*' .tmp/gitea-token-export.sh 2>/dev/null | cut -d= -f2 || echo "(not found)"); \
+		printf '  PAT:     \033[1;33m%s\033[0m\n' "$$TOKEN"; \
+	else \
+		printf '  Gitea:   skipped (HERMIT_ENABLE_GITEA=$(HERMIT_ENABLE_GITEA))\n'; \
+	fi
+	@printf '  Server:  embedded; port assigned at runtime\n'
 	@printf '\033[1;32m══════════════════════════════════════════\033[0m\n\n'
 
 reset: ## Full reset: kill app, destroy Gitea container + data, remove keychain entries, wipe build artifacts

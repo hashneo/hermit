@@ -1,5 +1,6 @@
 # Local machine overrides (device IDs, signing identity)
 /.local.mk
+/.env
 /hermit-native/Local.xcconfig
 .opencode/
 ui/node_modules/
