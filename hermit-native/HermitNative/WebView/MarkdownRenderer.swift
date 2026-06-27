@@ -8,7 +8,7 @@ import Foundation
 enum MarkdownRenderer {
 
     @available(*, deprecated, renamed: "MarkdownRendererView", message: "Use MarkdownRendererView + MarkdownParser for native rendering.")
-    static func htmlString(from markdown: String, css: String, mermaidScript: String) -> String {
+    static func htmlString(from markdown: String, css: String, mermaidScript: String, prefersDarkMode: Bool = false) -> String {
         // JSON-encode the markdown by wrapping it in an array so NSJSONSerialization
         // accepts it (it requires an array or dict root object). We then strip the
         // surrounding [ ] to get a quoted JSON string literal safe for embedding in JS.
@@ -28,13 +28,74 @@ enum MarkdownRenderer {
             markdownJSON = "\"\(escaped)\""
         }
 
+        let themeClass = prefersDarkMode ? "hermit-preview-dark" : "hermit-preview-light"
+        let mermaidTheme = prefersDarkMode ? "dark" : "default"
+
         return """
         <!DOCTYPE html>
-        <html>
+        <html class="\(themeClass)">
         <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="color-scheme" content="light dark">
         <style>\(css)</style>
+        <style>
+        :root { color-scheme: light dark; }
+        html.hermit-preview-dark,
+        html.hermit-preview-dark body,
+        html.hermit-preview-dark .rfc-stage-bg {
+          background: #12121e !important;
+          color: #e8e8f4 !important;
+        }
+        html.hermit-preview-dark .doc-card.rfc-page {
+          background: #181824 !important;
+          border-color: #2a2a40 !important;
+          box-shadow: none !important;
+        }
+        html.hermit-preview-dark .doc-body,
+        html.hermit-preview-dark .doc-body p,
+        html.hermit-preview-dark .doc-body li,
+        html.hermit-preview-dark .doc-body td {
+          color: #e8e8f4 !important;
+        }
+        html.hermit-preview-dark .doc-body h1,
+        html.hermit-preview-dark .doc-body h2,
+        html.hermit-preview-dark .doc-body h3,
+        html.hermit-preview-dark .doc-body h4,
+        html.hermit-preview-dark .doc-body h5,
+        html.hermit-preview-dark .doc-body h6,
+        html.hermit-preview-dark .doc-body th {
+          color: #f4f4ff !important;
+          border-color: #2a2a40 !important;
+        }
+        html.hermit-preview-dark .doc-body pre,
+        html.hermit-preview-dark .doc-body :not(pre) > code,
+        html.hermit-preview-dark .doc-body th,
+        html.hermit-preview-dark .doc-body tr:nth-child(even) {
+          background: #1e1e30 !important;
+          border-color: #2a2a40 !important;
+        }
+        html.hermit-preview-dark .doc-body pre code,
+        html.hermit-preview-dark .doc-body :not(pre) > code {
+          color: #e8e8f4 !important;
+        }
+        html.hermit-preview-dark .doc-body blockquote {
+          color: #a0a0c0 !important;
+          border-color: #5b8cff !important;
+          background: #1a1a2e !important;
+        }
+        html.hermit-preview-dark .doc-body a { color: #7da2ff !important; }
+        html.hermit-preview-dark .doc-body hr,
+        html.hermit-preview-dark .doc-body th,
+        html.hermit-preview-dark .doc-body td {
+          border-color: #2a2a40 !important;
+        }
+        html.hermit-preview-light,
+        html.hermit-preview-light body {
+          background: #eef1f6;
+          color: #1a1a2e;
+        }
+        </style>
         <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
         </head>
@@ -76,7 +137,7 @@ enum MarkdownRenderer {
 
           // Initialize mermaid after content is injected
           if (typeof mermaid !== 'undefined') {
-            mermaid.initialize({ startOnLoad: false, theme: 'default' });
+            mermaid.initialize({ startOnLoad: false, theme: '\(mermaidTheme)' });
             mermaid.run({ nodes: document.querySelectorAll('.mermaid') });
           }
 
