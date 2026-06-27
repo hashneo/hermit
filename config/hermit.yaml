@@ -1,5 +1,9 @@
 environment: development
 listen_address: ":8080"
+cache:
+  repository_rfc_list:
+    read_ttl: 3m
+    jitter: 1m
 registries:
   - name: github
     kind: github

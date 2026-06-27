@@ -100,6 +100,10 @@ func newMux(cfg config.Config) *http.ServeMux {
 	}
 	rfcService := rfc.NewServiceWithRepositoryResolver(repositoryService, registryBaseURLs)
 	rfcService.WithWorkset(worksetStore)
+	rfcService.WithRepositoryRFCListCacheTiming(
+		cfg.Cache.RepositoryRFCList.ReadTTL.Duration,
+		cfg.Cache.RepositoryRFCList.Jitter.Duration,
+	)
 	rfcHandler := rfc.NewHandler(rfcService)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/rfc", rfcHandler.GetDocument)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/rfc/render", rfcHandler.Render)
