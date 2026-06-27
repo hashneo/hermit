@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -12,6 +13,8 @@ const (
 	defaultListenAddress = ":8080"
 	defaultConfigPath    = "config/hermit.yaml"
 	defaultDataDir       = "data"
+	defaultCacheReadTTL  = 3 * time.Minute
+	defaultCacheJitter   = time.Minute
 )
 
 // Registry stores external provider configuration for repository integrations.
@@ -34,17 +37,45 @@ type Repository struct {
 	Token string `yaml:"-"`
 }
 
+type Duration struct {
+	time.Duration
+	set bool
+}
+
+func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.ScalarNode {
+		return fmt.Errorf("duration must be a string")
+	}
+	parsed, err := time.ParseDuration(value.Value)
+	if err != nil {
+		return fmt.Errorf("parse duration %q: %w", value.Value, err)
+	}
+	d.Duration = parsed
+	d.set = true
+	return nil
+}
+
+type CacheConfig struct {
+	RepositoryRFCList CacheTimingConfig `yaml:"repository_rfc_list"`
+}
+
+type CacheTimingConfig struct {
+	ReadTTL Duration `yaml:"read_ttl"`
+	Jitter  Duration `yaml:"jitter"`
+}
+
 // Config stores application runtime configuration.
 type Config struct {
 	Environment   string       `yaml:"environment"`
 	ListenAddress string       `yaml:"listen_address"`
 	Registries    []Registry   `yaml:"registries"`
 	Repositories  []Repository `yaml:"repositories"`
+	Cache         CacheConfig  `yaml:"cache"`
 	// DataDir is the base directory for mutable runtime data (thread store, etc.).
 	// Defaults to "data" relative to the working directory.
 	// When the server is embedded in a macOS app via gomobile, this is set to
 	// the app sandbox Application Support directory.
-	DataDir       string       `yaml:"data_dir"`
+	DataDir string `yaml:"data_dir"`
 }
 
 // Load builds config from a JSON config file.
@@ -114,6 +145,7 @@ func Load() (Config, error) {
 	if cfg.DataDir == "" {
 		cfg.DataDir = defaultDataDir
 	}
+	applyCacheDefaults(&cfg)
 
 	return cfg, nil
 }
@@ -137,4 +169,13 @@ func loadFromFile(path string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func applyCacheDefaults(cfg *Config) {
+	if !cfg.Cache.RepositoryRFCList.ReadTTL.set {
+		cfg.Cache.RepositoryRFCList.ReadTTL.Duration = defaultCacheReadTTL
+	}
+	if !cfg.Cache.RepositoryRFCList.Jitter.set {
+		cfg.Cache.RepositoryRFCList.Jitter.Duration = defaultCacheJitter
+	}
 }

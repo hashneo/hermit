@@ -3,6 +3,8 @@ package rfc
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	stdhtml "html"
@@ -111,6 +113,8 @@ type Service struct {
 	registryBases  map[string]string
 	threadResolver ThreadResolverService // optional; nil disables pre-merge resolution
 	workset        *workset.Store
+	cacheReadTTL   time.Duration
+	cacheJitter    time.Duration
 }
 
 // WithThreadResolver injects a thread resolver used to resolve all open review
@@ -123,9 +127,21 @@ func (s *Service) WithWorkset(store *workset.Store) {
 	s.workset = store
 }
 
+func (s *Service) WithRepositoryRFCListCacheTiming(readTTL, jitter time.Duration) {
+	if readTTL > 0 {
+		s.cacheReadTTL = readTTL
+	}
+	if jitter >= 0 {
+		s.cacheJitter = jitter
+	}
+}
+
 var docuchangoRFCFilenamePattern = regexp.MustCompile(`^rfc-[0-9]{3}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$`)
 
-const repositoryRFCListCacheTTL = 10 * time.Minute
+const (
+	defaultRepositoryRFCListCacheTTL    = 3 * time.Minute
+	defaultRepositoryRFCListCacheJitter = time.Minute
+)
 
 type RepositoryResolver interface {
 	ResolveRepositoryAccess(id string) (owner, name, registry, baseURL, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool)
@@ -272,8 +288,9 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 	}
 
 	cacheKey := repositoryRFCListCacheKey(repositoryID)
+	cacheTTL := s.repositoryRFCListCacheTTL(cacheKey)
 	if s.workset != nil {
-		if payload, meta, ok, err := s.workset.GetFreshCache(ctx, cacheKey, repositoryRFCListCacheTTL); err == nil && ok {
+		if payload, meta, ok, err := s.workset.GetFreshCache(ctx, cacheKey, cacheTTL); err == nil && ok {
 			var cached RepositoryRFCListResponse
 			if decodeErr := json.Unmarshal(payload, &cached); decodeErr == nil {
 				cached.Cache = &meta
@@ -298,7 +315,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 	baseURL := s.registryBaseURL(registry, repoBaseURL)
 	mainItems, err := client.ListRFCs(ctx, baseURL, owner, name, branch, docsPath, token)
 	if err != nil {
-		if cached, ok := s.cachedRepositoryRFCListAfterError(ctx, cacheKey, err); ok {
+		if cached, ok := s.cachedRepositoryRFCListAfterError(ctx, cacheKey, cacheTTL, err); ok {
 			return cached, nil
 		}
 		return RepositoryRFCListResponse{}, err
@@ -346,7 +363,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 
 	prResult, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, rfcLabel, token)
 	if err != nil {
-		if cached, ok := s.cachedRepositoryRFCListAfterError(ctx, cacheKey, err); ok {
+		if cached, ok := s.cachedRepositoryRFCListAfterError(ctx, cacheKey, cacheTTL, err); ok {
 			return cached, nil
 		}
 		return RepositoryRFCListResponse{}, err
@@ -401,12 +418,12 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 	return response, nil
 }
 
-func (s *Service) cachedRepositoryRFCListAfterError(ctx context.Context, cacheKey string, err error) (RepositoryRFCListResponse, bool) {
+func (s *Service) cachedRepositoryRFCListAfterError(ctx context.Context, cacheKey string, ttl time.Duration, err error) (RepositoryRFCListResponse, bool) {
 	if s.workset == nil {
 		return RepositoryRFCListResponse{}, false
 	}
 	_ = s.workset.PutCacheError(ctx, "repository_rfc_list", cacheKey, "provider_error", err.Error())
-	payload, meta, ok, getErr := s.workset.GetAnyCache(ctx, cacheKey, repositoryRFCListCacheTTL)
+	payload, meta, ok, getErr := s.workset.GetAnyCache(ctx, cacheKey, ttl)
 	if getErr != nil || !ok {
 		return RepositoryRFCListResponse{}, false
 	}
@@ -419,6 +436,23 @@ func (s *Service) cachedRepositoryRFCListAfterError(ctx context.Context, cacheKe
 	}
 	cached.Cache = &meta
 	return cached, true
+}
+
+func (s *Service) repositoryRFCListCacheTTL(cacheKey string) time.Duration {
+	readTTL := s.cacheReadTTL
+	if readTTL <= 0 {
+		readTTL = defaultRepositoryRFCListCacheTTL
+	}
+	jitter := s.cacheJitter
+	if jitter < 0 {
+		jitter = 0
+	}
+	if jitter == 0 {
+		return readTTL
+	}
+	sum := sha256.Sum256([]byte(cacheKey))
+	offset := binary.BigEndian.Uint64(sum[:8]) % uint64(jitter)
+	return readTTL + time.Duration(offset)
 }
 
 func repositoryRFCListCacheKey(repositoryID string) string {
