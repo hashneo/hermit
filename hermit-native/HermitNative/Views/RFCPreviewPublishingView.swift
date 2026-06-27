@@ -16,6 +16,7 @@ struct RFCPreviewView: View {
     @State private var showRaw = false
     @State private var showPublishing = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         NavigationStack {
@@ -29,7 +30,8 @@ struct RFCPreviewView: View {
                         html: MarkdownRenderer.htmlString(
                             from: markdown,
                             css: BundledAssets.readerCSS,
-                            mermaidScript: BundledAssets.mermaidScript
+                            mermaidScript: BundledAssets.mermaidScript,
+                            prefersDarkMode: colorScheme == .dark
                         )
                     )
                 }
