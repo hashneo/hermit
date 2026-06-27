@@ -76,7 +76,11 @@ func (a *App) Run(ctx context.Context) error {
 func newMux(cfg config.Config) *http.ServeMux {
 	mux := http.NewServeMux()
 	repositoryService := repository.NewPersistentService(nil, cfg.DataDir)
-	repositoryService.SeedFromConfig(cfg.Repositories)
+	if hasProgrammaticRepositoryTokens(cfg.Repositories) {
+		repositoryService.ReplaceFromConfig(cfg.Repositories)
+	} else {
+		repositoryService.SeedFromConfig(cfg.Repositories)
+	}
 	repositoryHandler := repository.NewHandler(repositoryService)
 	mux.HandleFunc("POST /api/v1/repositories", repositoryHandler.CreateRepository)
 	mux.HandleFunc("GET /api/v1/repositories", repositoryHandler.ListRepositories)
@@ -151,6 +155,15 @@ func newMux(cfg config.Config) *http.ServeMux {
 	mux.Handle("GET /", ui.Handler())
 
 	return mux
+}
+
+func hasProgrammaticRepositoryTokens(repositories []config.Repository) bool {
+	for _, repository := range repositories {
+		if repository.Token != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // meHandler proxies the authenticated user's identity from GitHub/Gitea.

@@ -3,6 +3,7 @@ package repository
 import (
 	"bytes"
 	"encoding/json"
+	"hermit/internal/config"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -151,5 +152,77 @@ func TestPersistentRepositoryConfigSurvivesServiceRestart(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "repositories.json")); err != nil {
 		t.Fatalf("expected repository store file: %v", err)
+	}
+}
+
+func TestReplaceFromConfigPrunesStalePersistentRepositories(t *testing.T) {
+	dataDir := t.TempDir()
+	service := NewPersistentService(nil, dataDir)
+
+	stale, err := service.Create(t.Context(), createInput{
+		Owner:          "hashicorp",
+		Name:           "stale",
+		Registry:       "github",
+		Token:          "ghp_stale1234567890",
+		DocsPathPolicy: "docs-cms/rfcs",
+	})
+	if err != nil {
+		t.Fatalf("create stale repository: %v", err)
+	}
+	kept, err := service.Create(t.Context(), createInput{
+		Owner:          "hashicorp",
+		Name:           "kept",
+		Registry:       "github",
+		Token:          "ghp_old1234567890",
+		DocsPathPolicy: "docs-cms/rfcs",
+	})
+	if err != nil {
+		t.Fatalf("create kept repository: %v", err)
+	}
+
+	reloaded := NewPersistentService(nil, dataDir)
+	reloaded.ReplaceFromConfig([]config.Repository{
+		{
+			Owner:          "hashicorp",
+			Name:           "kept",
+			Registry:       "github",
+			DefaultBranch:  "main",
+			DocsPathPolicy: "docs-cms/rfcs",
+			RFCLabel:       "hermit:rfc-ready",
+			Token:          "ghp_new1234567890",
+		},
+		{
+			Owner:          "hashicorp",
+			Name:           "new",
+			Registry:       "github",
+			DefaultBranch:  "main",
+			DocsPathPolicy: "docs",
+			RFCLabel:       "hermit:rfc-ready",
+			Token:          "ghp_newrepo123456",
+		},
+	})
+
+	items := reloaded.List()
+	if len(items) != 2 {
+		t.Fatalf("repository count = %d, want 2: %+v", len(items), items)
+	}
+	if _, ok := reloaded.Get(stale.ID); ok {
+		t.Fatalf("stale repository %s was not pruned", stale.ID)
+	}
+	gotKept, ok := reloaded.Get(kept.ID)
+	if !ok {
+		t.Fatalf("kept repository ID %s was not preserved", kept.ID)
+	}
+	if gotKept.Name != "kept" {
+		t.Fatalf("kept repository name = %q", gotKept.Name)
+	}
+
+	reloadedAgain := NewPersistentService(nil, dataDir)
+	items = reloadedAgain.List()
+	if len(items) != 2 {
+		t.Fatalf("reloaded repository count = %d, want 2: %+v", len(items), items)
+	}
+	if _, ok := reloadedAgain.Get(stale.ID); ok {
+		t.Fatalf("stale repository %s persisted after replacement", stale.ID)
 	}
 }

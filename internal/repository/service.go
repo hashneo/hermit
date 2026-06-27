@@ -212,6 +212,124 @@ func (s *Service) SeedFromConfig(repositories []config.Repository) {
 	}
 }
 
+// ReplaceFromConfig makes the repository store match the supplied config.
+//
+// This is intended for embedded/mobile startup, where Swift passes the current
+// native RepositoryStore snapshot, including in-memory PATs, on every launch.
+// In that mode the native config is authoritative and stale server-side
+// repositories.json entries must not hide newly configured repos.
+func (s *Service) ReplaceFromConfig(repositories []config.Repository) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := s.now().UTC().Format(time.RFC3339)
+	nextItems := make(map[string]storedConfig)
+	nextByName := make(map[string]string)
+
+	for _, repository := range repositories {
+		registry := repository.Registry
+		if registry == "" {
+			registry = "github"
+		}
+		if repository.Owner == "" || repository.Name == "" {
+			continue
+		}
+
+		key := repositoryKey(registry, repository.Owner, repository.Name)
+		existing, exists := s.items[s.byName[key]]
+		if !exists {
+			existing, exists = s.findByOwnerNameLocked(repository.Owner, repository.Name)
+		}
+
+		cfg := s.configFromRepository(repository, now)
+		if exists {
+			cfg.ID = existing.ID
+			cfg.CreatedAt = existing.CreatedAt
+		}
+
+		nextItems[cfg.ID] = storedConfig{Config: cfg, EncryptedToken: encryptToken(strings.TrimSpace(repository.Token))}
+		nextByName[key] = cfg.ID
+	}
+
+	s.items = nextItems
+	s.byName = nextByName
+	_ = s.saveLocked()
+}
+
+func (s *Service) findByOwnerNameLocked(owner, name string) (storedConfig, bool) {
+	for _, item := range s.items {
+		if strings.EqualFold(item.Owner, owner) && strings.EqualFold(item.Name, name) {
+			return item, true
+		}
+	}
+	return storedConfig{}, false
+}
+
+func (s *Service) configFromRepository(repository config.Repository, now string) Config {
+	registry := repository.Registry
+	if registry == "" {
+		registry = "github"
+	}
+	defaultBranch := repository.DefaultBranch
+	if defaultBranch == "" {
+		defaultBranch = "main"
+	}
+	docsPath := repository.DocsPathPolicy
+	if docsPath == "" {
+		docsPath = "docs-cms/rfcs/"
+	}
+	rfcLabel := repository.RFCLabel
+	if rfcLabel == "" {
+		rfcLabel = "hermit:rfc-ready"
+	}
+
+	token := strings.TrimSpace(repository.Token)
+	validation := ValidationResponse{
+		Healthy: false,
+		Checks: []ValidationCheckResponse{{
+			Name:    "token_missing",
+			Status:  "warn",
+			Message: "no token configured; use the API or native app to set a PAT",
+		}},
+		ValidatedAt:   now,
+		LastErrorCode: "token_missing",
+	}
+	var validatedAt *string
+	if token != "" {
+		result := s.client.ValidatePAT(context.Background(), repository.Owner, repository.Name, token)
+		checks := make([]ValidationCheckResponse, 0, len(result.Checks))
+		for _, c := range result.Checks {
+			checks = append(checks, ValidationCheckResponse{Name: c.Name, Status: c.Status, Message: c.Message})
+		}
+		validation = ValidationResponse{
+			Healthy:       result.Healthy,
+			Checks:        checks,
+			ValidatedAt:   now,
+			LastErrorCode: result.LastErrorCode,
+		}
+		if result.Healthy {
+			validatedAt = &now
+		}
+	}
+
+	return Config{
+		ID:             s.newID(),
+		Owner:          repository.Owner,
+		Name:           repository.Name,
+		Registry:       registry,
+		DefaultBranch:  defaultBranch,
+		DocsPathPolicy: docsPath,
+		RFCLabel:       rfcLabel,
+		Auth: AuthMetadata{
+			Method:               "pat",
+			TokenLastValidatedAt: validatedAt,
+		},
+		Validation: validation,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+}
+
 func (s *Service) Create(ctx context.Context, input createInput) (Config, error) {
 	token := strings.TrimSpace(input.Token)
 
