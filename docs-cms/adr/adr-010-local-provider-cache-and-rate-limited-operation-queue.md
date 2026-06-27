@@ -23,14 +23,14 @@ Hermit already treats GitHub as the source of truth for workflow state per ADR-0
 
 # Decision
 
-Hermit will add a server-side provider coordination layer with two responsibilities:
+Hermit will add a server-side provider coordination layer backed by embedded SQLite, with two responsibilities:
 
 1. Persistent repository refresh metadata and cached projections.
 2. A rate-limited operation queue for GitHub provider reads and writes.
 
 ## Refresh Metadata and Cached Projections
 
-Hermit will persist repository refresh state under the server data directory, alongside existing `repositories.json` and `resolved-threads.json` state.
+Hermit will persist repository refresh state in a SQLite database named `hermit.db` under the server data directory, alongside existing transitional JSON state such as `repositories.json` and `resolved-threads.json`.
 
 For each repository and refreshable view, Hermit will store:
 
@@ -71,6 +71,8 @@ The queue will:
 
 Write operations must be idempotent or carry idempotency metadata before being retried automatically. Non-idempotent writes may be queued and rate-limited, but must not be blindly replayed after an ambiguous failure.
 
+The SQLite workset database must not store sensitive information. In particular, it must not store PATs, authorization headers, raw comment bodies, or unpublished RFC draft content. Those values remain in the existing credential and request paths. SQLite stores only working-set metadata and cached provider projections needed to avoid repeated upstream reads.
+
 Initial operation classes:
 
 - Background repository refresh reads.
@@ -89,6 +91,17 @@ Swift may keep lightweight UI state, but durable refresh metadata and provider t
 - Remote/shared deployments need the same protection.
 - Provider adapters are already server-side.
 
+## Storage
+
+SQLite is the local working-set database for cache projections and provider operation metadata.
+
+The initial database path is:
+
+- Standalone server: `<data_dir>/hermit.db`
+- Embedded macOS server: `<Application Support>/Hermit/hermit/hermit.db`
+
+Existing JSON files may be migrated to SQLite when they contain only non-sensitive working-set data. JSON files containing tokens or other secrets must not be blindly migrated into SQLite.
+
 # Consequences
 
 ## Positive
@@ -105,6 +118,7 @@ Swift may keep lightweight UI state, but durable refresh metadata and provider t
 - Implementation adds persistent state, scheduling, and queue observability complexity.
 - Write operations need careful idempotency handling to avoid duplicate comments, reviews, or merges.
 - Tests must cover timing behavior, queue ordering, and restart recovery, which is more complex than direct request/response flows.
+- Migrating existing JSON state requires care because some current JSON files contain token material and are not eligible for the non-sensitive SQLite workset.
 
 ## Neutral
 
@@ -129,6 +143,10 @@ Rejected because reads are only part of the problem. Comments, reviews, branch u
 ## Queue Writes Only
 
 Rejected because startup and menu refresh traffic is read-heavy. Without read throttling and coalescing, Hermit can still hammer provider APIs before the user performs any write operation.
+
+## Continue Using JSON Files as the Working-Set Database
+
+Rejected because ad hoc JSON files make it harder to query, expire, coalesce, and inspect cache and queue records. SQLite gives Hermit transactional updates, indexes, and a single durable workset without introducing an external database server.
 
 # References
 

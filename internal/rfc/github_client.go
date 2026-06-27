@@ -19,7 +19,7 @@ import (
 type GitHubRFCClient interface {
 	ListRFCs(ctx context.Context, baseURL, owner, name, branch, docsPath, token string) ([]CatalogItem, error)
 	GetRFC(ctx context.Context, baseURL, owner, name, branch, filePath, token string) (DocumentView, error)
-	ListReviewReadyRFCs(ctx context.Context, baseURL, owner, name, docsPath, rfcLabel, token string) ([]ReviewReadyRFCItem, error)
+	ListReviewReadyRFCs(ctx context.Context, baseURL, owner, name, docsPath, rfcLabel, token string) (ReviewReadyRFCResult, error)
 	GetRFCFromPullRequest(ctx context.Context, baseURL, owner, name string, prNumber int, filePath, token string) (DocumentView, error)
 
 	// Write path — used by SubmitForReview and AcceptRFC.
@@ -78,6 +78,11 @@ type ReviewReadyRFCItem struct {
 	Title    string
 	Path     string
 	Labels   []string
+}
+
+type ReviewReadyRFCResult struct {
+	Items       []ReviewReadyRFCItem
+	OpenPRCount int
 }
 
 type HTTPGitHubRFCClient struct {
@@ -197,11 +202,11 @@ func (c *HTTPGitHubRFCClient) GetRFC(ctx context.Context, baseURL, owner, name, 
 	}, nil
 }
 
-func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, owner, name, docsPath, rfcLabel, token string) ([]ReviewReadyRFCItem, error) {
+func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, owner, name, docsPath, rfcLabel, token string) (ReviewReadyRFCResult, error) {
 	apiBase := strings.TrimRight(baseURL, "/")
 	rfcRoots, rfcPatterns, ok, err := c.docuchangoRFCPaths(ctx, apiBase, owner, name, "", token)
 	if err != nil {
-		return nil, err
+		return ReviewReadyRFCResult{}, err
 	}
 	docsPath = strings.Trim(strings.TrimSpace(docsPath), "/")
 	if docsPath == "" {
@@ -216,19 +221,19 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 	prURL := fmt.Sprintf("%s/repos/%s/%s/pulls?state=open&per_page=100", apiBase, owner, name)
 	prReq, err := http.NewRequestWithContext(ctx, http.MethodGet, prURL, nil)
 	if err != nil {
-		return nil, err
+		return ReviewReadyRFCResult{}, err
 	}
 	setGitHubHeaders(prReq, token)
 
 	prResp, err := c.client.Do(prReq)
 	if err != nil {
-		return nil, err
+		return ReviewReadyRFCResult{}, err
 	}
 	defer prResp.Body.Close()
 
 	if prResp.StatusCode < 200 || prResp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(prResp.Body, 2048))
-		return nil, fmt.Errorf("list pull requests failed: %d %s", prResp.StatusCode, strings.TrimSpace(string(body)))
+		return ReviewReadyRFCResult{}, fmt.Errorf("list pull requests failed: %d %s", prResp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	var pulls []struct {
@@ -244,10 +249,11 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 		} `json:"labels"`
 	}
 	if err := json.NewDecoder(prResp.Body).Decode(&pulls); err != nil {
-		return nil, err
+		return ReviewReadyRFCResult{}, err
 	}
 
 	items := make([]ReviewReadyRFCItem, 0)
+	openPRCount := len(pulls)
 	for _, pr := range pulls {
 		if pr.Draft {
 			continue
@@ -265,7 +271,7 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 
 		prFiles, err := c.listPullRequestFiles(ctx, apiBase, owner, name, pr.Number, token)
 		if err != nil {
-			return nil, err
+			return ReviewReadyRFCResult{}, err
 		}
 
 		// Pick the single RFC file with the most additions — this is the primary RFC
@@ -314,7 +320,7 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 		return items[i].PRNumber < items[j].PRNumber
 	})
 
-	return items, nil
+	return ReviewReadyRFCResult{Items: items, OpenPRCount: openPRCount}, nil
 }
 
 func (c *HTTPGitHubRFCClient) GetRFCFromPullRequest(ctx context.Context, baseURL, owner, name string, prNumber int, filePath, token string) (DocumentView, error) {
