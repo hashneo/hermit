@@ -129,13 +129,17 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *t
 	defer server.Close()
 
 	client := NewHTTPGitHubRFCClient()
-	items, err := client.ListReviewReadyRFCs(context.Background(), server.URL, "owner", "repo", "docs-cms/rfcs", "hermit:rfc-ready", "token")
+	result, err := client.ListReviewReadyRFCs(context.Background(), server.URL, "owner", "repo", "docs-cms/rfcs", "hermit:rfc-ready", "token")
 	if err != nil {
 		t.Fatalf("ListReviewReadyRFCs returned error: %v", err)
 	}
+	items := result.Items
 
 	if len(items) != 1 {
 		t.Fatalf("expected one review-ready RFC item, got %d", len(items))
+	}
+	if result.OpenPRCount != 2 {
+		t.Fatalf("expected open PR count 2, got %d", result.OpenPRCount)
 	}
 	if items[0].PRNumber != 10 {
 		t.Fatalf("expected PR number 10, got %d", items[0].PRNumber)
@@ -183,13 +187,17 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_ExcludesPRsWithoutRFCReadyLabel
 	defer server.Close()
 
 	client := NewHTTPGitHubRFCClient()
-	items, err := client.ListReviewReadyRFCs(context.Background(), server.URL, "owner", "repo", "docs-cms/rfcs", "hermit:rfc-ready", "token")
+	result, err := client.ListReviewReadyRFCs(context.Background(), server.URL, "owner", "repo", "docs-cms/rfcs", "hermit:rfc-ready", "token")
 	if err != nil {
 		t.Fatalf("ListReviewReadyRFCs returned error: %v", err)
 	}
+	items := result.Items
 
 	if len(items) != 1 {
 		t.Fatalf("expected only the labeled PR RFC, got %d items", len(items))
+	}
+	if result.OpenPRCount != 2 {
+		t.Fatalf("expected open PR count 2, got %d", result.OpenPRCount)
 	}
 	if items[0].PRNumber != 20 {
 		t.Fatalf("expected PR 20 (labeled), got PR %d", items[0].PRNumber)
@@ -225,12 +233,16 @@ indexes:
 	defer server.Close()
 
 	client := NewHTTPGitHubRFCClient()
-	items, err := client.ListReviewReadyRFCs(context.Background(), server.URL, "owner", "repo", "docs-cms/rfcs", "hermit:rfc-ready", "token")
+	result, err := client.ListReviewReadyRFCs(context.Background(), server.URL, "owner", "repo", "docs-cms/rfcs", "hermit:rfc-ready", "token")
 	if err != nil {
 		t.Fatalf("ListReviewReadyRFCs returned error: %v", err)
 	}
+	items := result.Items
 	if len(items) != 1 || items[0].Path != "docs/proposals/rfc-030-indexed.md" {
 		t.Fatalf("expected indexed RFC PR item, got %+v", items)
+	}
+	if result.OpenPRCount != 1 {
+		t.Fatalf("expected open PR count 1, got %d", result.OpenPRCount)
 	}
 }
 

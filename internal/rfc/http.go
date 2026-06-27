@@ -58,13 +58,13 @@ func (h *Handler) ListRepositoryRFCs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, err := h.service.ListRFCsByRepository(r.Context(), repositoryID)
+	response, err := h.service.ListRFCsByRepository(r.Context(), repositoryID)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "rfc_catalog_unavailable", err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *Handler) RenderRepositoryRFCByID(w http.ResponseWriter, r *http.Request) {

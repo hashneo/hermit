@@ -19,6 +19,7 @@ import (
 	"hermit/internal/syncstatus"
 	"hermit/internal/thread"
 	"hermit/internal/ui"
+	"hermit/internal/workset"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -93,7 +94,12 @@ func newMux(cfg config.Config) *http.ServeMux {
 	for _, registry := range cfg.Registries {
 		registryBaseURLs[registry.Name] = registry.BaseURL
 	}
+	worksetStore, err := workset.Open(cfg.DataDir)
+	if err != nil {
+		slog.Warn("sqlite workset disabled", "dataDir", cfg.DataDir, "error", err)
+	}
 	rfcService := rfc.NewServiceWithRepositoryResolver(repositoryService, registryBaseURLs)
+	rfcService.WithWorkset(worksetStore)
 	rfcHandler := rfc.NewHandler(rfcService)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/rfc", rfcHandler.GetDocument)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/rfc/render", rfcHandler.Render)

@@ -3,6 +3,7 @@ package rfc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	stdhtml "html"
 	"log/slog"
@@ -15,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"hermit/internal/workset"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
@@ -70,6 +73,18 @@ type CatalogItem struct {
 	HTMLURL string `json:"html_url,omitempty"`
 }
 
+type RepositoryRFCSummary struct {
+	PendingReviewCount int `json:"pending_review_count"`
+	OpenPRCount        int `json:"open_pr_count"`
+}
+
+type RepositoryRFCListResponse struct {
+	Items   []CatalogItem          `json:"items"`
+	Total   int                    `json:"total"`
+	Summary RepositoryRFCSummary   `json:"summary"`
+	Cache   *workset.CacheMetadata `json:"cache,omitempty"`
+}
+
 type DocumentView struct {
 	ID             string `json:"id"`
 	Title          string `json:"title"`
@@ -95,6 +110,7 @@ type Service struct {
 	githubClients  map[string]GitHubRFCClient
 	registryBases  map[string]string
 	threadResolver ThreadResolverService // optional; nil disables pre-merge resolution
+	workset        *workset.Store
 }
 
 // WithThreadResolver injects a thread resolver used to resolve all open review
@@ -103,7 +119,13 @@ func (s *Service) WithThreadResolver(tr ThreadResolverService) {
 	s.threadResolver = tr
 }
 
+func (s *Service) WithWorkset(store *workset.Store) {
+	s.workset = store
+}
+
 var docuchangoRFCFilenamePattern = regexp.MustCompile(`^rfc-[0-9]{3}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$`)
+
+const repositoryRFCListCacheTTL = 10 * time.Minute
 
 type RepositoryResolver interface {
 	ResolveRepositoryAccess(id string) (owner, name, registry, baseURL, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool)
@@ -244,17 +266,28 @@ func (s *Service) RenderRFC(id string) (DocumentView, error) {
 	}, nil
 }
 
-func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string) ([]CatalogItem, error) {
+func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string) (RepositoryRFCListResponse, error) {
 	if s.repoResolver == nil {
-		return nil, fmt.Errorf("repository resolver is not configured")
+		return RepositoryRFCListResponse{}, fmt.Errorf("repository resolver is not configured")
+	}
+
+	cacheKey := repositoryRFCListCacheKey(repositoryID)
+	if s.workset != nil {
+		if payload, meta, ok, err := s.workset.GetFreshCache(ctx, cacheKey, repositoryRFCListCacheTTL); err == nil && ok {
+			var cached RepositoryRFCListResponse
+			if decodeErr := json.Unmarshal(payload, &cached); decodeErr == nil {
+				cached.Cache = &meta
+				return cached, nil
+			}
+		}
 	}
 
 	owner, name, registry, repoBaseURL, branch, docsPath, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
-		return nil, fmt.Errorf("repository not found")
+		return RepositoryRFCListResponse{}, fmt.Errorf("repository not found")
 	}
 	if token == "" {
-		return nil, fmt.Errorf("repository token unavailable")
+		return RepositoryRFCListResponse{}, fmt.Errorf("repository token unavailable")
 	}
 
 	client, ok := s.githubClients[registry]
@@ -265,7 +298,10 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 	baseURL := s.registryBaseURL(registry, repoBaseURL)
 	mainItems, err := client.ListRFCs(ctx, baseURL, owner, name, branch, docsPath, token)
 	if err != nil {
-		return nil, err
+		if cached, ok := s.cachedRepositoryRFCListAfterError(ctx, cacheKey, err); ok {
+			return cached, nil
+		}
+		return RepositoryRFCListResponse{}, err
 	}
 
 	items := make([]CatalogItem, len(mainItems))
@@ -308,11 +344,14 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 	}
 	items = filled
 
-	prItems, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, rfcLabel, token)
+	prResult, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, rfcLabel, token)
 	if err != nil {
-		return nil, err
+		if cached, ok := s.cachedRepositoryRFCListAfterError(ctx, cacheKey, err); ok {
+			return cached, nil
+		}
+		return RepositoryRFCListResponse{}, err
 	}
-	for _, prItem := range prItems {
+	for _, prItem := range prResult.Items {
 		items = append(items, CatalogItem{
 			ID:             makePRCatalogID(prItem.PRNumber, prItem.Path),
 			Title:          prItem.Title,
@@ -346,7 +385,44 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 		return items[i].Title < items[j].Title
 	})
 
-	return items, nil
+	response := RepositoryRFCListResponse{
+		Items: items,
+		Total: len(items),
+		Summary: RepositoryRFCSummary{
+			PendingReviewCount: len(prResult.Items),
+			OpenPRCount:        prResult.OpenPRCount,
+		},
+	}
+	if s.workset != nil {
+		if meta, err := s.workset.PutCacheSuccess(ctx, "repository_rfc_list", cacheKey, response); err == nil {
+			response.Cache = &meta
+		}
+	}
+	return response, nil
+}
+
+func (s *Service) cachedRepositoryRFCListAfterError(ctx context.Context, cacheKey string, err error) (RepositoryRFCListResponse, bool) {
+	if s.workset == nil {
+		return RepositoryRFCListResponse{}, false
+	}
+	_ = s.workset.PutCacheError(ctx, "repository_rfc_list", cacheKey, "provider_error", err.Error())
+	payload, meta, ok, getErr := s.workset.GetAnyCache(ctx, cacheKey, repositoryRFCListCacheTTL)
+	if getErr != nil || !ok {
+		return RepositoryRFCListResponse{}, false
+	}
+	meta.Cached = true
+	meta.LastErrorCode = "provider_error"
+	meta.LastErrorMessage = err.Error()
+	var cached RepositoryRFCListResponse
+	if decodeErr := json.Unmarshal(payload, &cached); decodeErr != nil {
+		return RepositoryRFCListResponse{}, false
+	}
+	cached.Cache = &meta
+	return cached, true
+}
+
+func repositoryRFCListCacheKey(repositoryID string) string {
+	return "repository_rfc_list:" + repositoryID
 }
 
 // SubmitForReviewResult is returned by SubmitForReview on success.
@@ -567,7 +643,6 @@ func (s *Service) resolveOpenThreads(ctx context.Context, repositoryID string, p
 	return nil
 }
 
-
 // mergeWithRetry calls client.MergePR up to maxMergeAttempts times.
 //
 // GitHub's branch-protection "require conversation resolution" gate can lag a
@@ -787,13 +862,13 @@ func (s *Service) RenderPRRFC(ctx context.Context, repositoryID string, prNumber
 	baseURL := s.registryBaseURL(registry, repoBaseURL)
 
 	// List PR files to find the RFC path.
-	prFiles, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, rfcLabel, token)
+	prResult, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, rfcLabel, token)
 	if err != nil {
 		return DocumentView{}, fmt.Errorf("list PR RFCs: %w", err)
 	}
 
 	var filePath string
-	for _, item := range prFiles {
+	for _, item := range prResult.Items {
 		if item.PRNumber == prNumber {
 			filePath = item.Path
 			break
