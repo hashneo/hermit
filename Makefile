@@ -1,4 +1,4 @@
-.PHONY: build run debug clean ui-build validate-config validate-config-structure validate-config-access gitea-up gitea-down gitea-logs gitea-reset gitea-seed-pr native-build native-build-macos native-build-ipad native-test native-clean native-open gomobile-build setup-xcconfig dev ipad-deploy ipad-sim-deploy reset
+.PHONY: build run debug clean test test-native-config ui-build validate-config validate-config-structure validate-config-access gitea-up gitea-down gitea-logs gitea-reset gitea-seed-pr native-build native-build-macos native-build-ipad native-test native-clean native-open gomobile-build setup-xcconfig dev ipad-deploy ipad-sim-deploy reset
 
 # Include machine-local overrides (device IDs, etc.) — gitignored.
 -include .local.mk
@@ -23,6 +23,13 @@ HERMIT_NATIVE_REPOS_JSON ?= config/hermit-repos.meridian.json
 build:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_PATH) ./cmd/hermit
+
+test: test-native-config
+	go test ./...
+
+test-native-config: ## Validate native repo seed config and Settings/default merge behavior
+	$(PYTHON) -m py_compile scripts/seed-native-prefs.py scripts/test-native-seed-prefs.py
+	$(PYTHON) scripts/test-native-seed-prefs.py
 
 run: build
 	$(MAKE) ui-build
