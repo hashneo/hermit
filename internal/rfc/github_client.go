@@ -75,6 +75,7 @@ const RFCReadyLabel = "hermit:rfc-ready"
 
 type ReviewReadyRFCItem struct {
 	PRNumber       int
+	PRTitle        string
 	HeadSHA        string
 	HeadRef        string
 	Mergeable      *bool
@@ -82,7 +83,11 @@ type ReviewReadyRFCItem struct {
 	HTMLURL        string
 	Title          string
 	Path           string
+	DocumentType   string
 	Labels         []string
+	ChangedFiles   int
+	Additions      int
+	Deletions      int
 }
 
 type ReviewReadyRFCResult struct {
@@ -257,6 +262,7 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 
 	var pulls []struct {
 		Number         int    `json:"number"`
+		Title          string `json:"title"`
 		HTMLURL        string `json:"html_url"`
 		Draft          bool   `json:"draft"`
 		Mergeable      *bool  `json:"mergeable"`
@@ -302,30 +308,36 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 			return ReviewReadyRFCResult{}, err
 		}
 
-		// Pick the single RFC file with the most additions — this is the primary RFC
-		// being introduced or substantially revised by this PR. Other RFC files in
-		// the diff are incidental edits (e.g. index.md, changelog, status bumps).
-		// Fall back to the first matching file when additions are equal (e.g. in tests).
-		var primaryFile struct {
-			Filename  string
-			Additions int
-		}
 		workflowLabels := map[string]struct{}{}
+		type reviewDocument struct {
+			Filename     string
+			Additions    int
+			DocumentType string
+		}
+		documents := make([]reviewDocument, 0)
+		prAdditions := 0
+		prDeletions := 0
 		for _, prFile := range prFiles {
+			prAdditions += prFile.Additions
+			prDeletions += prFile.Deletions
 			docTypes := docMatcher.Match(prFile.Filename)
 			if !hasDocuchangoProject && isRFCPathInDocs(prFile.Filename, docsPath) {
 				docTypes = append(docTypes, "rfc")
 			}
+			docTypes = append(docTypes, fallbackDocuchangoDocTypes(prFile.Filename, docsPath)...)
+			docTypes = uniqueDocuchangoDocTypes(docTypes)
 			for _, docType := range docTypes {
 				workflowLabels[docuchangoWorkflowLabel(docType, docuchangoWorkflowStateReview)] = struct{}{}
 			}
-			if !containsString(docTypes, "rfc") {
+			docType := primaryReviewDocumentType(docTypes)
+			if docType == "" {
 				continue
 			}
-			if primaryFile.Filename == "" || prFile.Additions > primaryFile.Additions {
-				primaryFile.Filename = prFile.Filename
-				primaryFile.Additions = prFile.Additions
-			}
+			documents = append(documents, reviewDocument{
+				Filename:     prFile.Filename,
+				Additions:    prFile.Additions,
+				DocumentType: docType,
+			})
 		}
 		if len(workflowLabels) > 0 {
 			appliedLabels, err := c.ensureAndApplyWorkflowLabels(ctx, baseURL, owner, name, pr.Number, workflowLabels, labelNames, token)
@@ -335,31 +347,54 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 				labelNames = appliedLabels
 			}
 		}
-		if primaryFile.Filename == "" {
-			continue // no RFC file in this PR
+		if len(documents) == 0 {
+			continue // no Docuchango document file in this PR
 		}
 
-		title := strings.TrimSuffix(path.Base(primaryFile.Filename), ".md")
-		view, err := c.GetRFC(ctx, baseURL, owner, name, pr.Head.SHA, primaryFile.Filename, token)
-		if err == nil {
-			title = view.Title
-		}
-
-		items = append(items, ReviewReadyRFCItem{
-			PRNumber:       pr.Number,
-			HeadSHA:        pr.Head.SHA,
-			HeadRef:        pr.Head.Ref,
-			Mergeable:      mergeable,
-			MergeableState: mergeableState,
-			HTMLURL:        pr.HTMLURL,
-			Title:          title,
-			Path:           primaryFile.Filename,
-			Labels:         labelNames,
+		sort.SliceStable(documents, func(i, j int) bool {
+			if documents[i].DocumentType != documents[j].DocumentType {
+				return docuchangoReviewTypeSortOrder(documents[i].DocumentType) < docuchangoReviewTypeSortOrder(documents[j].DocumentType)
+			}
+			if documents[i].Additions != documents[j].Additions {
+				return documents[i].Additions > documents[j].Additions
+			}
+			return documents[i].Filename < documents[j].Filename
 		})
+
+		for _, document := range documents {
+			title := strings.TrimSuffix(path.Base(document.Filename), ".md")
+			view, err := c.GetRFC(ctx, baseURL, owner, name, pr.Head.SHA, document.Filename, token)
+			if err == nil {
+				title = view.Title
+			}
+
+			items = append(items, ReviewReadyRFCItem{
+				PRNumber:       pr.Number,
+				PRTitle:        pr.Title,
+				HeadSHA:        pr.Head.SHA,
+				HeadRef:        pr.Head.Ref,
+				Mergeable:      mergeable,
+				MergeableState: mergeableState,
+				HTMLURL:        pr.HTMLURL,
+				Title:          title,
+				Path:           document.Filename,
+				DocumentType:   document.DocumentType,
+				Labels:         labelNames,
+				ChangedFiles:   len(prFiles),
+				Additions:      prAdditions,
+				Deletions:      prDeletions,
+			})
+		}
 	}
 
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].PRNumber < items[j].PRNumber
+		if items[i].PRNumber != items[j].PRNumber {
+			return items[i].PRNumber < items[j].PRNumber
+		}
+		if items[i].DocumentType != items[j].DocumentType {
+			return docuchangoReviewTypeSortOrder(items[i].DocumentType) < docuchangoReviewTypeSortOrder(items[j].DocumentType)
+		}
+		return items[i].Path < items[j].Path
 	})
 
 	return ReviewReadyRFCResult{Items: items, OpenPRCount: openPRCount, PRStates: prStates}, nil
@@ -504,6 +539,7 @@ func (c *HTTPGitHubRFCClient) listPullRequestFiles(ctx context.Context, apiBase,
 	Filename  string `json:"filename"`
 	Status    string `json:"status"`
 	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
 }, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/files?per_page=100", apiBase, owner, name, prNumber)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -527,6 +563,7 @@ func (c *HTTPGitHubRFCClient) listPullRequestFiles(ctx context.Context, apiBase,
 		Filename  string `json:"filename"`
 		Status    string `json:"status"`
 		Additions int    `json:"additions"`
+		Deletions int    `json:"deletions"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&files); err != nil {
 		return nil, err
@@ -1447,6 +1484,84 @@ func normalizeDocuchangoDocType(value string) string {
 		}
 	}
 	return strings.Trim(b.String(), "-")
+}
+
+func fallbackDocuchangoDocTypes(filePath, docsPath string) []string {
+	normalizedPath := strings.Trim(strings.TrimSpace(filePath), "/")
+	base := path.Base(normalizedPath)
+	docsRoot := strings.Trim(strings.TrimSpace(docsPath), "/")
+	if docsRoot == "" {
+		docsRoot = "docs-cms/rfcs"
+	}
+	docsRoot = strings.TrimSuffix(docsRoot, "/rfcs")
+	if docsRoot == "" || docsRoot == "." {
+		docsRoot = "docs-cms"
+	}
+
+	type rule struct {
+		docType string
+		dir     string
+		prefix  string
+	}
+	rules := []rule{
+		{docType: "adr", dir: "adr", prefix: "adr-"},
+		{docType: "memo", dir: "memos", prefix: "memo-"},
+		{docType: "prd", dir: "prd", prefix: "prd-"},
+		{docType: "rfc", dir: "rfcs", prefix: "rfc-"},
+	}
+
+	for _, rule := range rules {
+		if !strings.HasPrefix(normalizedPath, docsRoot+"/"+rule.dir+"/") {
+			continue
+		}
+		if strings.HasPrefix(base, rule.prefix) && strings.HasSuffix(base, ".md") {
+			return []string{rule.docType}
+		}
+	}
+	return nil
+}
+
+func uniqueDocuchangoDocTypes(docTypes []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(docTypes))
+	for _, docType := range docTypes {
+		docType = normalizeDocuchangoDocType(docType)
+		if docType == "" {
+			continue
+		}
+		if _, ok := seen[docType]; ok {
+			continue
+		}
+		seen[docType] = struct{}{}
+		out = append(out, docType)
+	}
+	return out
+}
+
+func primaryReviewDocumentType(docTypes []string) string {
+	docTypes = uniqueDocuchangoDocTypes(docTypes)
+	if len(docTypes) == 0 {
+		return ""
+	}
+	sort.SliceStable(docTypes, func(i, j int) bool {
+		return docuchangoReviewTypeSortOrder(docTypes[i]) < docuchangoReviewTypeSortOrder(docTypes[j])
+	})
+	return docTypes[0]
+}
+
+func docuchangoReviewTypeSortOrder(docType string) int {
+	switch normalizeDocuchangoDocType(docType) {
+	case "adr":
+		return 10
+	case "prd":
+		return 20
+	case "rfc":
+		return 30
+	case "memo":
+		return 40
+	default:
+		return 100
+	}
 }
 
 func containsString(values []string, target string) bool {

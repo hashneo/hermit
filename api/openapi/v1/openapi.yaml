@@ -739,9 +739,38 @@ components:
           type: integer
           minimum: 1
           nullable: true
+        pr_title:
+          type: string
+          nullable: true
         head_sha:
           type: string
           nullable: true
+        head_ref:
+          type: string
+          nullable: true
+        mergeable:
+          type: boolean
+          nullable: true
+        mergeable_state:
+          type: string
+          nullable: true
+        document_type:
+          type: string
+          description: Docuchango document type, such as adr, memo, prd, or rfc.
+          nullable: true
+        labels:
+          type: array
+          items:
+            type: string
+        changed_files:
+          type: integer
+          minimum: 0
+        additions:
+          type: integer
+          minimum: 0
+        deletions:
+          type: integer
+          minimum: 0
         commentable:
           type: boolean
         status_mutable:

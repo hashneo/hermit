@@ -152,6 +152,7 @@ actor HermitAPIClient: HermitClientProtocol {
         struct RFCItem: Decodable {
             let id: String
             let title: String
+            let pr_title: String?
             let path: String
             let source_type: String
             let lifecycle_status: String?
@@ -160,7 +161,11 @@ actor HermitAPIClient: HermitClientProtocol {
             let head_ref: String?
             let mergeable: Bool?
             let mergeable_state: String?
+            let document_type: String?
             let labels: [String]?
+            let changed_files: Int?
+            let additions: Int?
+            let deletions: Int?
             let commentable: Bool?
             // hermit-ixk: populated by server for both main-branch and PR items.
             let html_url: String?
@@ -192,6 +197,7 @@ actor HermitAPIClient: HermitClientProtocol {
                 prs.append(RFCPullRequest(
                     id: prNumber, number: prNumber,
                     title: item.title,
+                    prTitle: item.pr_title ?? item.title,
                     body: "",
                     headSHA: item.head_sha ?? "",
                     headRef: item.head_ref ?? "",
@@ -200,7 +206,11 @@ actor HermitAPIClient: HermitClientProtocol {
                     draft: false,
                     mergeable: item.mergeable,
                     mergeableState: item.mergeable_state,
-                    labels: item.labels ?? []
+                    documentType: item.document_type ?? "rfc",
+                    labels: item.labels ?? [],
+                    changedFiles: item.changed_files ?? 0,
+                    additions: item.additions ?? 0,
+                    deletions: item.deletions ?? 0
                 ))
             } else {
                 files.append(RFCFile(id: item.id, name: item.title,
@@ -579,11 +589,13 @@ actor HermitAPIClient: HermitClientProtocol {
         }
         let pr = try JSONDecoder().decode(PR.self, from: data)
         return RFCPullRequest(id: pr.number, number: pr.number,
-                              title: pr.title, body: pr.body,
+                              title: pr.title, prTitle: pr.title, body: pr.body,
                               headSHA: pr.headSHA, headRef: pr.headRef,
                               htmlURL: pr.htmlURL, state: pr.state,
                               draft: pr.draft, mergeable: nil,
-                              mergeableState: nil, labels: pr.labels)
+                              mergeableState: nil, documentType: "rfc",
+                              labels: pr.labels, changedFiles: 0,
+                              additions: 0, deletions: 0)
     }
 
     // MARK: - HTTP helpers
