@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
 )
 
@@ -702,36 +704,36 @@ func (c *HTTPGitHubRFCClient) CreatePR(ctx context.Context, baseURL, owner, name
 
 type docuchangoProjectConfig struct {
 	Project struct {
-		ID   string `yaml:"id"`
-		Name string `yaml:"name"`
-	} `yaml:"project"`
+		ID   string `yaml:"id" json:"id" toml:"id"`
+		Name string `yaml:"name" json:"name" toml:"name"`
+	} `yaml:"project" json:"project" toml:"project"`
 	Structure struct {
-		RFCDir       string                       `yaml:"rfc_dir"`
-		ADRDir       string                       `yaml:"adr_dir"`
-		MemoDir      string                       `yaml:"memo_dir"`
-		PRDDir       string                       `yaml:"prd_dir"`
-		DocsRoots    []string                     `yaml:"docs_roots"`
-		DocTypes     map[string]docuchangoDocType `yaml:"doc_types"`
-		DocumentDirs []string                     `yaml:"document_folders"`
-	} `yaml:"structure"`
-	Indexes     []docuchangoIndex      `yaml:"indexes"`
-	Subprojects []docuchangoSubproject `yaml:"subprojects"`
+		RFCDir       string                       `yaml:"rfc_dir" json:"rfc_dir" toml:"rfc_dir"`
+		ADRDir       string                       `yaml:"adr_dir" json:"adr_dir" toml:"adr_dir"`
+		MemoDir      string                       `yaml:"memo_dir" json:"memo_dir" toml:"memo_dir"`
+		PRDDir       string                       `yaml:"prd_dir" json:"prd_dir" toml:"prd_dir"`
+		DocsRoots    []string                     `yaml:"docs_roots" json:"docs_roots" toml:"docs_roots"`
+		DocTypes     map[string]docuchangoDocType `yaml:"doc_types" json:"doc_types" toml:"doc_types"`
+		DocumentDirs []string                     `yaml:"document_folders" json:"document_folders" toml:"document_folders"`
+	} `yaml:"structure" json:"structure" toml:"structure"`
+	Indexes     []docuchangoIndex      `yaml:"indexes" json:"indexes" toml:"indexes"`
+	Subprojects []docuchangoSubproject `yaml:"subprojects" json:"subprojects" toml:"subprojects"`
 	Security    struct {
-		AllowExternalPaths bool `yaml:"allow_external_paths"`
-	} `yaml:"security"`
+		AllowExternalPaths bool `yaml:"allow_external_paths" json:"allow_external_paths" toml:"allow_external_paths"`
+	} `yaml:"security" json:"security" toml:"security"`
 }
 
 type docuchangoDocType struct {
-	Schema  string   `yaml:"schema"`
-	Folders []string `yaml:"folders"`
+	Schema  string   `yaml:"schema" json:"schema" toml:"schema"`
+	Folders []string `yaml:"folders" json:"folders" toml:"folders"`
 }
 
 type docuchangoIndex struct {
-	Targets []string `yaml:"targets"`
+	Targets []string `yaml:"targets" json:"targets" toml:"targets"`
 }
 
 type docuchangoSubproject struct {
-	Path string `yaml:"path"`
+	Path string `yaml:"path" json:"path" toml:"path"`
 }
 
 func (s *docuchangoSubproject) UnmarshalYAML(value *yaml.Node) error {
@@ -744,6 +746,26 @@ func (s *docuchangoSubproject) UnmarshalYAML(value *yaml.Node) error {
 		return err
 	}
 	s.Path = out.Path
+	return nil
+}
+
+func (s *docuchangoSubproject) UnmarshalJSON(data []byte) error {
+	var raw string
+	if err := json.Unmarshal(data, &raw); err == nil {
+		s.Path = raw
+		return nil
+	}
+	type alias docuchangoSubproject
+	var out alias
+	if err := json.Unmarshal(data, &out); err != nil {
+		return err
+	}
+	s.Path = out.Path
+	return nil
+}
+
+func (s *docuchangoSubproject) UnmarshalText(text []byte) error {
+	s.Path = string(text)
 	return nil
 }
 
@@ -863,7 +885,7 @@ func (c *HTTPGitHubRFCClient) loadDocuchangoProjectContexts(ctx context.Context,
 	if branch == "" {
 		branch = "HEAD"
 	}
-	rootCandidates := []string{"docs-project.yaml", "docs-cms/docs-project.yaml", "docs/docs-project.yaml"}
+	rootCandidates := docuchangoProjectConfigCandidates("", "docs-cms", "docs")
 	var root docuchangoProjectContext
 	found := false
 	for _, candidate := range rootCandidates {
@@ -894,10 +916,7 @@ func (c *HTTPGitHubRFCClient) loadDocuchangoProjectContexts(ctx context.Context,
 			if subPath == "" {
 				continue
 			}
-			candidates := []string{subPath}
-			if path.Base(subPath) != "docs-project.yaml" {
-				candidates = []string{path.Join(subPath, "docs-project.yaml")}
-			}
+			candidates := docuchangoProjectConfigCandidates(subPath)
 			for _, candidate := range candidates {
 				if _, ok := seen[candidate]; ok {
 					continue
@@ -928,13 +947,54 @@ func (c *HTTPGitHubRFCClient) getDocuchangoProjectConfig(ctx context.Context, ap
 		return nil, err
 	}
 	var config docuchangoProjectConfig
-	if err := yaml.Unmarshal([]byte(content), &config); err != nil {
+	if err := decodeDocuchangoProjectConfig([]byte(content), filePath, &config); err != nil {
 		return nil, fmt.Errorf("parse Docuchango project config %s: %w", filePath, err)
 	}
 	if strings.TrimSpace(config.Project.ID) == "" || strings.TrimSpace(config.Project.Name) == "" {
 		return nil, nil
 	}
 	return &config, nil
+}
+
+func docuchangoProjectConfigCandidates(paths ...string) []string {
+	const baseName = "docs-project"
+	exts := []string{".yaml", ".yml", ".json", ".toml"}
+	seen := map[string]struct{}{}
+	candidates := make([]string, 0, len(paths)*len(exts))
+	for _, raw := range paths {
+		cleaned := strings.Trim(path.Clean(strings.Trim(raw, "/")), "/")
+		if cleaned == "." {
+			cleaned = ""
+		}
+		base := path.Base(cleaned)
+		if strings.TrimSuffix(base, path.Ext(base)) == baseName {
+			if _, ok := seen[cleaned]; !ok {
+				seen[cleaned] = struct{}{}
+				candidates = append(candidates, cleaned)
+			}
+			continue
+		}
+		for _, ext := range exts {
+			candidate := path.Join(cleaned, baseName+ext)
+			if _, ok := seen[candidate]; ok {
+				continue
+			}
+			seen[candidate] = struct{}{}
+			candidates = append(candidates, candidate)
+		}
+	}
+	return candidates
+}
+
+func decodeDocuchangoProjectConfig(data []byte, filePath string, config *docuchangoProjectConfig) error {
+	switch strings.ToLower(filepath.Ext(filePath)) {
+	case ".json":
+		return json.Unmarshal(data, config)
+	case ".toml":
+		return toml.Unmarshal(data, config)
+	default:
+		return yaml.Unmarshal(data, config)
+	}
 }
 
 func (c *HTTPGitHubRFCClient) getRepositoryFile(ctx context.Context, apiBase, owner, name, branch, filePath, token string) (string, bool, error) {

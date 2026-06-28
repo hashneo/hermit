@@ -69,6 +69,8 @@ func TestRenderPRRFC(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"head": map[string]any{"sha": "abc123"},
 			})
+		case isDocuchangoProjectConfigProbe(r):
+			http.NotFound(w, r)
 		case strings.HasPrefix(r.URL.Path, "/repos/owner/repo/contents/"):
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"name":    "rfc-001-test.md",
@@ -136,6 +138,8 @@ func TestListRepositoryRFCs_IncludesSummary(t *testing.T) {
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
 				"filename": "docs-cms/rfcs/rfc-001-test.md", "status": "added", "additions": 3,
 			}})
+		case isDocuchangoProjectConfigProbe(r):
+			http.NotFound(w, r)
 		case strings.HasPrefix(r.URL.Path, "/repos/owner/repo/contents/"):
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"name":    "rfc-001-test.md",
@@ -207,6 +211,8 @@ func TestListRepositoryRFCs_UsesSQLiteCache(t *testing.T) {
 			}})
 		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "open":
 			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case isDocuchangoProjectConfigProbe(r):
+			http.NotFound(w, r)
 		case strings.HasPrefix(r.URL.Path, "/repos/owner/repo/contents/"):
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"name": "rfc-001-cached.md", "path": "docs-cms/rfcs/rfc-001-cached.md", "sha": "blobsha", "content": rfcContent,
