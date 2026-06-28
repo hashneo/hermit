@@ -1,6 +1,7 @@
 import SwiftUI
 #if os(macOS)
 import AppKit
+import Combine
 #endif
 
 // MARK: - hermit-y9x: Wire EmbeddedServerManager at app launch (macOS)
@@ -24,11 +25,9 @@ struct HermitNativeApp: App {
 
     var body: some Scene {
 #if os(macOS)
-        MenuBarExtra("Hermit", systemImage: advertiser.pendingInvitation != nil ? "person.crop.circle.badge.exclamationmark" : "doc.text.magnifyingglass") {
-            MenuBarContentView()
-                .environmentObject(appState)
+        Settings {
+            EmptyView()
         }
-        .menuBarExtraStyle(.window)
 #else
         WindowGroup {
             RootView()
@@ -57,8 +56,12 @@ struct HermitNativeApp: App {
 final class HermitAppDelegate: NSObject, NSApplicationDelegate {
     private var serverStarted = false
     private var restartObserver: NSObjectProtocol?
+    private var menuBarController: MenuBarStatusItemController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let menuBarController = MenuBarStatusItemController()
+        self.menuBarController = menuBarController
+        menuBarController.start()
         // hermit-9ds: live-restart the embedded server when credentials/repos change.
         restartObserver = NotificationCenter.default.addObserver(
             forName: .hermitRestartRequired,
@@ -83,6 +86,7 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        menuBarController?.stop()
         EmbeddedServerManager.shared.stop()
         PairingAdvertiser.shared.stop()
     }
@@ -287,6 +291,104 @@ final class RFCViewerWindowManager {
         DispatchQueue.main.async {
             NSApp.setActivationPolicy(.regular)
         }
+    }
+}
+
+@MainActor
+final class MenuBarStatusItemController: NSObject {
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    private var panel: NSPanel?
+    private var outsideClickMonitor: Any?
+    private var cancellables: Set<AnyCancellable> = []
+
+    func start() {
+        guard let button = statusItem.button else { return }
+        button.target = self
+        button.action = #selector(togglePanel(_:))
+        button.toolTip = "Hermit"
+        updateIcon(hasPendingInvitation: PairingAdvertiser.shared.pendingInvitation != nil)
+
+        PairingAdvertiser.shared.$pendingInvitation
+            .receive(on: RunLoop.main)
+            .sink { [weak self] invite in
+                self?.updateIcon(hasPendingInvitation: invite != nil)
+            }
+            .store(in: &cancellables)
+    }
+
+    func stop() {
+        closePanel()
+        if let outsideClickMonitor {
+            NSEvent.removeMonitor(outsideClickMonitor)
+            self.outsideClickMonitor = nil
+        }
+        cancellables.removeAll()
+        NSStatusBar.system.removeStatusItem(statusItem)
+    }
+
+    @objc private func togglePanel(_ sender: Any?) {
+        if panel?.isVisible == true {
+            closePanel()
+        } else {
+            openPanel()
+        }
+    }
+
+    private func openPanel() {
+        guard let button = statusItem.button,
+              let buttonWindow = button.window else { return }
+
+        let buttonRect = button.convert(button.bounds, to: nil)
+        let screenRect = buttonWindow.convertToScreen(buttonRect)
+        let anchorX = screenRect.midX
+
+        let content = MenuBarContentView(anchorScreenX: anchorX)
+            .environmentObject(AppState.shared)
+        let hosting = NSHostingController(rootView: content)
+        hosting.view.wantsLayer = true
+        hosting.view.layer?.backgroundColor = NSColor.clear.cgColor
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: anchorX - 280, y: screenRect.minY - 486, width: 560, height: 486),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        panel.contentViewController = hosting
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.level = .statusBar
+        panel.collectionBehavior = [.transient, .ignoresCycle]
+        panel.isReleasedWhenClosed = false
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.makeKeyAndOrderFront(nil)
+        self.panel = panel
+
+        installOutsideClickMonitor()
+    }
+
+    private func closePanel() {
+        panel?.orderOut(nil)
+    }
+
+    private func installOutsideClickMonitor() {
+        if outsideClickMonitor != nil { return }
+        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            Task { @MainActor in
+                guard let self,
+                      let panel = self.panel,
+                      panel.isVisible,
+                      !panel.frame.contains(NSEvent.mouseLocation) else { return }
+                self.closePanel()
+            }
+        }
+    }
+
+    private func updateIcon(hasPendingInvitation: Bool) {
+        let symbolName = hasPendingInvitation ? "person.crop.circle.badge.exclamationmark" : "doc.text.magnifyingglass"
+        statusItem.button?.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Hermit")
     }
 }
 
