@@ -34,6 +34,22 @@ func TestHTTPGitHubRFCClient_ListRFCs_FiltersNonDocuchangoFilenames(t *testing.T
 	}
 }
 
+func TestHTTPGitHubRFCClient_ListRFCs_MissingDocsDirectoryIsEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	client := NewHTTPGitHubRFCClient()
+	items, err := client.ListRFCs(context.Background(), server.URL, "owner", "repo", "main", "docs-cms/rfcs", "token")
+	if err != nil {
+		t.Fatalf("ListRFCs returned error: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected no RFC files, got %d", len(items))
+	}
+}
+
 func TestHTTPGitHubRFCClient_ListRFCs_UsesDocuchangoProjectConfigAndSubprojects(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
