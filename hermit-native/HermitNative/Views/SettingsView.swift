@@ -599,6 +599,11 @@ private struct RepositorySettingsTab: View {
                     Text(repo.name)
                 }
 
+                TableColumn("Last synced") { repo in
+                    RepositoryLastSyncedText(date: repo.lastSyncedAt)
+                }
+                .width(min: 110, ideal: 140)
+
                 TableColumn("Actions") { repo in
                     Menu {
                         Button("Set Active") {
@@ -699,6 +704,7 @@ private struct RepositorySettingsTab: View {
             // Move this repo to the front so makeAPIClient() picks it up as active,
             // then update AppState so iPadRootView's onChange triggers a fresh load.
             RepositoryStore.shared.setActive(repo)
+            RepositoryStore.shared.markSynced(repo)
             AppState.shared.docsPath = repo.docsPath
             AppState.shared.rfcLabel = repo.rfcLabel
             AppState.shared.repoOwner = repo.owner
@@ -738,6 +744,29 @@ private struct RepositorySettingsTab: View {
             }
         }
         return "\(repo.fullName) did not appear on the server after restart. Check the owner and repository name are correct."
+    }
+}
+
+private struct RepositoryLastSyncedText: View {
+    let date: Date?
+
+    var body: some View {
+        Text(label)
+            .foregroundStyle(date == nil ? .secondary : .primary)
+            .lineLimit(1)
+            .help(helpText)
+    }
+
+    private var label: String {
+        guard let date else { return "Never" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return "Synced \(formatter.localizedString(for: date, relativeTo: Date()))"
+    }
+
+    private var helpText: String {
+        guard let date else { return "This repository has not synced successfully yet." }
+        return "Last synced \(date.formatted(date: .abbreviated, time: .shortened))"
     }
 }
 
