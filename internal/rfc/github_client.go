@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"path"
@@ -71,13 +72,15 @@ type CreatedPR struct {
 const RFCReadyLabel = "hermit:rfc-ready"
 
 type ReviewReadyRFCItem struct {
-	PRNumber int
-	HeadSHA  string
-	HeadRef  string
-	HTMLURL  string
-	Title    string
-	Path     string
-	Labels   []string
+	PRNumber       int
+	HeadSHA        string
+	HeadRef        string
+	Mergeable      *bool
+	MergeableState string
+	HTMLURL        string
+	Title          string
+	Path           string
+	Labels         []string
 }
 
 type ReviewReadyRFCResult struct {
@@ -204,7 +207,7 @@ func (c *HTTPGitHubRFCClient) GetRFC(ctx context.Context, baseURL, owner, name, 
 
 func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, owner, name, docsPath, rfcLabel, token string) (ReviewReadyRFCResult, error) {
 	apiBase := strings.TrimRight(baseURL, "/")
-	rfcRoots, rfcPatterns, ok, err := c.docuchangoRFCPaths(ctx, apiBase, owner, name, "", token)
+	docMatcher, hasDocuchangoProject, err := c.docuchangoDocumentMatcher(ctx, apiBase, owner, name, "", token)
 	if err != nil {
 		return ReviewReadyRFCResult{}, err
 	}
@@ -216,8 +219,10 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 		rfcLabel = RFCReadyLabel
 	}
 
-	// Query open PRs then filter by label client-side.
-	// Some providers (for example Gitea) do not support string label filters on this endpoint.
+	// Query open PRs and inspect changed files client-side. Some providers
+	// (for example Gitea) do not support string label filters on this endpoint.
+	// Hermit also auto-applies workflow labels for Docuchango document changes,
+	// so label presence is an output of discovery rather than a hard precondition.
 	prURL := fmt.Sprintf("%s/repos/%s/%s/pulls?state=open&per_page=100", apiBase, owner, name)
 	prReq, err := http.NewRequestWithContext(ctx, http.MethodGet, prURL, nil)
 	if err != nil {
@@ -237,10 +242,12 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 	}
 
 	var pulls []struct {
-		Number  int    `json:"number"`
-		HTMLURL string `json:"html_url"`
-		Draft   bool   `json:"draft"`
-		Head    struct {
+		Number         int    `json:"number"`
+		HTMLURL        string `json:"html_url"`
+		Draft          bool   `json:"draft"`
+		Mergeable      *bool  `json:"mergeable"`
+		MergeableState string `json:"mergeable_state"`
+		Head           struct {
 			SHA string `json:"sha"`
 			Ref string `json:"ref"`
 		} `json:"head"`
@@ -256,11 +263,6 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 	openPRCount := len(pulls)
 	for _, pr := range pulls {
 		if pr.Draft {
-			continue
-		}
-
-		// Confirm the RFC-ready label is present in the decoded response.
-		if !prHasLabel(pr.Labels, rfcLabel) {
 			continue
 		}
 
@@ -282,12 +284,16 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 			Filename  string
 			Additions int
 		}
+		workflowLabels := map[string]struct{}{}
 		for _, prFile := range prFiles {
-			if ok {
-				if !isRFCPathInDocuchangoProject(prFile.Filename, rfcRoots, rfcPatterns) {
-					continue
-				}
-			} else if !isRFCPathInDocs(prFile.Filename, docsPath) {
+			docTypes := docMatcher.Match(prFile.Filename)
+			if !hasDocuchangoProject && isRFCPathInDocs(prFile.Filename, docsPath) {
+				docTypes = append(docTypes, "rfc")
+			}
+			for _, docType := range docTypes {
+				workflowLabels[docuchangoWorkflowLabel(docType, docuchangoWorkflowStateReview)] = struct{}{}
+			}
+			if !containsString(docTypes, "rfc") {
 				continue
 			}
 			if primaryFile.Filename == "" || prFile.Additions > primaryFile.Additions {
@@ -295,8 +301,25 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 				primaryFile.Additions = prFile.Additions
 			}
 		}
+		if len(workflowLabels) > 0 {
+			appliedLabels, err := c.ensureAndApplyWorkflowLabels(ctx, baseURL, owner, name, pr.Number, workflowLabels, labelNames, token)
+			if err != nil {
+				slog.Warn("auto-apply Hermit workflow labels failed", "owner", owner, "repo", name, "pr", pr.Number, "error", err)
+			} else {
+				labelNames = appliedLabels
+			}
+		}
 		if primaryFile.Filename == "" {
 			continue // no RFC file in this PR
+		}
+
+		mergeable := pr.Mergeable
+		mergeableState := strings.TrimSpace(pr.MergeableState)
+		if mergeable == nil && mergeableState == "" {
+			if detailMergeable, detailState, detailErr := c.getPullRequestMergeState(ctx, apiBase, owner, name, pr.Number, token); detailErr == nil {
+				mergeable = detailMergeable
+				mergeableState = detailState
+			}
 		}
 
 		title := strings.TrimSuffix(path.Base(primaryFile.Filename), ".md")
@@ -306,13 +329,15 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 		}
 
 		items = append(items, ReviewReadyRFCItem{
-			PRNumber: pr.Number,
-			HeadSHA:  pr.Head.SHA,
-			HeadRef:  pr.Head.Ref,
-			HTMLURL:  pr.HTMLURL,
-			Title:    title,
-			Path:     primaryFile.Filename,
-			Labels:   labelNames,
+			PRNumber:       pr.Number,
+			HeadSHA:        pr.Head.SHA,
+			HeadRef:        pr.Head.Ref,
+			Mergeable:      mergeable,
+			MergeableState: mergeableState,
+			HTMLURL:        pr.HTMLURL,
+			Title:          title,
+			Path:           primaryFile.Filename,
+			Labels:         labelNames,
 		})
 	}
 
@@ -321,6 +346,36 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 	})
 
 	return ReviewReadyRFCResult{Items: items, OpenPRCount: openPRCount}, nil
+}
+
+func (c *HTTPGitHubRFCClient) getPullRequestMergeState(ctx context.Context, apiBase, owner, name string, prNumber int, token string) (*bool, string, error) {
+	prURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d", apiBase, owner, name, prNumber)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, prURL, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	setGitHubHeaders(req, token)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return nil, "", fmt.Errorf("get pull request merge state failed: %d %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var payload struct {
+		Mergeable      *bool  `json:"mergeable"`
+		MergeableState string `json:"mergeable_state"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, "", err
+	}
+
+	return payload.Mergeable, strings.TrimSpace(payload.MergeableState), nil
 }
 
 func (c *HTTPGitHubRFCClient) GetRFCFromPullRequest(ctx context.Context, baseURL, owner, name string, prNumber int, filePath, token string) (DocumentView, error) {
@@ -648,6 +703,9 @@ type docuchangoProjectConfig struct {
 	} `yaml:"project"`
 	Structure struct {
 		RFCDir       string                       `yaml:"rfc_dir"`
+		ADRDir       string                       `yaml:"adr_dir"`
+		MemoDir      string                       `yaml:"memo_dir"`
+		PRDDir       string                       `yaml:"prd_dir"`
 		DocsRoots    []string                     `yaml:"docs_roots"`
 		DocTypes     map[string]docuchangoDocType `yaml:"doc_types"`
 		DocumentDirs []string                     `yaml:"document_folders"`
@@ -689,6 +747,46 @@ type docuchangoProjectContext struct {
 	config docuchangoProjectConfig
 	path   string
 	base   string
+}
+
+type docuchangoDocumentMatcher struct {
+	rules []docuchangoDocumentRule
+}
+
+type docuchangoDocumentRule struct {
+	docType string
+	root    string
+	pattern string
+}
+
+func (m docuchangoDocumentMatcher) Match(filePath string) []string {
+	normalizedPath := strings.Trim(strings.TrimSpace(filePath), "/")
+	if normalizedPath == "" || !strings.HasSuffix(normalizedPath, ".md") {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var docTypes []string
+	for _, rule := range m.rules {
+		if rule.matches(normalizedPath) {
+			if _, ok := seen[rule.docType]; ok {
+				continue
+			}
+			seen[rule.docType] = struct{}{}
+			docTypes = append(docTypes, rule.docType)
+		}
+	}
+	sort.Strings(docTypes)
+	return docTypes
+}
+
+func (r docuchangoDocumentRule) matches(filePath string) bool {
+	if r.pattern != "" {
+		return matchDocuchangoGlob(r.pattern, filePath)
+	}
+	if r.root == "" {
+		return false
+	}
+	return filePath == r.root || strings.HasPrefix(filePath, r.root+"/")
 }
 
 func (c *HTTPGitHubRFCClient) listDocuchangoProjectRFCs(ctx context.Context, apiBase, owner, name, branch, token string) ([]CatalogItem, bool, error) {
@@ -747,6 +845,14 @@ func (c *HTTPGitHubRFCClient) docuchangoRFCPaths(ctx context.Context, apiBase, o
 		return nil, nil, ok, err
 	}
 	return rfcRootsFromDocuchangoContexts(contexts), indexTargetsFromDocuchangoContexts(contexts), true, nil
+}
+
+func (c *HTTPGitHubRFCClient) docuchangoDocumentMatcher(ctx context.Context, apiBase, owner, name, branch, token string) (docuchangoDocumentMatcher, bool, error) {
+	contexts, ok, err := c.loadDocuchangoProjectContexts(ctx, apiBase, owner, name, branch, token)
+	if err != nil || !ok {
+		return docuchangoDocumentMatcher{}, ok, err
+	}
+	return docuchangoMatcherFromContexts(contexts), true, nil
 }
 
 func (c *HTTPGitHubRFCClient) loadDocuchangoProjectContexts(ctx context.Context, apiBase, owner, name, branch, token string) ([]docuchangoProjectContext, bool, error) {
@@ -986,6 +1092,78 @@ func indexTargetsFromDocuchangoContexts(contexts []docuchangoProjectContext) []s
 	return targets
 }
 
+func docuchangoMatcherFromContexts(contexts []docuchangoProjectContext) docuchangoDocumentMatcher {
+	seen := map[string]struct{}{}
+	var rules []docuchangoDocumentRule
+	addRule := func(docType, root, pattern string) {
+		docType = normalizeDocuchangoDocType(docType)
+		root = strings.Trim(strings.TrimSpace(root), "/")
+		pattern = strings.Trim(strings.TrimSpace(pattern), "/")
+		if docType == "" || (root == "" && pattern == "") {
+			return
+		}
+		key := docType + "\x00" + root + "\x00" + pattern
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		rules = append(rules, docuchangoDocumentRule{docType: docType, root: root, pattern: pattern})
+	}
+
+	for _, context := range contexts {
+		if len(context.config.Structure.DocTypes) > 0 {
+			docsRoots := context.config.Structure.DocsRoots
+			if len(docsRoots) == 0 {
+				docsRoots = []string{"."}
+			}
+			for name, docType := range context.config.Structure.DocTypes {
+				labelType := firstNonEmpty(docType.Schema, name)
+				for _, docsRoot := range docsRoots {
+					for _, folder := range docType.Folders {
+						root := resolveDocuchangoConfigPath(path.Join(context.base, docsRoot), folder, context.config.Security.AllowExternalPaths)
+						addRule(labelType, root, "")
+					}
+				}
+			}
+		} else {
+			for docType, dir := range legacyDocuchangoDocDirs(context.config) {
+				root := resolveDocuchangoConfigPath(context.base, dir, context.config.Security.AllowExternalPaths)
+				addRule(docType, root, "")
+			}
+		}
+
+		for _, folder := range context.config.Structure.DocumentDirs {
+			root := resolveDocuchangoConfigPath(context.base, folder, context.config.Security.AllowExternalPaths)
+			docType := normalizeDocuchangoDocType(path.Base(root))
+			if docType == "rfcs" {
+				docType = "rfc"
+			}
+			if docType == "memos" {
+				docType = "memo"
+			}
+			addRule(docType, root, "")
+		}
+		for _, index := range context.config.Indexes {
+			for _, target := range index.Targets {
+				resolved := resolveDocuchangoConfigPath(context.base, target, context.config.Security.AllowExternalPaths)
+				addRule("rfc", "", resolved)
+			}
+		}
+	}
+
+	return docuchangoDocumentMatcher{rules: rules}
+}
+
+func legacyDocuchangoDocDirs(config docuchangoProjectConfig) map[string]string {
+	dirs := map[string]string{
+		"adr":  firstNonEmpty(config.Structure.ADRDir, "adr"),
+		"rfc":  firstNonEmpty(config.Structure.RFCDir, "rfcs"),
+		"memo": firstNonEmpty(config.Structure.MemoDir, "memos"),
+		"prd":  firstNonEmpty(config.Structure.PRDDir, "prd"),
+	}
+	return dirs
+}
+
 func resolveDocuchangoConfigPath(base, rel string, allowExternal bool) string {
 	rel = strings.Trim(strings.TrimSpace(rel), "/")
 	if rel == "" || rel == "." {
@@ -1061,6 +1239,110 @@ func prHasLabel(labels []struct {
 		}
 	}
 	return false
+}
+
+func (c *HTTPGitHubRFCClient) ensureAndApplyWorkflowLabels(ctx context.Context, baseURL, owner, name string, prNumber int, labels map[string]struct{}, existing []string, token string) ([]string, error) {
+	existingSet := map[string]struct{}{}
+	for _, label := range existing {
+		existingSet[label] = struct{}{}
+	}
+
+	missing := make([]string, 0, len(labels))
+	for label := range labels {
+		if label == "" {
+			continue
+		}
+		if _, ok := existingSet[label]; ok {
+			continue
+		}
+		if err := c.EnsureLabel(ctx, baseURL, owner, name, label, "0075ca", docuchangoWorkflowLabelDescription(label), token); err != nil {
+			return existing, err
+		}
+		missing = append(missing, label)
+	}
+	sort.Strings(missing)
+	if len(missing) == 0 {
+		return existing, nil
+	}
+	if err := c.AddLabels(ctx, baseURL, owner, name, prNumber, missing, token); err != nil {
+		return existing, err
+	}
+	out := append([]string{}, existing...)
+	out = append(out, missing...)
+	sort.Strings(out)
+	return out, nil
+}
+
+const (
+	docuchangoWorkflowStateReview       = "review"
+	docuchangoWorkflowStateNeedsChanges = "needs-changes"
+	docuchangoWorkflowStateReady        = "ready"
+)
+
+func docuchangoWorkflowLabel(docType, state string) string {
+	docType = normalizeDocuchangoDocType(docType)
+	state = normalizeDocuchangoWorkflowState(state)
+	if docType == "" {
+		return ""
+	}
+	return docType + ":" + state
+}
+
+func normalizeDocuchangoWorkflowState(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case docuchangoWorkflowStateNeedsChanges:
+		return docuchangoWorkflowStateNeedsChanges
+	case docuchangoWorkflowStateReady:
+		return docuchangoWorkflowStateReady
+	default:
+		return docuchangoWorkflowStateReview
+	}
+}
+
+func docuchangoWorkflowLabelDescription(label string) string {
+	docType, state, ok := strings.Cut(label, ":")
+	if !ok || docType == "" || state == "" {
+		return "Docuchango workflow state"
+	}
+	return fmt.Sprintf("%s document is in %s state", strings.ToUpper(docType), state)
+}
+
+func normalizeDocuchangoDocType(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.TrimSuffix(value, "s")
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func isRFCPathInDocs(filePath, docsPath string) bool {

@@ -23,12 +23,17 @@ private func hLog(_ msg: String, log: OSLog = _apiLog, type: OSLogType = .debug)
     os_log("%{public}@", log: log, type: type, msg)
 }
 
+struct RepositoryRFCSummary {
+    let pendingReviewCount: Int
+    let openPRCount: Int
+}
+
 // MARK: - Shared API protocol
 
 /// All views and sessions depend on this protocol, not a concrete type.
 protocol HermitClientProtocol: Actor {
     // RFC discovery
-    func discoverRFCs() async throws -> (mainBranch: [RFCFile], pullRequests: [RFCPullRequest])
+    func discoverRFCs() async throws -> (mainBranch: [RFCFile], pullRequests: [RFCPullRequest], summary: RepositoryRFCSummary)
     func listMainBranchRFCs() async throws -> [RFCFile]
     func fetchRFCContent(path: String, ref: String) async throws -> String
     func fetchPRRFCContent(prNumber: Int) async throws -> String
@@ -118,7 +123,7 @@ actor HermitAPIClient: HermitClientProtocol {
 
     // MARK: - discoverRFCs
 
-    func discoverRFCs() async throws -> (mainBranch: [RFCFile], pullRequests: [RFCPullRequest]) {
+    func discoverRFCs() async throws -> (mainBranch: [RFCFile], pullRequests: [RFCPullRequest], summary: RepositoryRFCSummary) {
         let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/rfcs")
         let data = try await get(u)
@@ -132,15 +137,25 @@ actor HermitAPIClient: HermitClientProtocol {
             let pr_number: Int?
             let head_sha: String?
             let head_ref: String?
+            let mergeable: Bool?
+            let mergeable_state: String?
             let labels: [String]?
             let commentable: Bool?
             // hermit-ixk: populated by server for both main-branch and PR items.
             let html_url: String?
         }
 
-        struct RFCPage: Decodable { let items: [RFCItem] }
+        struct Summary: Decodable {
+            let pending_review_count: Int
+            let open_pr_count: Int
+        }
+        struct RFCPage: Decodable {
+            let items: [RFCItem]
+            let summary: Summary?
+        }
         let decoder = JSONDecoder()
-        let items = try decoder.decode(RFCPage.self, from: data).items
+        let page = try decoder.decode(RFCPage.self, from: data)
+        let items = page.items
         var files: [RFCFile] = []
         var prs: [RFCPullRequest] = []
 
@@ -155,6 +170,8 @@ actor HermitAPIClient: HermitClientProtocol {
                     htmlURL: item.html_url ?? "",
                     state: "open",
                     draft: false,
+                    mergeable: item.mergeable,
+                    mergeableState: item.mergeable_state,
                     labels: item.labels ?? []
                 ))
             } else {
@@ -164,13 +181,20 @@ actor HermitAPIClient: HermitClientProtocol {
                                      lifecycleStatus: item.lifecycle_status))
             }
         }
-        return (files, prs)
+        return (
+            files,
+            prs,
+            RepositoryRFCSummary(
+                pendingReviewCount: page.summary?.pending_review_count ?? prs.count,
+                openPRCount: page.summary?.open_pr_count ?? prs.count
+            )
+        )
     }
 
     // MARK: - listMainBranchRFCs
 
     func listMainBranchRFCs() async throws -> [RFCFile] {
-        let (files, _) = try await discoverRFCs()
+        let (files, _, _) = try await discoverRFCs()
         return files
     }
 
@@ -212,7 +236,7 @@ actor HermitAPIClient: HermitClientProtocol {
     // MARK: - listFilesOnRef
 
     func listFilesOnRef(docsPath: String, ref: String) async throws -> [String] {
-        let (files, _) = try await discoverRFCs()
+        let (files, _, _) = try await discoverRFCs()
         return files.map(\.path)
     }
 
@@ -524,7 +548,8 @@ actor HermitAPIClient: HermitClientProtocol {
                               title: pr.title, body: pr.body,
                               headSHA: pr.headSHA, headRef: pr.headRef,
                               htmlURL: pr.htmlURL, state: pr.state,
-                              draft: pr.draft, labels: pr.labels)
+                              draft: pr.draft, mergeable: nil,
+                              mergeableState: nil, labels: pr.labels)
     }
 
     // MARK: - HTTP helpers

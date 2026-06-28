@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"syscall"
@@ -72,6 +74,58 @@ type cli struct {
 	jsonOut bool
 }
 
+type nativeConnection struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Endpoint string `json:"endpoint"`
+	Token    string `json:"token,omitempty"`
+}
+
+type nativeRepository struct {
+	ID        string `json:"id"`
+	ServerID  string `json:"serverID,omitempty"`
+	AccountID string `json:"accountID"`
+	Owner     string `json:"owner"`
+	Name      string `json:"name"`
+	DocsPath  string `json:"docsPath"`
+	RFCLabel  string `json:"rfcLabel"`
+}
+
+type nativePrefs struct {
+	Accounts             []nativeConnection
+	Repositories         []nativeRepository
+	AccountsActiveID     string
+	RepositoriesActiveID string
+	BaseURL              string
+	ServerBaseURL        string
+	RepoOwner            string
+	RepoName             string
+	DocsPath             string
+	RFCLabel             string
+	ServerMode           string
+}
+
+type shareConfig struct {
+	Version      int               `json:"version"`
+	Accounts     []shareAccount    `json:"accounts"`
+	Repositories []shareRepository `json:"repositories"`
+}
+
+type shareAccount struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Endpoint string `json:"endpoint"`
+}
+
+type shareRepository struct {
+	Account  string `json:"account"`
+	Owner    string `json:"owner"`
+	Name     string `json:"name"`
+	DocsPath string `json:"docs_path"`
+	RFCLabel string `json:"rfc_label"`
+	ServerID string `json:"server_id,omitempty"`
+}
+
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -125,6 +179,14 @@ func (c cli) runRepo(args []string, stdin io.Reader, stdout, stderr io.Writer) e
 	switch args[0] {
 	case "add":
 		return c.repoAdd(args[1:], stdin, stdout, stderr)
+	case "add-local":
+		return repoAddLocal(args[1:], stdin, stdout, stderr)
+	case "export-local":
+		return repoExportLocal(args[1:], stdout, stderr)
+	case "import-local":
+		return repoImportLocal(args[1:], stdout, stderr)
+	case "bind-credential":
+		return repoBindCredential(args[1:], stdin, stdout, stderr)
 	case "list":
 		return c.repoList(stdout)
 	case "get":
@@ -143,6 +205,169 @@ func (c cli) runRepo(args []string, stdin io.Reader, stdout, stderr io.Writer) e
 	default:
 		return fmt.Errorf("unknown repo command %q", args[0])
 	}
+}
+
+func repoExportLocal(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("repo export-local", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	bundleID := fs.String("bundle-id", "", "HermitNative bundle identifier; defaults from hermit-native/Local.xcconfig")
+	output := fs.String("output", "", "write shareable config JSON to this file instead of stdout")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	bid, err := resolveBundleID(strings.TrimSpace(*bundleID))
+	if err != nil {
+		return err
+	}
+	prefs, err := loadNativePrefs(bid)
+	if err != nil {
+		return err
+	}
+
+	cfg := shareConfigFromPrefs(prefs)
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if strings.TrimSpace(*output) != "" {
+		return os.WriteFile(strings.TrimSpace(*output), data, 0o644)
+	}
+	_, err = stdout.Write(data)
+	return err
+}
+
+func repoImportLocal(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("repo import-local", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	filePath := fs.String("file", "", "shareable Hermit repo config JSON")
+	bundleID := fs.String("bundle-id", "", "HermitNative bundle identifier; defaults from hermit-native/Local.xcconfig")
+	setActive := fs.String("set-active", "", "optional owner/name repository to make active after import")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*filePath) == "" {
+		return errors.New("repo import-local requires --file")
+	}
+
+	cfg, err := readShareConfig(strings.TrimSpace(*filePath))
+	if err != nil {
+		return err
+	}
+	bid, err := resolveBundleID(strings.TrimSpace(*bundleID))
+	if err != nil {
+		return err
+	}
+	prefs, err := loadNativePrefs(bid)
+	if err != nil {
+		return err
+	}
+
+	accountIDs := map[string]string{}
+	for _, account := range cfg.Accounts {
+		endpoint := strings.TrimRight(strings.TrimSpace(account.Endpoint), "/")
+		if endpoint == "" {
+			return fmt.Errorf("account %q has empty endpoint", account.ID)
+		}
+		accountID := findOrCreateAccountWithoutToken(&prefs, endpoint, firstNonEmpty(account.Name, account.ID))
+		accountIDs[account.ID] = accountID
+		if prefs.AccountsActiveID == "" {
+			prefs.AccountsActiveID = accountID
+		}
+	}
+
+	imported := 0
+	for _, repo := range cfg.Repositories {
+		accountID := accountIDs[repo.Account]
+		if accountID == "" {
+			return fmt.Errorf("repository %s/%s references unknown account %q", repo.Owner, repo.Name, repo.Account)
+		}
+		repoID := upsertRepositoryWithServerID(&prefs, accountID, strings.TrimSpace(repo.Owner), strings.TrimSpace(repo.Name), normalizeDocsPath(repo.DocsPath), firstNonEmpty(repo.RFCLabel, "hermit:rfc-ready"), strings.TrimSpace(repo.ServerID))
+		imported++
+		if prefs.RepositoriesActiveID == "" || strings.EqualFold(strings.TrimSpace(*setActive), repo.Owner+"/"+repo.Name) {
+			prefs.RepositoriesActiveID = repoID
+			prefs.RepoOwner = strings.TrimSpace(repo.Owner)
+			prefs.RepoName = strings.TrimSpace(repo.Name)
+			prefs.DocsPath = normalizeDocsPath(repo.DocsPath)
+			prefs.RFCLabel = firstNonEmpty(repo.RFCLabel, "hermit:rfc-ready")
+		}
+	}
+	if prefs.ServerMode == "" {
+		prefs.ServerMode = `{"type":"embeddedLocal"}`
+	}
+	if err := saveNativePrefs(bid, prefs); err != nil {
+		return err
+	}
+
+	return printJSON(stdout, map[string]any{
+		"bundle_id":    bid,
+		"accounts":     len(cfg.Accounts),
+		"repositories": imported,
+		"credentials":  "not imported; run hermitctl repo bind-credential",
+	})
+}
+
+func repoBindCredential(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("repo bind-credential", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	endpoint := fs.String("endpoint", "", "account endpoint to bind, for example https://github.ibm.com/api/v3")
+	accountIDFlag := fs.String("account-id", "", "native account UUID to bind")
+	bundleID := fs.String("bundle-id", "", "HermitNative bundle identifier; defaults from hermit-native/Local.xcconfig")
+	noKeychain := fs.Bool("no-keychain", false, "skip writing the PAT into the native Keychain")
+	token := fs.String("token", "", "PAT value; prefer --token-stdin or prompt")
+	tokenStdin := fs.Bool("token-stdin", false, "read PAT from stdin")
+	envFile := fs.String("env-file", "", ".env file to read token from")
+	tokenEnv := fs.String("token-env", "", "environment variable name containing the PAT")
+	credentialHost := fs.String("credential-host", "", "host to query via git credential helper")
+	useCredentialHelper := fs.Bool("git-credential", false, "read PAT from git credential helper")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	pat, err := resolveToken(tokenOptions{token: *token, tokenStdin: *tokenStdin, envFile: *envFile, tokenEnv: *tokenEnv, credentialHost: *credentialHost, useCredentialHelper: *useCredentialHelper}, stdin, stderr)
+	if err != nil {
+		return err
+	}
+	bid, err := resolveBundleID(strings.TrimSpace(*bundleID))
+	if err != nil {
+		return err
+	}
+	prefs, err := loadNativePrefs(bid)
+	if err != nil {
+		return err
+	}
+
+	accountID, err := resolveNativeAccountID(prefs, strings.TrimSpace(*accountIDFlag), strings.TrimSpace(*endpoint))
+	if err != nil {
+		return err
+	}
+	for i := range prefs.Accounts {
+		if prefs.Accounts[i].ID == accountID {
+			prefs.Accounts[i].Token = pat
+			break
+		}
+	}
+	if err := saveNativePrefs(bid, prefs); err != nil {
+		return err
+	}
+	if !*noKeychain {
+		if err := writeNativeKeychainToken(accountID, pat); err != nil {
+			return err
+		}
+	}
+
+	result := map[string]string{
+		"bundle_id":  bid,
+		"account_id": accountID,
+		"credential": "updated",
+	}
+	if *noKeychain {
+		result["keychain"] = "skipped"
+	} else {
+		result["keychain"] = "updated"
+	}
+	return printJSON(stdout, result)
 }
 
 func (c cli) repoAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -181,6 +406,100 @@ func (c cli) repoAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) e
 		return err
 	}
 	return printRepository(stdout, cfg, c.jsonOut)
+}
+
+func repoAddLocal(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("repo add-local", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	owner := fs.String("owner", "", "repository owner")
+	name := fs.String("name", "", "repository name")
+	registry := fs.String("registry", "github", "configured registry name")
+	baseURL := fs.String("base-url", "", "registry API base URL for this repository/account")
+	docsPath := fs.String("docs-path", "docs-cms/rfcs", "docs path policy")
+	rfcLabel := fs.String("rfc-label", "hermit:rfc-ready", "RFC label")
+	accountName := fs.String("account-name", "", "display name for the local native account")
+	bundleID := fs.String("bundle-id", "", "HermitNative bundle identifier; defaults from hermit-native/Local.xcconfig")
+	configPath := fs.String("config", "", "Hermit config file path used to resolve registry base URLs")
+	noKeychain := fs.Bool("no-keychain", false, "skip writing the PAT into the native Keychain")
+	token := fs.String("token", "", "PAT value; prefer --token-stdin or prompt")
+	tokenStdin := fs.Bool("token-stdin", false, "read PAT from stdin")
+	envFile := fs.String("env-file", "", ".env file to read token from")
+	tokenEnv := fs.String("token-env", "", "environment variable name containing the PAT")
+	credentialHost := fs.String("credential-host", "", "host to query via git credential helper")
+	useCredentialHelper := fs.Bool("git-credential", false, "read PAT from git credential helper")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*owner) == "" || strings.TrimSpace(*name) == "" {
+		return errors.New("owner and name are required")
+	}
+
+	pat, err := resolveToken(tokenOptions{token: *token, tokenStdin: *tokenStdin, envFile: *envFile, tokenEnv: *tokenEnv, credentialHost: *credentialHost, useCredentialHelper: *useCredentialHelper}, stdin, stderr)
+	if err != nil {
+		return err
+	}
+
+	bid, err := resolveBundleID(strings.TrimSpace(*bundleID))
+	if err != nil {
+		return err
+	}
+
+	registryBaseURL, err := resolveRegistryBaseURL(*registry, strings.TrimSpace(*baseURL), strings.TrimSpace(*configPath))
+	if err != nil {
+		return err
+	}
+	endpoint := normalizeNativeEndpoint(registryBaseURL)
+	serverBaseURL, err := resolveEmbeddedServerBaseURL(strings.TrimSpace(*configPath))
+	if err != nil {
+		return err
+	}
+
+	prefs, err := loadNativePrefs(bid)
+	if err != nil {
+		return err
+	}
+
+	accountID, accountTokenChanged := findOrCreateAccount(&prefs, endpoint, firstNonEmpty(strings.TrimSpace(*accountName), accountDisplayName(*registry, endpoint)), pat)
+	repoID := upsertRepository(&prefs, accountID, strings.TrimSpace(*owner), strings.TrimSpace(*name), normalizeDocsPath(*docsPath), strings.TrimSpace(*rfcLabel))
+	prefs.RepositoriesActiveID = repoID
+	prefs.AccountsActiveID = accountID
+	prefs.BaseURL = strings.TrimRight(registryBaseURL, "/")
+	prefs.ServerBaseURL = serverBaseURL
+	prefs.RepoOwner = strings.TrimSpace(*owner)
+	prefs.RepoName = strings.TrimSpace(*name)
+	prefs.DocsPath = normalizeDocsPath(*docsPath)
+	prefs.RFCLabel = strings.TrimSpace(*rfcLabel)
+	prefs.ServerMode = `{"type":"embeddedLocal"}`
+
+	if err := saveNativePrefs(bid, prefs); err != nil {
+		return err
+	}
+	if !*noKeychain && accountTokenChanged {
+		if err := writeNativeKeychainToken(accountID, pat); err != nil {
+			return err
+		}
+	}
+
+	if *registry == "" {
+		*registry = "github"
+	}
+	result := map[string]string{
+		"bundle_id":  bid,
+		"account_id": accountID,
+		"repo_id":    repoID,
+		"owner":      strings.TrimSpace(*owner),
+		"name":       strings.TrimSpace(*name),
+		"registry":   firstNonEmpty(strings.TrimSpace(*registry), "github"),
+		"endpoint":   endpoint,
+	}
+	if *noKeychain {
+		result["keychain"] = "skipped"
+	} else if accountTokenChanged {
+		result["keychain"] = "updated"
+	} else {
+		result["keychain"] = "unchanged"
+	}
+	return printJSON(stdout, result)
 }
 
 func (c cli) repoList(stdout io.Writer) error {
@@ -525,6 +844,493 @@ func parseEnvValue(value string) (string, error) {
 	return strings.TrimSpace(value), nil
 }
 
+func resolveBundleID(explicit string) (string, error) {
+	if explicit != "" {
+		return explicit, nil
+	}
+	data, err := os.ReadFile(filepath.Join("hermit-native", "Local.xcconfig"))
+	if err != nil {
+		return "", fmt.Errorf("resolve bundle id: %w", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "HERMIT_BUNDLE_ID") {
+			continue
+		}
+		_, value, ok := strings.Cut(line, "=")
+		if ok {
+			bundleID := strings.TrimSpace(value)
+			if bundleID != "" {
+				return bundleID, nil
+			}
+		}
+	}
+	return "", errors.New("HERMIT_BUNDLE_ID not found in hermit-native/Local.xcconfig")
+}
+
+func resolveRegistryBaseURL(registryName, explicitBaseURL, configPath string) (string, error) {
+	if strings.TrimSpace(explicitBaseURL) != "" {
+		return strings.TrimRight(strings.TrimSpace(explicitBaseURL), "/"), nil
+	}
+	if configPath != "" {
+		if err := os.Setenv("HERMIT_CONFIG_FILE", configPath); err != nil {
+			return "", err
+		}
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	name := strings.TrimSpace(registryName)
+	if name == "" {
+		name = "github"
+	}
+	for _, registry := range cfg.Registries {
+		if registry.Name == name {
+			return strings.TrimRight(strings.TrimSpace(registry.BaseURL), "/"), nil
+		}
+	}
+	return "", fmt.Errorf("registry %q not found in config", name)
+}
+
+func resolveEmbeddedServerBaseURL(configPath string) (string, error) {
+	if configPath != "" {
+		if err := os.Setenv("HERMIT_CONFIG_FILE", configPath); err != nil {
+			return "", err
+		}
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	return resolveBaseURL(cfg.ListenAddress, "")
+}
+
+func normalizeNativeEndpoint(registryBaseURL string) string {
+	trimmed := strings.TrimRight(strings.TrimSpace(registryBaseURL), "/")
+	if strings.HasSuffix(trimmed, "/api/v3") {
+		return trimmed
+	}
+	trimmed = strings.TrimSuffix(trimmed, "/api/v1")
+	return trimmed
+}
+
+func normalizeDocsPath(docsPath string) string {
+	trimmed := strings.TrimSpace(docsPath)
+	trimmed = strings.Trim(trimmed, "/")
+	if trimmed == "" {
+		return "docs-cms/rfcs"
+	}
+	return trimmed
+}
+
+func accountDisplayName(registry, endpoint string) string {
+	if registry == "github-enterprise" {
+		if host := hostFromURL(endpoint); host != "" {
+			return host
+		}
+	}
+	if host := hostFromURL(endpoint); host != "" {
+		return host
+	}
+	return "Hermit"
+}
+
+func hostFromURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return parsed.Host
+}
+
+func nativePrefsPlistPath(bundleID string) string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "Library", "Containers", bundleID, "Data", "Library", "Preferences", bundleID+".plist")
+}
+
+func loadNativePrefs(bundleID string) (nativePrefs, error) {
+	path := nativePrefsPlistPath(bundleID)
+	prefs := nativePrefs{}
+
+	if raw, err := readPlistValue(path, `hermit\.accounts`); err == nil && raw != "" {
+		decoded, err := decodePlistJSONData(raw)
+		if err != nil {
+			return prefs, err
+		}
+		if err := json.Unmarshal(decoded, &prefs.Accounts); err != nil {
+			return prefs, err
+		}
+	}
+	if raw, err := readPlistValue(path, `hermit\.repositories`); err == nil && raw != "" {
+		decoded, err := decodePlistJSONData(raw)
+		if err != nil {
+			return prefs, err
+		}
+		if err := json.Unmarshal(decoded, &prefs.Repositories); err != nil {
+			return prefs, err
+		}
+	}
+	prefs.AccountsActiveID, _ = readDefaultsString(bundleID, "hermit.accounts.activeID")
+	prefs.RepositoriesActiveID, _ = readDefaultsString(bundleID, "hermit.repositories.activeID")
+	prefs.BaseURL, _ = readDefaultsString(bundleID, "hermit.baseURL")
+	prefs.ServerBaseURL, _ = readDefaultsString(bundleID, "hermit.serverBaseURL")
+	prefs.RepoOwner, _ = readDefaultsString(bundleID, "hermit.repoOwner")
+	prefs.RepoName, _ = readDefaultsString(bundleID, "hermit.repoName")
+	prefs.DocsPath, _ = readDefaultsString(bundleID, "hermit.docsPath")
+	prefs.RFCLabel, _ = readDefaultsString(bundleID, "hermit.rfcLabel")
+	prefs.ServerMode, _ = readDefaultsString(bundleID, "hermit.serverMode")
+	return prefs, nil
+}
+
+func saveNativePrefs(bundleID string, prefs nativePrefs) error {
+	accountsJSON, err := json.Marshal(prefs.Accounts)
+	if err != nil {
+		return err
+	}
+	reposJSON, err := json.Marshal(prefs.Repositories)
+	if err != nil {
+		return err
+	}
+	plistPath := nativePrefsPlistPath(bundleID)
+	if err := os.MkdirAll(filepath.Dir(plistPath), 0o755); err != nil {
+		return err
+	}
+	if _, err := os.Stat(plistPath); errors.Is(err, os.ErrNotExist) {
+		if err := os.WriteFile(plistPath, []byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict/></plist>"), 0o644); err != nil {
+			return err
+		}
+	}
+	if err := writeDefaultsString(bundleID, "hermit.baseURL", prefs.BaseURL); err != nil {
+		return err
+	}
+	if err := writeDefaultsString(bundleID, "hermit.serverBaseURL", prefs.ServerBaseURL); err != nil {
+		return err
+	}
+	if err := writeDefaultsString(bundleID, "hermit.repoOwner", prefs.RepoOwner); err != nil {
+		return err
+	}
+	if err := writeDefaultsString(bundleID, "hermit.repoName", prefs.RepoName); err != nil {
+		return err
+	}
+	if err := writeDefaultsString(bundleID, "hermit.docsPath", prefs.DocsPath); err != nil {
+		return err
+	}
+	if err := writeDefaultsString(bundleID, "hermit.rfcLabel", prefs.RFCLabel); err != nil {
+		return err
+	}
+	if err := writeDefaultsStringValue(bundleID, "hermit.serverMode", prefs.ServerMode); err != nil {
+		return err
+	}
+	if err := writeDefaultsString(bundleID, "hermit.accounts.activeID", prefs.AccountsActiveID); err != nil {
+		return err
+	}
+	if err := writeDefaultsString(bundleID, "hermit.repositories.activeID", prefs.RepositoriesActiveID); err != nil {
+		return err
+	}
+	if err := writePlistDataValue(plistPath, `hermit\.accounts`, accountsJSON); err != nil {
+		return err
+	}
+	if err := writePlistDataValue(plistPath, `hermit\.repositories`, reposJSON); err != nil {
+		return err
+	}
+	return nil
+}
+
+func findOrCreateAccount(prefs *nativePrefs, endpoint, accountName, token string) (string, bool) {
+	for i := range prefs.Accounts {
+		if strings.EqualFold(strings.TrimRight(prefs.Accounts[i].Endpoint, "/"), strings.TrimRight(endpoint, "/")) {
+			tokenChanged := prefs.Accounts[i].Token != token
+			prefs.Accounts[i].Name = firstNonEmpty(accountName, prefs.Accounts[i].Name)
+			prefs.Accounts[i].Endpoint = endpoint
+			prefs.Accounts[i].Token = token
+			return prefs.Accounts[i].ID, tokenChanged
+		}
+	}
+	accountID := newUUID()
+	prefs.Accounts = append(prefs.Accounts, nativeConnection{
+		ID:       accountID,
+		Name:     accountName,
+		Endpoint: endpoint,
+		Token:    token,
+	})
+	return accountID, true
+}
+
+func findOrCreateAccountWithoutToken(prefs *nativePrefs, endpoint, accountName string) string {
+	for i := range prefs.Accounts {
+		if strings.EqualFold(strings.TrimRight(prefs.Accounts[i].Endpoint, "/"), strings.TrimRight(endpoint, "/")) {
+			prefs.Accounts[i].Name = firstNonEmpty(accountName, prefs.Accounts[i].Name)
+			prefs.Accounts[i].Endpoint = endpoint
+			return prefs.Accounts[i].ID
+		}
+	}
+	accountID := newUUID()
+	prefs.Accounts = append(prefs.Accounts, nativeConnection{
+		ID:       accountID,
+		Name:     firstNonEmpty(accountName, accountDisplayName("", endpoint)),
+		Endpoint: endpoint,
+	})
+	return accountID
+}
+
+func upsertRepository(prefs *nativePrefs, accountID, owner, name, docsPath, rfcLabel string) string {
+	return upsertRepositoryWithServerID(prefs, accountID, owner, name, docsPath, rfcLabel, "")
+}
+
+func upsertRepositoryWithServerID(prefs *nativePrefs, accountID, owner, name, docsPath, rfcLabel, serverID string) string {
+	for i := range prefs.Repositories {
+		if strings.EqualFold(prefs.Repositories[i].Owner, owner) && strings.EqualFold(prefs.Repositories[i].Name, name) {
+			prefs.Repositories[i].AccountID = accountID
+			prefs.Repositories[i].DocsPath = docsPath
+			prefs.Repositories[i].RFCLabel = rfcLabel
+			if serverID != "" {
+				prefs.Repositories[i].ServerID = serverID
+			}
+			return prefs.Repositories[i].ID
+		}
+	}
+	repoID := newUUID()
+	prefs.Repositories = append(prefs.Repositories, nativeRepository{
+		ID:        repoID,
+		AccountID: accountID,
+		Owner:     owner,
+		Name:      name,
+		DocsPath:  docsPath,
+		RFCLabel:  rfcLabel,
+		ServerID:  serverID,
+	})
+	return repoID
+}
+
+func shareConfigFromPrefs(prefs nativePrefs) shareConfig {
+	accountByID := make(map[string]nativeConnection, len(prefs.Accounts))
+	aliasByID := make(map[string]string, len(prefs.Accounts))
+	usedAliases := map[string]int{}
+
+	accounts := make([]shareAccount, 0, len(prefs.Accounts))
+	for _, account := range prefs.Accounts {
+		accountByID[account.ID] = account
+		alias := uniqueAlias(shareAccountAlias(account), usedAliases)
+		aliasByID[account.ID] = alias
+		accounts = append(accounts, shareAccount{
+			ID:       alias,
+			Name:     account.Name,
+			Endpoint: account.Endpoint,
+		})
+	}
+
+	repositories := make([]shareRepository, 0, len(prefs.Repositories))
+	for _, repo := range prefs.Repositories {
+		accountAlias := aliasByID[repo.AccountID]
+		if accountAlias == "" {
+			if account, ok := accountByID[repo.AccountID]; ok {
+				accountAlias = uniqueAlias(shareAccountAlias(account), usedAliases)
+			}
+		}
+		repositories = append(repositories, shareRepository{
+			Account:  accountAlias,
+			Owner:    repo.Owner,
+			Name:     repo.Name,
+			DocsPath: normalizeDocsPath(repo.DocsPath),
+			RFCLabel: firstNonEmpty(repo.RFCLabel, "hermit:rfc-ready"),
+			ServerID: repo.ServerID,
+		})
+	}
+
+	return shareConfig{Version: 1, Accounts: accounts, Repositories: repositories}
+}
+
+func readShareConfig(filePath string) (shareConfig, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return shareConfig{}, err
+	}
+	var cfg shareConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return shareConfig{}, err
+	}
+	if cfg.Version == 0 {
+		cfg.Version = 1
+	}
+	if cfg.Version != 1 {
+		return shareConfig{}, fmt.Errorf("unsupported repo config version %d", cfg.Version)
+	}
+	if len(cfg.Accounts) == 0 {
+		return shareConfig{}, errors.New("repo config has no accounts")
+	}
+	return cfg, nil
+}
+
+func resolveNativeAccountID(prefs nativePrefs, explicitAccountID, endpoint string) (string, error) {
+	if explicitAccountID != "" {
+		for _, account := range prefs.Accounts {
+			if account.ID == explicitAccountID {
+				return account.ID, nil
+			}
+		}
+		return "", fmt.Errorf("account id %q not found", explicitAccountID)
+	}
+	if endpoint == "" {
+		if len(prefs.Accounts) == 1 {
+			return prefs.Accounts[0].ID, nil
+		}
+		return "", errors.New("multiple accounts configured; pass --endpoint or --account-id")
+	}
+	normalized := strings.TrimRight(endpoint, "/")
+	for _, account := range prefs.Accounts {
+		if strings.EqualFold(strings.TrimRight(account.Endpoint, "/"), normalized) {
+			return account.ID, nil
+		}
+	}
+	return "", fmt.Errorf("account endpoint %q not found; import repo config first", endpoint)
+}
+
+func shareAccountAlias(account nativeConnection) string {
+	if host := hostFromURL(account.Endpoint); host != "" {
+		return slugify(host)
+	}
+	if account.Name != "" {
+		return slugify(account.Name)
+	}
+	return "account"
+}
+
+func uniqueAlias(alias string, used map[string]int) string {
+	if alias == "" {
+		alias = "account"
+	}
+	used[alias]++
+	if used[alias] == 1 {
+		return alias
+	}
+	return fmt.Sprintf("%s-%d", alias, used[alias])
+}
+
+func slugify(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func writeNativeKeychainToken(accountID, token string) error {
+	key := "hermit.account." + accountID
+	cmd := exec.Command("security", "add-generic-password", "-a", key, "-s", "HermitNative", "-w", token, "-T", "", "-U")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message != "" {
+			return fmt.Errorf("write native keychain token: %s", message)
+		}
+		return fmt.Errorf("write native keychain token: %w", err)
+	}
+	return nil
+}
+
+func readDefaultsString(domain, key string) (string, error) {
+	cmd := exec.Command("defaults", "read", domain, key)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+func writeDefaultsString(domain, key, value string) error {
+	cmd := exec.Command("defaults", "write", domain, key, value)
+	return runDefaultsCommand(cmd, key)
+}
+
+func writeDefaultsStringValue(domain, key, value string) error {
+	cmd := exec.Command("defaults", "write", domain, key, "-string", value)
+	return runDefaultsCommand(cmd, key)
+}
+
+func runDefaultsCommand(cmd *exec.Cmd, key string) error {
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message != "" {
+			return fmt.Errorf("defaults write %s: %s", key, message)
+		}
+		return fmt.Errorf("defaults write %s: %w", key, err)
+	}
+	return nil
+}
+
+func readPlistValue(plistPath, keyPath string) (string, error) {
+	cmd := exec.Command("plutil", "-extract", keyPath, "raw", "-o", "-", plistPath)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message != "" {
+			return "", fmt.Errorf("plutil extract %s: %s", keyPath, message)
+		}
+		return "", fmt.Errorf("plutil extract %s: %w", keyPath, err)
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+func writePlistDataValue(plistPath, keyPath string, data []byte) error {
+	encoded := base64.StdEncoding.EncodeToString(data)
+	cmd := exec.Command("plutil", "-replace", keyPath, "-data", encoded, plistPath)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message != "" {
+			return fmt.Errorf("plutil replace %s: %s", keyPath, message)
+		}
+		return fmt.Errorf("plutil replace %s: %w", keyPath, err)
+	}
+	return nil
+}
+
+func decodePlistJSONData(raw string) ([]byte, error) {
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(raw))
+	if err == nil {
+		return decoded, nil
+	}
+	return []byte(raw), nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func newUUID() string {
+	output, err := exec.Command("uuidgen").Output()
+	if err == nil {
+		return strings.ToLower(strings.TrimSpace(string(output)))
+	}
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
 func singleID(command string, args []string) (string, error) {
 	if len(args) != 1 || strings.TrimSpace(args[0]) == "" {
 		return "", fmt.Errorf("usage: hermitctl %s <repository-id>", command)
@@ -583,7 +1389,7 @@ func usage(w io.Writer) {
 
 func repoUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: hermitctl repo <command>")
-	fmt.Fprintln(w, "commands: add, list, get, remove, validate, rotate-token, debug")
+	fmt.Fprintln(w, "commands: add, add-local, export-local, import-local, bind-credential, list, get, remove, validate, rotate-token, debug")
 }
 
 func min(a, b int) int {

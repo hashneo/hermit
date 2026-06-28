@@ -1,0 +1,425 @@
+{
+  "accounts": [
+    {
+      "endpoint": "https://github.ibm.com/api/v3",
+      "id": "github-ibm",
+      "name": "github.ibm.com"
+    }
+  ],
+  "repositories": [
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "web",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "pok-bootstrap",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "agent",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "gantry",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "release",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "devtools",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "go-platform",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "memvid",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "terraform-provider-hmc",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "pok-terraform",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "agent-env-z",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "docs",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "rust-platform",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "prism",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "goblet",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-kb-ds8k",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-kb-z-zvm",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-kb-z-zos",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-kb-z",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-tfgen-hmc",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "terraform-automation",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "isof-sdk",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "terraform-provider-ds8k",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "profile",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "cli-cli",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "oven-sh-bun",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "oven-sh-WebKit",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "monitor",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "notebook",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-kb-z-hmc",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-tfgen-ds8k",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "z3270",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "notes",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-kb-z-workflow-search",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "hcdx",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-kb-z-harness",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-z-io",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-kb-z-support",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "research-terraform-agents",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-content-cio",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-workflows-z",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "policy-sandbox",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-schema-z",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "zDNN-benchmarks",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "zDNN-metal",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "zDNN",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "llama.cpp",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-package-template",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "mise",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "OpenShell",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "books",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-evals-z",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-content-z",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-tfgen-iocds",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-tfgen-hcd",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "metro-contracts-z",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "isof-db",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    },
+    {
+      "account": "github-ibm",
+      "docs_path": "docs-cms/rfcs",
+      "name": "proxy-ibm",
+      "owner": "meridian",
+      "rfc_label": "hermit:rfc-ready"
+    }
+  ],
+  "version": 1
+}

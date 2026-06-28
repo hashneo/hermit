@@ -8,9 +8,14 @@ import Network
 
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
+    let embedded: Bool
 
     // hermit-9ds: shown when any config change requires an app relaunch
     @State private var showRestartBanner = false
+
+    init(embedded: Bool = false) {
+        self.embedded = embedded
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,7 +48,7 @@ struct SettingsView: View {
             }
         }
 #if os(macOS)
-        .frame(width: 600, height: 560)
+        .frame(width: embedded ? nil : 600, height: embedded ? nil : 560)
 #endif
         // hermit-9ds: listen for config-change notifications from AccountStore/RepositoryStore
         .onReceive(NotificationCenter.default.publisher(for: .hermitRestartRequired)) { _ in
@@ -72,6 +77,10 @@ private struct AccountSettingsTab: View {
         VStack(spacing: 0) {
             // ── Toolbar ──────────────────────────────────────────────────
             HStack {
+                Label("Hermit authenticates with saved PATs. Git Credential Helper can import that PAT when adding or editing an account.", systemImage: "key")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
                 Spacer()
                 Button {
                     showAddSheet = true
@@ -173,6 +182,11 @@ private struct AddAccountSheet: View {
     @State private var name     = ""
     @State private var endpoint = ""
     @State private var token    = ""
+#if os(macOS)
+    @State private var credentialHost = ""
+    @State private var credentialStatus: GitCredentialHelperStatus = .idle
+    @State private var checkingCredential = false
+#endif
 
     var canSave: Bool {
         !name.trimmingCharacters(in: .whitespaces).isEmpty &&
@@ -197,6 +211,16 @@ private struct AddAccountSheet: View {
                     SecureField("Personal Access Token", text: $token)
                         .textContentType(.password)
                 }
+#if os(macOS)
+                GitCredentialHelperSection(
+                    endpoint: endpoint,
+                    host: $credentialHost,
+                    status: credentialStatus,
+                    isChecking: checkingCredential,
+                    onCheck: { Task { await checkGitCredential(fillToken: false) } },
+                    onUse: { Task { await checkGitCredential(fillToken: true) } }
+                )
+#endif
             }
             .formStyle(.grouped)
             .navigationTitle("Add Account")
@@ -225,6 +249,29 @@ private struct AddAccountSheet: View {
         .frame(width: 420, height: 280)
 #endif
     }
+
+#if os(macOS)
+    private func checkGitCredential(fillToken: Bool) async {
+        checkingCredential = true
+        credentialStatus = .checking
+        let host = resolvedCredentialHost(endpoint: endpoint, override: credentialHost)
+        let result = await GitCredentialHelper.lookup(host: host)
+        checkingCredential = false
+
+        switch result {
+        case .success(let credential):
+            credentialHost = credential.host
+            if fillToken {
+                token = credential.password
+                credentialStatus = .found("Loaded credential for \(credential.host).")
+            } else {
+                credentialStatus = .found("Credential helper returned a password for \(credential.host).")
+            }
+        case .failure(let message):
+            credentialStatus = .failed(message)
+        }
+    }
+#endif
 }
 
 // MARK: - Edit account sheet
@@ -237,12 +284,20 @@ private struct EditAccountSheet: View {
     @State private var name: String
     @State private var endpoint: String
     @State private var token: String = ""
+#if os(macOS)
+    @State private var credentialHost: String
+    @State private var credentialStatus: GitCredentialHelperStatus = .idle
+    @State private var checkingCredential = false
+#endif
 
     init(connection: Connection, isPresented: Binding<Bool>) {
         self.connection = connection
         _isPresented = isPresented
         _name     = State(initialValue: connection.name)
         _endpoint = State(initialValue: connection.endpoint)
+#if os(macOS)
+        _credentialHost = State(initialValue: resolvedCredentialHost(endpoint: connection.endpoint, override: ""))
+#endif
     }
 
     var body: some View {
@@ -265,6 +320,16 @@ private struct EditAccountSheet: View {
                 } footer: {
                     Text("Leave blank to keep the existing token.")
                 }
+#if os(macOS)
+                GitCredentialHelperSection(
+                    endpoint: endpoint,
+                    host: $credentialHost,
+                    status: credentialStatus,
+                    isChecking: checkingCredential,
+                    onCheck: { Task { await checkGitCredential(fillToken: false) } },
+                    onUse: { Task { await checkGitCredential(fillToken: true) } }
+                )
+#endif
             }
             .formStyle(.grouped)
             .navigationTitle("Edit Account")
@@ -292,7 +357,202 @@ private struct EditAccountSheet: View {
         .frame(width: 420, height: 300)
 #endif
     }
+
+#if os(macOS)
+    private func checkGitCredential(fillToken: Bool) async {
+        checkingCredential = true
+        credentialStatus = .checking
+        let host = resolvedCredentialHost(endpoint: endpoint, override: credentialHost)
+        let result = await GitCredentialHelper.lookup(host: host)
+        checkingCredential = false
+
+        switch result {
+        case .success(let credential):
+            credentialHost = credential.host
+            if fillToken {
+                token = credential.password
+                credentialStatus = .found("Loaded credential for \(credential.host). Save to update this account token.")
+            } else {
+                credentialStatus = .found("Credential helper returned a password for \(credential.host).")
+            }
+        case .failure(let message):
+            credentialStatus = .failed(message)
+        }
+    }
+#endif
 }
+
+#if os(macOS)
+private enum GitCredentialHelperStatus: Equatable {
+    case idle
+    case checking
+    case found(String)
+    case failed(String)
+
+    var message: String {
+        switch self {
+        case .idle:
+            return "Use the local Git credential helper as a token source for this account."
+        case .checking:
+            return "Checking git credential helper..."
+        case .found(let message), .failed(let message):
+            return message
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .idle:
+            return "key"
+        case .checking:
+            return "arrow.triangle.2.circlepath"
+        case .found:
+            return "checkmark.circle.fill"
+        case .failed:
+            return "xmark.circle.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .idle, .checking:
+            return .secondary
+        case .found:
+            return .green
+        case .failed:
+            return .orange
+        }
+    }
+}
+
+private struct GitCredentialHelperSection: View {
+    let endpoint: String
+    @Binding var host: String
+    let status: GitCredentialHelperStatus
+    let isChecking: Bool
+    let onCheck: () -> Void
+    let onUse: () -> Void
+
+    var body: some View {
+        Section {
+            TextField("Credential host", text: $host, prompt: Text(defaultHostPrompt))
+                .autocorrectionDisabled()
+            HStack(spacing: 8) {
+                Button("Check Helper", action: onCheck)
+                    .disabled(isChecking)
+                Button("Use Git Credential", action: onUse)
+                    .disabled(isChecking)
+                if isChecking {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            Label(status.message, systemImage: status.systemImage)
+                .font(.caption)
+                .foregroundStyle(status.tint)
+        } header: {
+            Text("Git Credential Helper")
+        } footer: {
+            Text("Hermit asks git credential fill for the host and stores only the returned token when you save. Leave the host blank to derive it from the endpoint.")
+        }
+    }
+
+    private var defaultHostPrompt: String {
+        resolvedCredentialHost(endpoint: endpoint, override: "")
+    }
+}
+
+private struct GitCredential {
+    let host: String
+    let username: String
+    let password: String
+}
+
+private enum GitCredentialLookupResult {
+    case success(GitCredential)
+    case failure(String)
+}
+
+private enum GitCredentialHelper {
+    static func lookup(host: String) async -> GitCredentialLookupResult {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else {
+            return .failure("Enter an endpoint or credential host first.")
+        }
+
+        return await Task.detached(priority: .userInitiated) {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = ["credential", "fill"]
+
+            let input = Pipe()
+            let output = Pipe()
+            let error = Pipe()
+            process.standardInput = input
+            process.standardOutput = output
+            process.standardError = error
+
+            do {
+                try process.run()
+                let request = "protocol=https\nhost=\(trimmedHost)\n\n"
+                input.fileHandleForWriting.write(Data(request.utf8))
+                try? input.fileHandleForWriting.close()
+                process.waitUntilExit()
+
+                let outputData = output.fileHandleForReading.readDataToEndOfFile()
+                let errorData = error.fileHandleForReading.readDataToEndOfFile()
+                let stdout = String(data: outputData, encoding: .utf8) ?? ""
+                let stderr = String(data: errorData, encoding: .utf8) ?? ""
+
+                guard process.terminationStatus == 0 else {
+                    let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if detail.isEmpty {
+                        return .failure("Git credential helper failed for \(trimmedHost).")
+                    }
+                    return .failure(detail)
+                }
+
+                var values: [String: String] = [:]
+                for line in stdout.split(separator: "\n") {
+                    let parts = line.split(separator: "=", maxSplits: 1)
+                    guard parts.count == 2 else { continue }
+                    values[String(parts[0])] = String(parts[1])
+                }
+
+                guard let password = values["password"], !password.isEmpty else {
+                    return .failure("No password was returned for \(trimmedHost).")
+                }
+
+                return .success(GitCredential(
+                    host: values["host"] ?? trimmedHost,
+                    username: values["username"] ?? "",
+                    password: password
+                ))
+            } catch {
+                return .failure("Could not run git credential helper: \(error.localizedDescription)")
+            }
+        }.value
+    }
+}
+
+private func resolvedCredentialHost(endpoint: String, override: String) -> String {
+    let trimmedOverride = override.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmedOverride.isEmpty {
+        return trimmedOverride
+            .replacingOccurrences(of: "https://", with: "")
+            .replacingOccurrences(of: "http://", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+    let trimmedEndpoint = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let url = URL(string: trimmedEndpoint), let host = url.host else {
+        return trimmedEndpoint
+            .replacingOccurrences(of: "https://", with: "")
+            .replacingOccurrences(of: "http://", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+    return host
+}
+#endif
 
 // MARK: - Repository tab
 
@@ -673,12 +933,16 @@ private struct EditRepoSheet: View {
 
 private struct ServerSettingsTab: View {
     @EnvironmentObject private var appState: AppState
+    @State private var cacheReadTTLSeconds = ConfigStore.shared.cacheReadTTLSeconds
+    @State private var cacheJitterSeconds = ConfigStore.shared.cacheJitterSeconds
 
     var body: some View {
         Form {
             Section("Mode") {
                 modePicker
             }
+
+            cacheRefreshSection
 
             switch appState.serverMode {
 #if os(macOS)
@@ -694,6 +958,14 @@ private struct ServerSettingsTab: View {
             }
         }
         .formStyle(.grouped)
+        .onChange(of: cacheReadTTLSeconds) { _, value in
+            ConfigStore.shared.cacheReadTTLSeconds = value
+            NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
+        }
+        .onChange(of: cacheJitterSeconds) { _, value in
+            ConfigStore.shared.cacheJitterSeconds = value
+            NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
+        }
     }
 
     // MARK: - Mode picker
@@ -711,6 +983,40 @@ private struct ServerSettingsTab: View {
             ConfigStore.shared.serverMode = new
             applyModeChange(new)
         }
+    }
+
+    private var cacheRefreshSection: some View {
+        Section {
+            Stepper(value: $cacheReadTTLSeconds, in: 30...3600, step: 30) {
+                LabeledContent("Read refresh interval") {
+                    Text(durationLabel(cacheReadTTLSeconds))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Stepper(value: $cacheJitterSeconds, in: 0...600, step: 15) {
+                LabeledContent("Jitter window") {
+                    Text(durationLabel(cacheJitterSeconds))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Button("Reset Cache Timing") {
+                cacheReadTTLSeconds = 180
+                cacheJitterSeconds = 60
+            }
+        } header: {
+            Text("Cache Refresh")
+        } footer: {
+            Text("Defaults are 3 minutes plus up to 1 minute of stable per-repository jitter. Changes apply after the embedded server restarts.")
+        }
+    }
+
+    private func durationLabel(_ seconds: Int) -> String {
+        if seconds == 0 { return "Off" }
+        if seconds % 60 == 0 {
+            let minutes = seconds / 60
+            return minutes == 1 ? "1 minute" : "\(minutes) minutes"
+        }
+        return "\(seconds) seconds"
     }
 
     private func applyModeChange(_ mode: ServerMode) {

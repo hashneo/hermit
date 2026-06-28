@@ -66,6 +66,8 @@ type CatalogItem struct {
 	PRNumber        int      `json:"pr_number,omitempty"`
 	HeadSHA         string   `json:"head_sha,omitempty"`
 	HeadRef         string   `json:"head_ref,omitempty"`
+	Mergeable       *bool    `json:"mergeable,omitempty"`
+	MergeableState  string   `json:"mergeable_state,omitempty"`
 	Labels          []string `json:"labels,omitempty"`
 	Commentable     bool     `json:"commentable"`
 	StatusMutable   bool     `json:"status_mutable"`
@@ -287,13 +289,12 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 		return RepositoryRFCListResponse{}, fmt.Errorf("repository resolver is not configured")
 	}
 
-	cacheKey := repositoryRFCListCacheKey(repositoryID)
-	cacheTTL := s.repositoryRFCListCacheTTL(cacheKey)
+	cacheTTL := s.repositoryRFCListCacheTTL(repositoryID)
 	if s.workset != nil {
-		if payload, meta, ok, err := s.workset.GetFreshCache(ctx, cacheKey, cacheTTL); err == nil && ok {
+		if projection, ok, err := s.workset.GetFreshRepositoryRFCList(ctx, repositoryID, cacheTTL); err == nil && ok {
 			var cached RepositoryRFCListResponse
-			if decodeErr := json.Unmarshal(payload, &cached); decodeErr == nil {
-				cached.Cache = &meta
+			if decodeErr := json.Unmarshal(projection.Payload, &cached); decodeErr == nil {
+				cached.Cache = &projection.Cache
 				return cached, nil
 			}
 		}
@@ -315,7 +316,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 	baseURL := s.registryBaseURL(registry, repoBaseURL)
 	mainItems, err := client.ListRFCs(ctx, baseURL, owner, name, branch, docsPath, token)
 	if err != nil {
-		if cached, ok := s.cachedRepositoryRFCListAfterError(ctx, cacheKey, cacheTTL, err); ok {
+		if cached, ok := s.cachedRepositoryRFCListAfterError(ctx, repositoryID, cacheTTL, err); ok {
 			return cached, nil
 		}
 		return RepositoryRFCListResponse{}, err
@@ -363,7 +364,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 
 	prResult, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, rfcLabel, token)
 	if err != nil {
-		if cached, ok := s.cachedRepositoryRFCListAfterError(ctx, cacheKey, cacheTTL, err); ok {
+		if cached, ok := s.cachedRepositoryRFCListAfterError(ctx, repositoryID, cacheTTL, err); ok {
 			return cached, nil
 		}
 		return RepositoryRFCListResponse{}, err
@@ -379,6 +380,8 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 			PRNumber:       prItem.PRNumber,
 			HeadSHA:        prItem.HeadSHA,
 			HeadRef:        prItem.HeadRef,
+			Mergeable:      prItem.Mergeable,
+			MergeableState: prItem.MergeableState,
 			Labels:         prItem.Labels,
 			Commentable:    true,
 			StatusMutable:  false,
@@ -411,34 +414,37 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 		},
 	}
 	if s.workset != nil {
-		if meta, err := s.workset.PutCacheSuccess(ctx, "repository_rfc_list", cacheKey, response); err == nil {
-			response.Cache = &meta
+		if payload, err := json.Marshal(response); err == nil {
+			if meta, err := s.workset.PutRepositoryRFCListSuccess(ctx, repositoryID, payload); err == nil {
+				response.Cache = &meta
+			}
 		}
 	}
 	return response, nil
 }
 
-func (s *Service) cachedRepositoryRFCListAfterError(ctx context.Context, cacheKey string, ttl time.Duration, err error) (RepositoryRFCListResponse, bool) {
+func (s *Service) cachedRepositoryRFCListAfterError(ctx context.Context, repositoryID string, ttl time.Duration, err error) (RepositoryRFCListResponse, bool) {
 	if s.workset == nil {
 		return RepositoryRFCListResponse{}, false
 	}
-	_ = s.workset.PutCacheError(ctx, "repository_rfc_list", cacheKey, "provider_error", err.Error())
-	payload, meta, ok, getErr := s.workset.GetAnyCache(ctx, cacheKey, ttl)
+	_ = s.workset.PutRepositoryRFCListError(ctx, repositoryID, "provider_error", err.Error())
+	projection, ok, getErr := s.workset.GetAnyRepositoryRFCList(ctx, repositoryID, ttl)
 	if getErr != nil || !ok {
 		return RepositoryRFCListResponse{}, false
 	}
+	meta := projection.Cache
 	meta.Cached = true
 	meta.LastErrorCode = "provider_error"
 	meta.LastErrorMessage = err.Error()
 	var cached RepositoryRFCListResponse
-	if decodeErr := json.Unmarshal(payload, &cached); decodeErr != nil {
+	if decodeErr := json.Unmarshal(projection.Payload, &cached); decodeErr != nil {
 		return RepositoryRFCListResponse{}, false
 	}
 	cached.Cache = &meta
 	return cached, true
 }
 
-func (s *Service) repositoryRFCListCacheTTL(cacheKey string) time.Duration {
+func (s *Service) repositoryRFCListCacheTTL(repositoryID string) time.Duration {
 	readTTL := s.cacheReadTTL
 	if readTTL <= 0 {
 		readTTL = defaultRepositoryRFCListCacheTTL
@@ -450,13 +456,9 @@ func (s *Service) repositoryRFCListCacheTTL(cacheKey string) time.Duration {
 	if jitter == 0 {
 		return readTTL
 	}
-	sum := sha256.Sum256([]byte(cacheKey))
+	sum := sha256.Sum256([]byte(repositoryID))
 	offset := binary.BigEndian.Uint64(sum[:8]) % uint64(jitter)
 	return readTTL + time.Duration(offset)
-}
-
-func repositoryRFCListCacheKey(repositoryID string) string {
-	return "repository_rfc_list:" + repositoryID
 }
 
 // SubmitForReviewResult is returned by SubmitForReview on success.

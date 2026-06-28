@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"hermit/internal/app"
 	"hermit/internal/config"
@@ -35,8 +36,9 @@ import (
 // backwards compatibility and are promoted into Repos when Repos is empty.
 type StartConfig struct {
 	// Multi-repo (preferred)
-	Repos   []RepoConfig `json:"repos"`
-	DataDir string       `json:"dataDir"`    // app sandbox Application Support dir
+	Repos   []RepoConfig      `json:"repos"`
+	DataDir string            `json:"dataDir"` // app sandbox Application Support dir
+	Cache   MobileCacheConfig `json:"cache"`
 
 	// Legacy single-repo fields (promoted to Repos when Repos is empty)
 	BaseURL  string `json:"baseURL"`
@@ -45,6 +47,11 @@ type StartConfig struct {
 	Repo     string `json:"repo"`
 	DocsPath string `json:"docsPath"`
 	RFCLabel string `json:"rfcLabel"`
+}
+
+type MobileCacheConfig struct {
+	RepositoryRFCListReadTTLSeconds *int `json:"repositoryRFCListReadTTLSeconds"`
+	RepositoryRFCListJitterSeconds  *int `json:"repositoryRFCListJitterSeconds"`
 }
 
 // RepoConfig describes one repository to register with the server.
@@ -226,11 +233,18 @@ func buildConfig(sc StartConfig) (config.Config, error) {
 		return config.Config{}, errors.New("no valid repositories configured")
 	}
 
-	return config.Config{
+	cfg := config.Config{
 		Environment:   "production",
 		ListenAddress: "0.0.0.0:0", // overridden by Start()
 		Registries:    registries,
 		Repositories:  repositories,
 		DataDir:       filepath.Join(dataDir, "hermit"),
-	}, nil
+	}
+	if sc.Cache.RepositoryRFCListReadTTLSeconds != nil && *sc.Cache.RepositoryRFCListReadTTLSeconds > 0 {
+		cfg.Cache.RepositoryRFCList.ReadTTL.Duration = time.Duration(*sc.Cache.RepositoryRFCListReadTTLSeconds) * time.Second
+	}
+	if sc.Cache.RepositoryRFCListJitterSeconds != nil && *sc.Cache.RepositoryRFCListJitterSeconds >= 0 {
+		cfg.Cache.RepositoryRFCList.Jitter.Duration = time.Duration(*sc.Cache.RepositoryRFCListJitterSeconds) * time.Second
+	}
+	return cfg, nil
 }

@@ -459,6 +459,40 @@ go run ./cmd/hermitctl repo add \
   --credential-host github.ibm.com
 ```
 
+#### Share native repo config
+
+Native app repository lists can be exported as token-free JSON and shared with
+the team. The export includes account endpoints and repository metadata only;
+PATs and git credential helper state are intentionally local to each developer.
+
+```bash
+go run ./cmd/hermitctl repo export-local --output hermit-repos.json
+```
+
+Another developer can import that file without receiving any credentials:
+
+```bash
+go run ./cmd/hermitctl repo import-local --file hermit-repos.json
+```
+
+After import, each developer binds their own local credential for the account
+endpoint. For GitHub Enterprise with the git credential helper:
+
+```bash
+go run ./cmd/hermitctl repo bind-credential \
+  --endpoint https://github.ibm.com/api/v3 \
+  --git-credential \
+  --credential-host github.ibm.com
+```
+
+For automation, bind from stdin instead:
+
+```bash
+printf '%s' "$GHE_TOKEN" | go run ./cmd/hermitctl repo bind-credential \
+  --endpoint https://github.ibm.com/api/v3 \
+  --token-stdin
+```
+
 Use `--json` on any server command for machine-readable output.
 
 Validate config locally:

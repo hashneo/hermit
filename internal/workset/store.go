@@ -3,7 +3,6 @@ package workset
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +13,12 @@ import (
 )
 
 const databaseFilename = "hermit.db"
+
+const (
+	defaultBusyTimeoutMS = 5000
+	defaultMaxOpenConns  = 4
+	defaultMaxIdleConns  = 2
+)
 
 type Store struct {
 	db  *sql.DB
@@ -48,12 +53,45 @@ func Open(dataDir string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	configureDBPool(db)
+	if err := configureSQLite(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	s := &Store{db: db, now: time.Now}
 	if err := s.migrate(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return s, nil
+}
+
+func configureDBPool(db *sql.DB) {
+	db.SetMaxOpenConns(defaultMaxOpenConns)
+	db.SetMaxIdleConns(defaultMaxIdleConns)
+}
+
+func configureSQLite(db *sql.DB) error {
+	stmts := []string{
+		`PRAGMA foreign_keys = ON`,
+		fmt.Sprintf(`PRAGMA busy_timeout = %d`, defaultBusyTimeoutMS),
+		`PRAGMA journal_mode = WAL`,
+		`PRAGMA synchronous = NORMAL`,
+		`PRAGMA cache_size = -64000`,
+		`PRAGMA temp_store = MEMORY`,
+		`PRAGMA wal_autocheckpoint = 1000`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("configure sqlite %q: %w", stmt, err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("ping sqlite: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) Close() error {
@@ -63,151 +101,10 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-func (s *Store) GetFreshCache(ctx context.Context, key string, ttl time.Duration) ([]byte, CacheMetadata, bool, error) {
-	record, ok, err := s.getCache(ctx, key)
-	if err != nil || !ok {
-		return nil, CacheMetadata{}, false, err
-	}
-	if record.LastSuccessfulRefreshAt.IsZero() {
-		return nil, metadataFromRecord(record, false, time.Time{}), false, nil
-	}
-	next := record.LastSuccessfulRefreshAt.Add(ttl)
-	if s.now().Before(next) {
-		return record.Payload, metadataFromRecord(record, true, next), true, nil
-	}
-	return nil, metadataFromRecord(record, false, next), false, nil
-}
-
-func (s *Store) GetAnyCache(ctx context.Context, key string, ttl time.Duration) ([]byte, CacheMetadata, bool, error) {
-	record, ok, err := s.getCache(ctx, key)
-	if err != nil || !ok {
-		return nil, CacheMetadata{}, false, err
-	}
-	if record.LastSuccessfulRefreshAt.IsZero() {
-		return nil, metadataFromRecord(record, false, time.Time{}), false, nil
-	}
-	return record.Payload, metadataFromRecord(record, true, record.LastSuccessfulRefreshAt.Add(ttl)), true, nil
-}
-
-func (s *Store) PutCacheSuccess(ctx context.Context, scope, key string, value any) (CacheMetadata, error) {
-	payload, err := json.Marshal(value)
-	if err != nil {
-		return CacheMetadata{}, err
-	}
-	now := s.now().UTC()
-	nowText := now.Format(time.RFC3339)
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO cache_entries (
-			key, scope, payload_json, last_successful_refresh_at, last_attempted_refresh_at,
-			last_error_code, last_error_message, created_at, updated_at
-		)
-		VALUES (?, ?, ?, ?, ?, '', '', ?, ?)
-		ON CONFLICT(key) DO UPDATE SET
-			scope = excluded.scope,
-			payload_json = excluded.payload_json,
-			last_successful_refresh_at = excluded.last_successful_refresh_at,
-			last_attempted_refresh_at = excluded.last_attempted_refresh_at,
-			last_error_code = '',
-			last_error_message = '',
-			updated_at = excluded.updated_at
-	`, key, scope, string(payload), nowText, nowText, nowText, nowText)
-	if err != nil {
-		return CacheMetadata{}, err
-	}
-	return CacheMetadata{
-		Cached:                  false,
-		LastSuccessfulRefreshAt: nowText,
-		LastAttemptedRefreshAt:  nowText,
-	}, nil
-}
-
-func (s *Store) PutCacheError(ctx context.Context, scope, key, code, message string) error {
-	nowText := s.now().UTC().Format(time.RFC3339)
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO cache_entries (
-			key, scope, payload_json, last_attempted_refresh_at,
-			last_error_code, last_error_message, created_at, updated_at
-		)
-		VALUES (?, ?, '{}', ?, ?, ?, ?, ?)
-		ON CONFLICT(key) DO UPDATE SET
-			scope = excluded.scope,
-			last_attempted_refresh_at = excluded.last_attempted_refresh_at,
-			last_error_code = excluded.last_error_code,
-			last_error_message = excluded.last_error_message,
-			updated_at = excluded.updated_at
-	`, key, scope, nowText, code, message, nowText, nowText)
-	return err
-}
-
-func (s *Store) EnqueueOperation(ctx context.Context, op Operation) error {
-	nowText := s.now().UTC().Format(time.RFC3339)
-	if op.ID == "" {
-		return errors.New("operation id is required")
-	}
-	if op.Status == "" {
-		op.Status = "queued"
-	}
-	if op.NotBeforeAt == "" {
-		op.NotBeforeAt = nowText
-	}
-	if op.PayloadJSON == "" {
-		op.PayloadJSON = "{}"
-	}
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO provider_operations (
-			id, kind, status, priority, dedupe_key, payload_json, attempts,
-			not_before_at, last_error_code, last_error_message, created_at, updated_at
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, op.ID, op.Kind, op.Status, op.Priority, op.DedupeKey, op.PayloadJSON, op.Attempts,
-		op.NotBeforeAt, op.LastErrorCode, op.LastErrorMessage, nowText, nowText)
-	return err
-}
-
-type Operation struct {
-	ID               string
-	Kind             string
-	Status           string
-	Priority         int
-	DedupeKey        string
-	PayloadJSON      string
-	Attempts         int
-	NotBeforeAt      string
-	LastErrorCode    string
-	LastErrorMessage string
-}
-
-func (s *Store) getCache(ctx context.Context, key string) (cacheRecord, bool, error) {
-	var payload, successText, attemptedText, errorCode, errorMessage string
-	err := s.db.QueryRowContext(ctx, `
-		SELECT payload_json, COALESCE(last_successful_refresh_at, ''), COALESCE(last_attempted_refresh_at, ''),
-		       COALESCE(last_error_code, ''), COALESCE(last_error_message, '')
-		FROM cache_entries
-		WHERE key = ?
-	`, key).Scan(&payload, &successText, &attemptedText, &errorCode, &errorMessage)
-	if errors.Is(err, sql.ErrNoRows) {
-		return cacheRecord{}, false, nil
-	}
-	if err != nil {
-		return cacheRecord{}, false, err
-	}
-	successAt, _ := time.Parse(time.RFC3339, successText)
-	attemptedAt, _ := time.Parse(time.RFC3339, attemptedText)
-	return cacheRecord{
-		Payload:                 []byte(payload),
-		LastSuccessfulRefreshAt: successAt,
-		LastAttemptedRefreshAt:  attemptedAt,
-		LastErrorCode:           errorCode,
-		LastErrorMessage:        errorMessage,
-	}, true, nil
-}
-
 func (s *Store) migrate(ctx context.Context) error {
 	stmts := []string{
-		`PRAGMA journal_mode = WAL`,
-		`CREATE TABLE IF NOT EXISTS cache_entries (
-			key TEXT PRIMARY KEY,
-			scope TEXT NOT NULL,
+		`CREATE TABLE IF NOT EXISTS repository_rfc_lists (
+			repository_id TEXT PRIMARY KEY,
 			payload_json TEXT NOT NULL,
 			last_successful_refresh_at TEXT,
 			last_attempted_refresh_at TEXT,
@@ -217,7 +114,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_cache_entries_scope ON cache_entries(scope)`,
+		`CREATE INDEX IF NOT EXISTS idx_repository_rfc_lists_last_success ON repository_rfc_lists(last_successful_refresh_at)`,
 		`CREATE TABLE IF NOT EXISTS provider_operations (
 			id TEXT PRIMARY KEY,
 			kind TEXT NOT NULL,

@@ -265,15 +265,15 @@ func TestRepositoryRFCListCacheTTLUsesConfiguredJitter(t *testing.T) {
 	service := NewServiceWithRepositoryResolver(&fakeResolver{}, nil)
 	service.WithRepositoryRFCListCacheTiming(3*time.Minute, time.Minute)
 
-	ttl := service.repositoryRFCListCacheTTL("repository_rfc_list:repo-1")
+	ttl := service.repositoryRFCListCacheTTL("repo-1")
 	if ttl < 3*time.Minute {
 		t.Fatalf("ttl = %s, want at least 3m", ttl)
 	}
 	if ttl >= 4*time.Minute {
 		t.Fatalf("ttl = %s, want less than 4m", ttl)
 	}
-	if ttl != service.repositoryRFCListCacheTTL("repository_rfc_list:repo-1") {
-		t.Fatalf("ttl jitter should be stable for the same cache key")
+	if ttl != service.repositoryRFCListCacheTTL("repo-1") {
+		t.Fatalf("ttl jitter should be stable for the same repository")
 	}
 }
 
