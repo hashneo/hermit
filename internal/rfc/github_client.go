@@ -76,6 +76,8 @@ const RFCReadyLabel = "hermit:rfc-ready"
 type ReviewReadyRFCItem struct {
 	PRNumber       int
 	PRTitle        string
+	PRState        string
+	PRMerged       bool
 	HeadSHA        string
 	HeadRef        string
 	Mergeable      *bool
@@ -238,11 +240,14 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 		rfcLabel = RFCReadyLabel
 	}
 
-	// Query open PRs and inspect changed files client-side. Some providers
+	// Query PRs and inspect changed files client-side. Some providers
 	// (for example Gitea) do not support string label filters on this endpoint.
 	// Hermit also auto-applies workflow labels for Docuchango document changes,
 	// so label presence is an output of discovery rather than a hard precondition.
-	prURL := fmt.Sprintf("%s/repos/%s/%s/pulls?state=open&per_page=100", apiBase, owner, name)
+	// Closed PRs are included only when they already carry review workflow labels,
+	// which keeps historical PRs out of the dashboard while preserving labeled
+	// docs-cms review work whose top-level PR state is closed or merged.
+	prURL := fmt.Sprintf("%s/repos/%s/%s/pulls?state=all&per_page=100", apiBase, owner, name)
 	prReq, err := http.NewRequestWithContext(ctx, http.MethodGet, prURL, nil)
 	if err != nil {
 		return ReviewReadyRFCResult{}, err
@@ -264,7 +269,9 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 		Number         int    `json:"number"`
 		Title          string `json:"title"`
 		HTMLURL        string `json:"html_url"`
+		State          string `json:"state"`
 		Draft          bool   `json:"draft"`
+		Merged         bool   `json:"merged"`
 		Mergeable      *bool  `json:"mergeable"`
 		MergeableState string `json:"mergeable_state"`
 		Head           struct {
@@ -280,23 +287,39 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 	}
 
 	items := make([]ReviewReadyRFCItem, 0)
-	openPRCount := len(pulls)
+	openPRCount := 0
 	var prStates PRStateCounts
 	for _, pr := range pulls {
+		prState := strings.ToLower(strings.TrimSpace(pr.State))
+		if prState == "" {
+			prState = "open"
+		}
+		if prState == "open" {
+			openPRCount++
+		} else if !prHasReviewWorkflowLabel(pr.Labels, rfcLabel) {
+			continue
+		}
+
 		if pr.Draft {
-			prStates.add(classifyPRState(pr.Draft, pr.Mergeable, pr.MergeableState))
+			if prState == "open" {
+				prStates.add(classifyPRState(pr.Draft, pr.Mergeable, pr.MergeableState))
+			}
 			continue
 		}
 
 		mergeable := pr.Mergeable
 		mergeableState := strings.TrimSpace(pr.MergeableState)
-		if mergeable == nil && mergeableState == "" {
-			if detailMergeable, detailState, detailErr := c.getPullRequestMergeState(ctx, apiBase, owner, name, pr.Number, token); detailErr == nil {
+		merged := pr.Merged
+		if (mergeable == nil && mergeableState == "") || prState != "open" {
+			if detailMergeable, detailState, detailMerged, detailErr := c.getPullRequestMergeState(ctx, apiBase, owner, name, pr.Number, token); detailErr == nil {
 				mergeable = detailMergeable
 				mergeableState = detailState
+				merged = detailMerged
 			}
 		}
-		prStates.add(classifyPRState(pr.Draft, mergeable, mergeableState))
+		if prState == "open" {
+			prStates.add(classifyPRState(pr.Draft, mergeable, mergeableState))
+		}
 
 		labelNames := make([]string, 0, len(pr.Labels))
 		for _, l := range pr.Labels {
@@ -371,6 +394,8 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 			items = append(items, ReviewReadyRFCItem{
 				PRNumber:       pr.Number,
 				PRTitle:        pr.Title,
+				PRState:        prState,
+				PRMerged:       merged,
 				HeadSHA:        pr.Head.SHA,
 				HeadRef:        pr.Head.Ref,
 				Mergeable:      mergeable,
@@ -447,34 +472,35 @@ func classifyPRState(draft bool, mergeable *bool, mergeableState string) string 
 	}
 }
 
-func (c *HTTPGitHubRFCClient) getPullRequestMergeState(ctx context.Context, apiBase, owner, name string, prNumber int, token string) (*bool, string, error) {
+func (c *HTTPGitHubRFCClient) getPullRequestMergeState(ctx context.Context, apiBase, owner, name string, prNumber int, token string) (*bool, string, bool, error) {
 	prURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d", apiBase, owner, name, prNumber)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, prURL, nil)
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	setGitHubHeaders(req, token)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return nil, "", fmt.Errorf("get pull request merge state failed: %d %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, "", false, fmt.Errorf("get pull request merge state failed: %d %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	var payload struct {
 		Mergeable      *bool  `json:"mergeable"`
 		MergeableState string `json:"mergeable_state"`
+		Merged         bool   `json:"merged"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 
-	return payload.Mergeable, strings.TrimSpace(payload.MergeableState), nil
+	return payload.Mergeable, strings.TrimSpace(payload.MergeableState), payload.Merged, nil
 }
 
 func (c *HTTPGitHubRFCClient) GetRFCFromPullRequest(ctx context.Context, baseURL, owner, name string, prNumber int, filePath, token string) (DocumentView, error) {
@@ -1394,6 +1420,21 @@ func prHasLabel(labels []struct {
 }, target string) bool {
 	for _, l := range labels {
 		if l.Name == target {
+			return true
+		}
+	}
+	return false
+}
+
+func prHasReviewWorkflowLabel(labels []struct {
+	Name string `json:"name"`
+}, rfcLabel string) bool {
+	for _, label := range labels {
+		name := strings.ToLower(strings.TrimSpace(label.Name))
+		if name == strings.ToLower(strings.TrimSpace(rfcLabel)) {
+			return true
+		}
+		if strings.HasSuffix(name, ":review") || strings.HasSuffix(name, ":needs-changes") {
 			return true
 		}
 	}

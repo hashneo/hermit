@@ -65,6 +65,8 @@ type CatalogItem struct {
 	LifecycleStatus string   `json:"lifecycle_status,omitempty"`
 	PRNumber        int      `json:"pr_number,omitempty"`
 	PRTitle         string   `json:"pr_title,omitempty"`
+	PRState         string   `json:"pr_state,omitempty"`
+	PRMerged        bool     `json:"pr_merged,omitempty"`
 	HeadSHA         string   `json:"head_sha,omitempty"`
 	HeadRef         string   `json:"head_ref,omitempty"`
 	Mergeable       *bool    `json:"mergeable,omitempty"`
@@ -385,6 +387,8 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 			AllowedActions: []string{"view", "comment"},
 			PRNumber:       prItem.PRNumber,
 			PRTitle:        prItem.PRTitle,
+			PRState:        prItem.PRState,
+			PRMerged:       prItem.PRMerged,
 			HeadSHA:        prItem.HeadSHA,
 			HeadRef:        prItem.HeadRef,
 			Mergeable:      prItem.Mergeable,

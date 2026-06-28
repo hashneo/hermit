@@ -742,6 +742,13 @@ components:
         pr_title:
           type: string
           nullable: true
+        pr_state:
+          type: string
+          description: Top-level pull request state, such as open or closed.
+          nullable: true
+        pr_merged:
+          type: boolean
+          description: Whether the pull request has been merged.
         head_sha:
           type: string
           nullable: true

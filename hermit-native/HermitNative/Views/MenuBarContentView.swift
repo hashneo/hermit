@@ -1205,7 +1205,8 @@ private struct PendingPRGroup: Identifiable {
             }
         }
         return RFCPullRequest(
-            id: 0, number: 0, title: "", prTitle: "", body: "",
+            id: 0, number: 0, title: "", prTitle: "",
+            prState: "open", prMerged: false, body: "",
             headSHA: "", headRef: "", htmlURL: "", state: "",
             draft: false, mergeable: nil, mergeableState: nil,
             documentType: "rfc", labels: [], changedFiles: 0,
@@ -1817,7 +1818,8 @@ private struct PRSummaryRow: View {
     private var pr: RFCPullRequest {
         if case .pullRequest(let pr) = rfc.source { return pr }
         return RFCPullRequest(
-            id: 0, number: 0, title: "", prTitle: "", body: "",
+            id: 0, number: 0, title: "", prTitle: "",
+            prState: "open", prMerged: false, body: "",
             headSHA: "", headRef: "", htmlURL: "", state: "",
             draft: false, mergeable: nil, mergeableState: nil,
             documentType: "rfc", labels: [], changedFiles: 0,
@@ -1923,6 +1925,26 @@ private struct PRStateDescriptor {
     )
 
     static func describe(_ pr: RFCPullRequest) -> PRStateDescriptor {
+        let topLevelState = pr.prState.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if pr.prMerged {
+            return PRStateDescriptor(
+                title: "Merged",
+                systemImage: "checkmark.seal.fill",
+                tint: .purple,
+                help: "Pull request has been merged.",
+                sortOrder: 50
+            )
+        }
+        if topLevelState == "closed" {
+            return PRStateDescriptor(
+                title: "Closed",
+                systemImage: "xmark.circle.fill",
+                tint: .secondary,
+                help: "Pull request is closed.",
+                sortOrder: 60
+            )
+        }
+
         let normalizedState = (pr.mergeableState ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
         if pr.draft {

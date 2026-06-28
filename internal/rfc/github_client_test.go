@@ -213,7 +213,7 @@ structure:
 func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "open":
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "all":
 			if got := r.URL.Query().Get("labels"); got != "" {
 				t.Fatalf("expected no labels query parameter, got %q", got)
 			}
@@ -591,6 +591,79 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_DiscoversDocsCMSDocumentsWithou
 		if got.ChangedFiles != 4 || got.Additions != 63 || got.Deletions != 6 {
 			t.Fatalf("item %d missing PR stats: changed=%d additions=%d deletions=%d", i, got.ChangedFiles, got.Additions, got.Deletions)
 		}
+	}
+}
+
+func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_IncludesClosedLabeledDocsCMSPR(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case isDocuchangoProjectConfigProbe(r):
+			http.NotFound(w, r)
+		case r.URL.Path == "/repos/owner/repo/pulls":
+			if got := r.URL.Query().Get("state"); got != "all" {
+				t.Fatalf("expected state=all pull request query, got %q", got)
+			}
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{
+					"number":   42,
+					"title":    "docs: merged review docs",
+					"state":    "closed",
+					"draft":    false,
+					"head":     map[string]any{"sha": "sha-closed", "ref": "docs-closed"},
+					"html_url": "https://github.test/owner/repo/pull/42",
+					"labels": []map[string]any{
+						{"name": "hermit:rfc-ready"},
+						{"name": "adr:review"},
+					},
+				},
+				{
+					"number": 43,
+					"title":  "docs: old closed docs",
+					"state":  "closed",
+					"draft":  false,
+					"head":   map[string]any{"sha": "sha-old", "ref": "docs-old"},
+					"labels": []map[string]any{},
+				},
+			})
+		case r.URL.Path == "/repos/owner/repo/pulls/42":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"merged":          true,
+				"mergeable":       nil,
+				"mergeable_state": "unknown",
+			})
+		case r.URL.Path == "/repos/owner/repo/pulls/42/files":
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"filename": "docs-cms/adr/adr-042-closed.md", "status": "added", "additions": 10, "deletions": 1},
+			})
+		case r.URL.Path == "/repos/owner/repo/pulls/43/files":
+			t.Fatalf("unlabeled closed PR files should not be requested")
+		case r.URL.Path == "/repos/owner/repo/contents/docs-cms/adr/adr-042-closed.md":
+			writeContentResponse(t, w, "adr-042-closed.md", "---\ntitle: Closed ADR\n---\n# Closed ADR\n")
+		case handleWorkflowLabelTestRequest(w, r):
+			return
+		default:
+			t.Fatalf("unexpected request path: %s?%s", r.URL.Path, r.URL.RawQuery)
+		}
+	}))
+	defer server.Close()
+
+	client := NewHTTPGitHubRFCClient()
+	result, err := client.ListReviewReadyRFCs(context.Background(), server.URL, "owner", "repo", "docs-cms/rfcs", "hermit:rfc-ready", "token")
+	if err != nil {
+		t.Fatalf("ListReviewReadyRFCs returned error: %v", err)
+	}
+	if result.OpenPRCount != 0 {
+		t.Fatalf("open PR count = %d, want 0", result.OpenPRCount)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("expected one closed labeled review item, got %+v", result.Items)
+	}
+	item := result.Items[0]
+	if item.PRState != "closed" || !item.PRMerged {
+		t.Fatalf("expected closed merged PR metadata, got state=%q merged=%v", item.PRState, item.PRMerged)
+	}
+	if item.DocumentType != "adr" || item.Path != "docs-cms/adr/adr-042-closed.md" {
+		t.Fatalf("unexpected review document: %+v", item)
 	}
 }
 

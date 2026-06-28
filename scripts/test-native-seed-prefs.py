@@ -90,8 +90,8 @@ def test_preserves_settings_added_repository():
         accounts = read_json_pref(plist, "hermit.accounts")
         repositories = read_json_pref(plist, "hermit.repositories")
 
-        assert repositories[0]["owner"] == "meridian", repositories[0]
-        assert repositories[0]["name"] == "web", repositories[0]
+        assert repositories[0]["owner"] == "jrepp", repositories[0]
+        assert repositories[0]["name"] == "merge-god", repositories[0]
         merge_god = [
             repo
             for repo in repositories
@@ -108,20 +108,28 @@ def test_preserves_settings_added_repository():
         assert github_accounts[0]["token"] == "github-token", github_accounts[0]
 
 
-def test_seed_config_does_not_include_local_canary_repo():
+def test_seed_config_includes_merge_god_review_fixture_repo():
     config_path = REPO_ROOT / "config" / "hermit-repos.meridian.json"
     config = json.loads(config_path.read_text())
-    local_canaries = [
+    review_fixture_repos = [
         repo
         for repo in config["repositories"]
         if repo["owner"] == "jrepp" and repo["name"] == "merge-god"
     ]
-    assert local_canaries == [], local_canaries
+    assert review_fixture_repos == [
+        {
+            "account": "github",
+            "docs_path": "docs-cms/rfcs",
+            "name": "merge-god",
+            "owner": "jrepp",
+            "rfc_label": "hermit:rfc-ready",
+        }
+    ], review_fixture_repos
 
 
 def main():
     test_preserves_settings_added_repository()
-    test_seed_config_does_not_include_local_canary_repo()
+    test_seed_config_includes_merge_god_review_fixture_repo()
     print("native seed preference tests passed")
 
 
