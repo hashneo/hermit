@@ -180,8 +180,7 @@ final class AccountStore: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
 
-        let isGitHub = base.contains("github.com")
-        let healthPath = isGitHub ? "/user" : "/api/v1/health"
+        let healthPath = Self.isGitHubAPIEndpoint(base) ? "/user" : "/api/v1/health"
         guard let url = URL(string: "\(base)\(healthPath)") else { return }
 
         var req = URLRequest(url: url, timeoutInterval: 8)
@@ -201,6 +200,19 @@ final class AccountStore: ObservableObject {
     // MARK: - Private
 
     private var connectedIDs: Set<UUID> = []
+
+    private static func isGitHubAPIEndpoint(_ endpoint: String) -> Bool {
+        guard let url = URL(string: endpoint),
+              let host = url.host?.lowercased() else { return false }
+
+        let path = url.path.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return host == "api.github.com" ||
+            host == "github.com" ||
+            host.hasPrefix("github.") ||
+            host.contains(".github.") ||
+            path == "api/v3" ||
+            path.hasSuffix("/api/v3")
+    }
 
     private func save() {
         AccountStore.saveToDefaults(connections: connections)
