@@ -8,6 +8,7 @@ import AppKit
 struct MenuBarContentView: View {
     @EnvironmentObject private var appState: AppState
 #if os(macOS)
+    private let initialAnchorScreenX: CGFloat?
     @ObservedObject private var serverMgr = EmbeddedServerManager.shared
     @ObservedObject private var repoStore = RepositoryStore.shared
     @ObservedObject private var accountStore = AccountStore.shared
@@ -20,6 +21,13 @@ struct MenuBarContentView: View {
     @State private var selectedView: MenuBarPrimaryView = .dashboard
     @State private var menuAnchor = MenuBarBubbleAnchor.capture()
     @State private var pointerX = MenuBarBubbleWindowController.fallbackPointerX
+
+    init(anchorScreenX: CGFloat? = nil) {
+        self.initialAnchorScreenX = anchorScreenX
+        _menuAnchor = State(initialValue: MenuBarBubbleAnchor.capture(anchorScreenX))
+    }
+#else
+    init() {}
 #endif
 
 #if os(macOS)
@@ -46,7 +54,7 @@ struct MenuBarContentView: View {
             .clipShape(MenuBarSpeechBubbleShape(pointerX: pointerX))
             .animation(.snappy(duration: 0.22), value: renderMode)
             .onAppear {
-                menuAnchor = MenuBarBubbleAnchor.capture()
+                menuAnchor = MenuBarBubbleAnchor.capture(initialAnchorScreenX)
                 serverRepoStore.start(portProvider: { serverMgr.port }, accountIDProvider: { accountStore.connections.first?.id })
                 Task {
                     await refreshAll(force: false)
@@ -591,8 +599,8 @@ private struct MenuBarSpeechBubbleShape: InsettableShape {
 private struct MenuBarBubbleAnchor: Equatable {
     let screenX: CGFloat
 
-    static func capture() -> MenuBarBubbleAnchor {
-        MenuBarBubbleAnchor(screenX: NSEvent.mouseLocation.x)
+    static func capture(_ preferredScreenX: CGFloat? = nil) -> MenuBarBubbleAnchor {
+        MenuBarBubbleAnchor(screenX: preferredScreenX ?? NSEvent.mouseLocation.x)
     }
 }
 
