@@ -22,7 +22,7 @@ func TestRepositoryConfigCreateGetValidate(t *testing.T) {
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/validate", handler.ValidateRepository)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rotate-token", handler.RotateRepositoryToken)
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/repositories", bytes.NewBufferString(`{"owner":"hashicorp","name":"hermit","base_url":"https://github.example.com/api/v3/","personal_access_token":"ghp_12345678901234567890"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/repositories", bytes.NewBufferString(`{"owner":"hashicorp","name":"hermit","base_url":"https://github.example.com/api/v3/","personal_access_token":"ghp_12345678901234567890","rfc_label":"docs:review"}`))
 	createResp := httptest.NewRecorder()
 	mux.ServeHTTP(createResp, createReq)
 
@@ -42,6 +42,9 @@ func TestRepositoryConfigCreateGetValidate(t *testing.T) {
 	}
 	if created.BaseURL != "https://github.example.com/api/v3" {
 		t.Fatalf("base URL = %q, want normalized GitHub Enterprise API URL", created.BaseURL)
+	}
+	if created.RFCLabel != "docs:review" {
+		t.Fatalf("rfc label = %q, want docs:review", created.RFCLabel)
 	}
 
 	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/repositories/"+created.ID, nil)

@@ -23,6 +23,7 @@ func (h *Handler) CreateRepository(w http.ResponseWriter, r *http.Request) {
 		PersonalAccessToken string `json:"personal_access_token"`
 		DefaultBranch       string `json:"default_branch"`
 		DocsPathPolicy      string `json:"docs_path_policy"`
+		RFCLabel            string `json:"rfc_label"`
 	}
 
 	if err := decodeJSON(r, &payload); err != nil {
@@ -38,6 +39,7 @@ func (h *Handler) CreateRepository(w http.ResponseWriter, r *http.Request) {
 		Token:          payload.PersonalAccessToken,
 		DefaultBranch:  payload.DefaultBranch,
 		DocsPathPolicy: payload.DocsPathPolicy,
+		RFCLabel:       payload.RFCLabel,
 	})
 	if err != nil {
 		if err.Error() == "repository is already configured" {

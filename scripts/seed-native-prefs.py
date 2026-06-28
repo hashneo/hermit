@@ -181,6 +181,50 @@ def main():
                 "rfcLabel": repo.get("rfc_label", "hermit:rfc-ready"),
             })
 
+        existing_accounts = decode_existing_json("hermit.accounts")
+        existing_repositories = decode_existing_json("hermit.repositories")
+        account_endpoint_by_id = {
+            str(account.get("id")): str(account.get("endpoint", "")).rstrip("/")
+            for account in accounts
+        }
+        configured_account_endpoints = set(account_endpoint_by_id.values())
+        for account in existing_accounts:
+            endpoint = str(account.get("endpoint", "")).rstrip("/")
+            if endpoint and endpoint not in configured_account_endpoints:
+                accounts.append(account)
+                configured_account_endpoints.add(endpoint)
+                account_endpoint_by_id[str(account.get("id"))] = endpoint
+
+        existing_account_endpoint_by_id = {
+            str(account.get("id")): str(account.get("endpoint", "")).rstrip("/")
+            for account in existing_accounts
+        }
+
+        def repository_key(repo, endpoint_by_id):
+            return (
+                endpoint_by_id.get(str(repo.get("accountID")), ""),
+                str(repo.get("owner", "")).lower(),
+                str(repo.get("name", "")).lower(),
+            )
+
+        existing_by_key = {
+            repository_key(repo, existing_account_endpoint_by_id): repo
+            for repo in existing_repositories
+            if repository_key(repo, existing_account_endpoint_by_id)[0]
+        }
+        merged_repositories = []
+        configured_repo_keys = set()
+        for repo in repositories:
+            key = repository_key(repo, account_endpoint_by_id)
+            configured_repo_keys.add(key)
+            merged_repositories.append(existing_by_key.get(key, repo))
+        for repo in existing_repositories:
+            key = repository_key(repo, existing_account_endpoint_by_id)
+            if key[0] and key not in configured_repo_keys:
+                merged_repositories.append(repo)
+                configured_repo_keys.add(key)
+        repositories = merged_repositories
+
         if not accounts or not repositories:
             print(f"Warning: {repos_json_path} did not contain usable accounts/repositories; falling back to {cfg_path}")
 
