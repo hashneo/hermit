@@ -107,6 +107,109 @@ structure:
 	}
 }
 
+func TestHTTPGitHubRFCClient_ListRFCs_ProbesDocuchangoProjectConfigFormats(t *testing.T) {
+	requested := make([]string, 0)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = append(requested, r.URL.Path)
+		switch r.URL.Path {
+		case "/repos/owner/repo/contents/docs-project.yaml":
+			http.NotFound(w, r)
+		case "/repos/owner/repo/contents/docs-project.yml":
+			http.NotFound(w, r)
+		case "/repos/owner/repo/contents/docs-project.json":
+			writeContentResponse(t, w, "docs-project.json", `{
+  "project": {"id": "json-root", "name": "JSON Root"},
+  "structure": {
+    "docs_roots": ["docs"],
+    "doc_types": {
+      "rfc": {"schema": "rfc", "folders": ["proposals"]}
+    }
+  }
+}`)
+		case "/repos/owner/repo/contents/docs/proposals":
+			_ = json.NewEncoder(w).Encode([]map[string]string{
+				{"path": "docs/proposals/rfc-020-json-root.md", "type": "file"},
+			})
+		default:
+			t.Fatalf("unexpected request path: %s?%s", r.URL.Path, r.URL.RawQuery)
+		}
+	}))
+	defer server.Close()
+
+	client := NewHTTPGitHubRFCClient()
+	items, err := client.ListRFCs(context.Background(), server.URL, "owner", "repo", "main", "legacy/rfcs", "token")
+	if err != nil {
+		t.Fatalf("ListRFCs returned error: %v", err)
+	}
+	if len(items) != 1 || items[0].Path != "docs/proposals/rfc-020-json-root.md" {
+		t.Fatalf("expected JSON config RFC path, got %+v", items)
+	}
+
+	wantPrefix := []string{
+		"/repos/owner/repo/contents/docs-project.yaml",
+		"/repos/owner/repo/contents/docs-project.yml",
+		"/repos/owner/repo/contents/docs-project.json",
+	}
+	if strings.Join(requested[:len(wantPrefix)], ",") != strings.Join(wantPrefix, ",") {
+		t.Fatalf("probe order = %v, want prefix %v", requested, wantPrefix)
+	}
+}
+
+func TestHTTPGitHubRFCClient_ListRFCs_LoadsTomlRootAndYMLSubprojectConfig(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/contents/docs-project.yaml",
+			"/repos/owner/repo/contents/docs-project.yml",
+			"/repos/owner/repo/contents/docs-project.json":
+			http.NotFound(w, r)
+		case "/repos/owner/repo/contents/docs-project.toml":
+			writeContentResponse(t, w, "docs-project.toml", `
+[project]
+id = "toml-root"
+name = "TOML Root"
+
+[[subprojects]]
+path = "services/service-a"
+`)
+		case "/repos/owner/repo/contents/services/service-a/docs-project.yaml":
+			http.NotFound(w, r)
+		case "/repos/owner/repo/contents/services/service-a/docs-project.yml":
+			writeContentResponse(t, w, "docs-project.yml", `project:
+  id: service-a
+  name: Service A
+structure:
+  docs_roots: [docs]
+  doc_types:
+    rfc:
+      schema: rfc
+      folders: [proposals]
+`)
+		case "/repos/owner/repo/contents/services/service-a/docs-project.json":
+			http.NotFound(w, r)
+		case "/repos/owner/repo/contents/services/service-a/docs-project.toml":
+			http.NotFound(w, r)
+		case "/repos/owner/repo/contents/rfcs":
+			http.NotFound(w, r)
+		case "/repos/owner/repo/contents/services/service-a/docs/proposals":
+			_ = json.NewEncoder(w).Encode([]map[string]string{
+				{"path": "services/service-a/docs/proposals/rfc-021-yml-subproject.md", "type": "file"},
+			})
+		default:
+			t.Fatalf("unexpected request path: %s?%s", r.URL.Path, r.URL.RawQuery)
+		}
+	}))
+	defer server.Close()
+
+	client := NewHTTPGitHubRFCClient()
+	items, err := client.ListRFCs(context.Background(), server.URL, "owner", "repo", "main", "legacy/rfcs", "token")
+	if err != nil {
+		t.Fatalf("ListRFCs returned error: %v", err)
+	}
+	if len(items) != 1 || items[0].Path != "services/service-a/docs/proposals/rfc-021-yml-subproject.md" {
+		t.Fatalf("expected subproject RFC path from TOML/YML config, got %+v", items)
+	}
+}
+
 func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -142,7 +245,7 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *t
 				"content": "LS0tCnRpdGxlOiBSZWFkeSBQUiBSRkMKLS0tCgojIFJlYWR5IFBSIFJGQwo=",
 			})
 		default:
-			if strings.HasSuffix(r.URL.Path, "docs-project.yaml") {
+			if isDocuchangoProjectConfigProbe(r) {
 				http.NotFound(w, r)
 				return
 			}
@@ -234,7 +337,7 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_AutoLabelsRFCWithoutReadyLabel(
 		case handleWorkflowLabelTestRequest(w, r):
 			return
 		default:
-			if strings.HasSuffix(r.URL.Path, "docs-project.yaml") {
+			if isDocuchangoProjectConfigProbe(r) {
 				http.NotFound(w, r)
 				return
 			}
@@ -448,6 +551,14 @@ func handleWorkflowLabelTestRequest(w http.ResponseWriter, r *http.Request) bool
 
 func isIssueLabelPost(r *http.Request) bool {
 	return r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/repos/owner/repo/issues/") && strings.HasSuffix(r.URL.Path, "/labels")
+}
+
+func isDocuchangoProjectConfigProbe(r *http.Request) bool {
+	return r.Method == http.MethodGet &&
+		(strings.HasSuffix(r.URL.Path, "docs-project.yaml") ||
+			strings.HasSuffix(r.URL.Path, "docs-project.yml") ||
+			strings.HasSuffix(r.URL.Path, "docs-project.json") ||
+			strings.HasSuffix(r.URL.Path, "docs-project.toml"))
 }
 
 func writeContentResponse(t *testing.T, w http.ResponseWriter, name, content string) {
