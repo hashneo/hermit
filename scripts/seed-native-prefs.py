@@ -154,7 +154,7 @@ def main():
             endpoint = str(account.get("endpoint", "")).rstrip("/")
             account_id = stable_uuid("account", account_key)
             account_ids[account_key] = account_id
-            account_token = token_override or existing_token_for(endpoint) or gh_token_for(endpoint)
+            account_token = token_override or gh_token_for(endpoint) or existing_token_for(endpoint)
             next_account = {
                 "id": account_id,
                 "name": account.get("name") or account_key,
