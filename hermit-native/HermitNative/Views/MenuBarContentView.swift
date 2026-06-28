@@ -19,6 +19,40 @@ struct MenuBarContentView: View {
 
 #if os(macOS)
     var body: some View {
+        menuContent
+            .frame(width: renderMode.contentSize.width, height: renderMode.contentSize.height)
+            .padding(.top, MenuBarSpeechBubbleShape.pointerHeight)
+            .background {
+                MenuBarSpeechBubbleShape()
+                    .fill(Color(nsColor: .windowBackgroundColor))
+                    .shadow(color: .black.opacity(0.20), radius: 18, x: 0, y: 8)
+            }
+            .overlay {
+                MenuBarSpeechBubbleShape()
+                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
+            }
+            .clipShape(MenuBarSpeechBubbleShape())
+            .animation(.snappy(duration: 0.22), value: renderMode)
+            .onAppear {
+                serverRepoStore.start(portProvider: { serverMgr.port }, accountIDProvider: { accountStore.connections.first?.id })
+                Task {
+                    await refreshAll(force: false)
+                }
+            }
+            .onChange(of: serverMgr.port) { _, port in
+                Task {
+                    await refreshAll(force: true, portOverride: port)
+                }
+            }
+            .onChange(of: repoIdentitySignature) { _, _ in
+                if let selectedRepoID, !displayedRepos.contains(where: { $0.id == selectedRepoID }) {
+                    self.selectedRepoID = nil
+                }
+                Task { await refreshDashboard(force: false) }
+            }
+    }
+
+    private var menuContent: some View {
         VStack(spacing: 0) {
             header
 
@@ -33,30 +67,11 @@ struct MenuBarContentView: View {
             Divider()
             footer
         }
-        .frame(width: 780, height: 580)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear {
-            serverRepoStore.start(portProvider: { serverMgr.port }, accountIDProvider: { accountStore.connections.first?.id })
-            Task {
-                await refreshAll(force: false)
-            }
-        }
-        .onChange(of: serverMgr.port) { _, port in
-            Task {
-                await refreshAll(force: true, portOverride: port)
-            }
-        }
-        .onChange(of: repoIdentitySignature) { _, _ in
-            if let selectedRepoID, !displayedRepos.contains(where: { $0.id == selectedRepoID }) {
-                self.selectedRepoID = nil
-            }
-            Task { await refreshDashboard(force: false) }
-        }
     }
 
     private var header: some View {
         VStack(spacing: 12) {
-            HStack(alignment: .top) {
+            HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Hermit")
                         .font(.title2.weight(.semibold))
@@ -64,31 +79,11 @@ struct MenuBarContentView: View {
 
                 Spacer()
 
-                HStack(spacing: 8) {
-                    Picker("View", selection: $selectedView) {
-                        Label("Dashboard", systemImage: "rectangle.grid.2x2").tag(MenuBarPrimaryView.dashboard)
-                        Label("Monitor", systemImage: "waveform.path.ecg").tag(MenuBarPrimaryView.monitoring)
-                        Label("Settings", systemImage: "gearshape").tag(MenuBarPrimaryView.settings)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 300)
+                headerControls
+            }
 
-                    Button {
-                        Task { await refreshAll(force: true) }
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(selectedView != .dashboard)
-
-                    Button {
-                        NewRFCWindowManager.shared.open(appState: appState)
-                    } label: {
-                        Label("New RFC", systemImage: "plus")
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
+            if renderMode == .compact {
+                viewPicker
             }
 
             if let issue = serverRepoStore.issue {
@@ -102,11 +97,71 @@ struct MenuBarContentView: View {
         .padding(16)
     }
 
+    private var viewPicker: some View {
+        Picker("View", selection: $selectedView) {
+            Label("Dashboard", systemImage: "rectangle.grid.2x2").tag(MenuBarPrimaryView.dashboard)
+            Label("Monitor", systemImage: "waveform.path.ecg").tag(MenuBarPrimaryView.monitoring)
+            Label("Settings", systemImage: "gearshape").tag(MenuBarPrimaryView.settings)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(width: renderMode == .compact ? 280 : 300)
+    }
+
+    @ViewBuilder
+    private var headerControls: some View {
+        if renderMode == .compact {
+            HStack(spacing: 8) {
+                Button {
+                    Task { await refreshAll(force: true) }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .labelStyle(.iconOnly)
+                .help("Refresh")
+                .buttonStyle(.bordered)
+                .disabled(selectedView != .dashboard)
+
+                Button {
+                    NewRFCWindowManager.shared.open(appState: appState)
+                } label: {
+                    Label("New RFC", systemImage: "plus")
+                }
+                .labelStyle(.iconOnly)
+                .help("New RFC")
+                .buttonStyle(.borderedProminent)
+            }
+        } else {
+            HStack(spacing: 8) {
+                viewPicker
+
+                Button {
+                    Task { await refreshAll(force: true) }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .disabled(selectedView != .dashboard)
+
+                Button {
+                    NewRFCWindowManager.shared.open(appState: appState)
+                } label: {
+                    Label("New RFC", systemImage: "plus")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
     @ViewBuilder
     private var content: some View {
         switch selectedView {
         case .dashboard:
-            dashboardContent
+            if renderMode == .compact {
+                compactDashboardContent
+            } else {
+                dashboardContent
+            }
         case .monitoring:
             MonitoringTabView(
                 repositories: displayedRepos,
@@ -119,6 +174,69 @@ struct MenuBarContentView: View {
         case .settings:
             SettingsView(embedded: true)
                 .environmentObject(appState)
+        }
+    }
+
+    @ViewBuilder
+    private var compactDashboardContent: some View {
+        if displayedRepos.isEmpty {
+            ContentUnavailableView(
+                "No repositories configured",
+                systemImage: "shippingbox",
+                description: Text("Add a repository in Settings to populate the Hermit popout.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    CompactAllRepositoriesSummary(
+                        repoCount: displayedRepos.count,
+                        loadedCount: loadedRepositoryCount,
+                        pendingReviewCount: aggregatePendingReviewCount,
+                        openPRCount: aggregateOpenPRCount,
+                        publishedCount: aggregatePublishedCount,
+                        serverStatusText: serverStatusText,
+                        serverStatusColor: serverStatusColor
+                    )
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Repositories")
+                                .font(.headline)
+                            Spacer()
+                            Menu {
+                                Picker("Sort", selection: $repoSort) {
+                                    ForEach(RepoSortOption.allCases) { option in
+                                        Text(option.rawValue).tag(option)
+                                    }
+                                }
+                            } label: {
+                                Label(repoSort.rawValue, systemImage: "arrow.up.arrow.down")
+                                    .font(.caption)
+                            }
+                            .menuStyle(.borderlessButton)
+                        }
+
+                        ForEach(filteredOrderedRepos.prefix(4)) { repo in
+                            RepoFilterRow(
+                                repo: repo,
+                                state: dashboardStore.state(for: repo.id),
+                                isSelected: false,
+                                isActive: repo.id == repoStore.repositories.first?.id,
+                                onSelect: { selectedRepoID = repo.id }
+                            )
+                        }
+                    }
+
+                    CompactReviewQueue(
+                        items: Array(pendingRFCItems.prefix(3)),
+                        totalCount: pendingRFCItems.count,
+                        onOpen: { item in openPRSummary(item.rfc) }
+                    )
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 14)
+            }
         }
     }
 
@@ -232,6 +350,14 @@ struct MenuBarContentView: View {
 
     private var displayedRepos: [Repository] {
         serverRepoStore.repositories.isEmpty ? repoStore.repositories : serverRepoStore.repositories
+    }
+
+    private var renderMode: MenuBarRenderMode {
+        if selectedView != .dashboard { return .normal }
+        if selectedRepoID != nil { return .normal }
+        if advertiser.pendingInvitation != nil { return .normal }
+        if serverRepoStore.issue != nil { return .normal }
+        return .compact
     }
 
     private var orderedRepos: [Repository] {
@@ -377,6 +503,78 @@ struct MenuBarContentView: View {
 #endif
 }
 
+private struct MenuBarSpeechBubbleShape: InsettableShape {
+    static let pointerHeight: CGFloat = 16
+
+    private static let pointerWidth: CGFloat = 42
+    private static let pointerCenterX: CGFloat = 54
+    private static let cornerRadius: CGFloat = 24
+
+    var insetAmount: CGFloat = 0
+
+    func path(in rect: CGRect) -> Path {
+        let bounds = rect.insetBy(dx: insetAmount, dy: insetAmount)
+        let bodyRect = CGRect(
+            x: bounds.minX,
+            y: bounds.minY + Self.pointerHeight,
+            width: bounds.width,
+            height: max(0, bounds.height - Self.pointerHeight)
+        )
+        let radius = min(Self.cornerRadius, bodyRect.width / 2, bodyRect.height / 2)
+        let halfPointer = Self.pointerWidth / 2
+        let pointerCenterX = min(
+            max(bodyRect.minX + Self.pointerCenterX, bodyRect.minX + radius + halfPointer),
+            bodyRect.maxX - radius - halfPointer
+        )
+
+        var path = Path()
+        path.move(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY))
+        path.addLine(to: CGPoint(x: pointerCenterX - halfPointer, y: bodyRect.minY))
+        path.addLine(to: CGPoint(x: pointerCenterX, y: bounds.minY))
+        path.addLine(to: CGPoint(x: pointerCenterX + halfPointer, y: bodyRect.minY))
+        path.addLine(to: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.minY))
+        path.addArc(
+            center: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.minY + radius),
+            radius: radius,
+            startAngle: .degrees(-90),
+            endAngle: .degrees(0),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: bodyRect.maxX, y: bodyRect.maxY - radius))
+        path.addArc(
+            center: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.maxY - radius),
+            radius: radius,
+            startAngle: .degrees(0),
+            endAngle: .degrees(90),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.maxY))
+        path.addArc(
+            center: CGPoint(x: bodyRect.minX + radius, y: bodyRect.maxY - radius),
+            radius: radius,
+            startAngle: .degrees(90),
+            endAngle: .degrees(180),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: bodyRect.minX, y: bodyRect.minY + radius))
+        path.addArc(
+            center: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY + radius),
+            radius: radius,
+            startAngle: .degrees(180),
+            endAngle: .degrees(270),
+            clockwise: false
+        )
+        path.closeSubpath()
+        return path
+    }
+
+    func inset(by amount: CGFloat) -> MenuBarSpeechBubbleShape {
+        var shape = self
+        shape.insetAmount += amount
+        return shape
+    }
+}
+
 // MARK: - Repo Dashboard Views
 
 #if os(macOS)
@@ -384,6 +582,20 @@ private enum MenuBarPrimaryView {
     case dashboard
     case monitoring
     case settings
+}
+
+private enum MenuBarRenderMode {
+    case compact
+    case normal
+
+    var contentSize: CGSize {
+        switch self {
+        case .compact:
+            return CGSize(width: 560, height: 470)
+        case .normal:
+            return CGSize(width: 780, height: 580)
+        }
+    }
 }
 
 private enum RepoSortOption: String, CaseIterable, Identifiable {
@@ -400,6 +612,115 @@ private enum RepoFilterOption: String, CaseIterable, Identifiable {
     case needsAttention = "Needs attention"
 
     var id: String { rawValue }
+}
+
+private struct CompactAllRepositoriesSummary: View {
+    let repoCount: Int
+    let loadedCount: Int
+    let pendingReviewCount: Int
+    let openPRCount: Int
+    let publishedCount: Int
+    let serverStatusText: String
+    let serverStatusColor: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("All repositories")
+                    .font(.headline)
+                Spacer()
+                StatusCapsule(title: "\(loadedCount)/\(repoCount) loaded", systemImage: "shippingbox", tint: .secondary)
+            }
+
+            HStack(spacing: 8) {
+                CompactMetricTile(title: "Review", value: pendingReviewCount, systemImage: "text.bubble", tint: .orange)
+                CompactMetricTile(title: "Open PRs", value: openPRCount, systemImage: "arrow.triangle.pull", tint: .blue)
+                CompactMetricTile(title: "Published", value: publishedCount, systemImage: "doc.text", tint: .green)
+            }
+
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(serverStatusColor)
+                    .frame(width: 8, height: 8)
+                Text(serverStatusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct CompactMetricTile: View {
+    let title: String
+    let value: Int
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tint)
+            Text("\(value)")
+                .font(.title2.weight(.semibold))
+                .monospacedDigit()
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+private struct CompactReviewQueue: View {
+    let items: [PendingRFCItem]
+    let totalCount: Int
+    let onOpen: (PendingRFCItem) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Review queue")
+                    .font(.headline)
+                Spacer()
+                Text("\(totalCount)")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+
+            if items.isEmpty {
+                Text("No RFC pull requests are currently waiting for review.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.secondary.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(items) { item in
+                        Button {
+                            onOpen(item)
+                        } label: {
+                            PRSummaryRow(rfc: item.rfc, repoName: item.repo.fullName)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
 }
 
 private struct PairingInviteBanner: View {
