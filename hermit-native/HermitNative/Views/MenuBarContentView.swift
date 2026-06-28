@@ -18,7 +18,7 @@ struct MenuBarContentView: View {
     @StateObject private var dashboardStore = MenuBarDashboardStore()
     @State private var selectedRepoID: UUID? = nil
     @State private var repoSort: RepoSortOption = .reviewCount
-    @State private var repoFilter: RepoFilterOption = .all
+    @State private var repoFilter: RepoFilterOption = .pendingReview
     @State private var selectedView: MenuBarPrimaryView = .dashboard
     @State private var menuAnchor = MenuBarBubbleAnchor.capture()
     @State private var pointerX = MenuBarBubbleWindowController.fallbackPointerX
