@@ -11,7 +11,7 @@ doc_uuid: a1b2c3d4-0003-4000-8000-100000000008
 
 # Summary
 
-This RFC defines the design and behaviour of the Hermit macOS menu bar app — a persistent `NSStatusItem` popover that gives engineers instant access to the RFC catalog, document reading, and AI-assisted RFC creation without leaving their current context. The menu bar app is read-only for RFC review; full commenting is available on iPadOS (rfc-009).
+This RFC defines the design and behaviour of the Hermit macOS menu bar app — a persistent `MenuBarExtra` window that gives engineers instant access to the RFC catalog, document reading, settings, and AI-assisted RFC creation without leaving their current context. The menu bar app is read-only for RFC review; full commenting is available on iPadOS (rfc-009).
 
 # Motivation
 
@@ -21,38 +21,27 @@ The secondary motivation is RFC creation. Engineers often have an idea for an RF
 
 # Detailed Design
 
-## NSStatusItem Popover
+## Menu Bar Window
 
-The app registers an `NSStatusItem` in the macOS menu bar on launch. The status item uses a custom icon (the Hermit glyph). On click, it presents an `NSPopover` anchored to the status bar item.
+The app registers a `MenuBarExtra` in the macOS menu bar on launch. On click, it presents the main Hermit window with dashboard, monitoring, and embedded settings views.
 
 ```swift
 // HermitApp.swift (macOS conditional)
 @main struct HermitApp: App {
     #if os(macOS)
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    var body: some Scene { Settings { SettingsView() } }
+    var body: some Scene {
+        MenuBarExtra("Hermit", systemImage: "doc.text.magnifyingglass") {
+            MenuBarContentView()
+        }
+        .menuBarExtraStyle(.window)
+    }
     #else
     var body: some Scene { WindowGroup { iPadRootView() } }
     #endif
 }
-
-class AppDelegate: NSObject, NSApplicationDelegate {
-    var statusItem: NSStatusItem!
-    var popover: NSPopover!
-
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(named: "HermitMenuBarIcon")
-        statusItem.button?.action = #selector(togglePopover)
-        popover = NSPopover()
-        popover.contentSize = NSSize(width: 520, height: 680)
-        popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: MenuBarPopover())
-    }
-}
 ```
 
-### Popover Dimensions
+### Menu Window Dimensions
 
 - Default: **520 × 680 pts**
 - Minimum: **400 × 500 pts** (user-resizable)
@@ -105,7 +94,7 @@ When an RFC is selected, the popover expands horizontally (or the content area s
 | Button | Action |
 |---|---|
 | ↗ (open external) | Opens current RFC on GitHub in default browser |
-| ⚙ (settings) | Opens Settings window (separate `NSWindow`) |
+| ⚙ (settings) | Selects the embedded Settings tab in the main Hermit menu window |
 | 📌 (pin) | Detaches popover into a floating `NSPanel` |
 
 ## RFC List
@@ -140,21 +129,21 @@ Loading state: a skeleton shimmer is shown while the API call is in flight. Erro
 
 ## New RFC Button
 
-The `[+ New RFC]` button at the bottom of the list opens the RFC interview flow (rfc-010) inside the popover. The user can choose text or voice mode. On macOS, the popover expands to accommodate the interview UI or the interview opens in a dedicated `NSPanel`.
+The `[+ New RFC]` button at the bottom of the list opens the RFC interview flow (rfc-010) inside the menu window. The user can choose text or voice mode. On macOS, the menu window expands to accommodate the interview UI or the interview opens in a dedicated `NSPanel`.
 
 ## Background Polling and Badge
 
 The app polls GitHub for new PR-backed RFCs every **15 minutes** while the app is running (using a `Task` with a `clock.sleep` loop). The polling interval is configurable in Settings (5 / 15 / 30 / 60 minutes, or Off).
 
 When new PR-backed RFCs are found (not seen before):
-- The `NSStatusItem` button shows a badge dot (custom drawn on the icon via `NSImage` compositing).
+- The menu bar extra shows a badge dot (custom drawn on the icon via `NSImage` compositing).
 - A macOS `UNUserNotification` banner is sent: *"New RFC ready for review: {title}"*.
 
 The set of "seen" RFC IDs is persisted to `UserDefaults` and cleared when the list is opened.
 
-## Settings Window
+## Embedded Settings
 
-A standard macOS `Settings` scene with three tabs:
+Settings are part of the main Hermit menu bar window, not a separate macOS `Settings` scene or standalone `NSWindow`. The Settings segmented control opens an embedded `SettingsView` with these tabs:
 
 ### Account
 - GitHub PAT field (write-only display, shows last 4 chars)
@@ -180,7 +169,7 @@ The app runs as an `LSUIElement` (menu bar only, no Dock icon, no main window). 
 <true/>
 ```
 
-On first launch, if no PAT is configured, the Settings window opens automatically. The popover cannot be used until a valid PAT is stored.
+On first launch, if no PAT is configured, the menu window starts in the embedded Settings view. The dashboard cannot load repository data until a valid PAT is stored.
 
 # Drawbacks
 
