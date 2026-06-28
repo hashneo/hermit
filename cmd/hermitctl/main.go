@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -61,6 +62,72 @@ type validationCheck struct {
 type listRepositoriesResponse struct {
 	Items []repositoryConfig `json:"items"`
 	Total int                `json:"total"`
+}
+
+type repositoryRFCListResponse struct {
+	Items   []rfcCatalogItem     `json:"items"`
+	Total   int                  `json:"total"`
+	Summary repositoryRFCSummary `json:"summary"`
+}
+
+type repositoryRFCSummary struct {
+	PendingReviewCount int           `json:"pending_review_count"`
+	OpenPRCount        int           `json:"open_pr_count"`
+	PRStates           prStateCounts `json:"pr_states"`
+}
+
+type prStateCounts struct {
+	Ready       int `json:"ready"`
+	Conflicted  int `json:"conflicted"`
+	Failed      int `json:"failed"`
+	NeedsReview int `json:"needs_review"`
+}
+
+type rfcCatalogItem struct {
+	ID             string   `json:"id"`
+	Title          string   `json:"title"`
+	Path           string   `json:"path"`
+	SourceType     string   `json:"source_type"`
+	SourceLabel    string   `json:"source_label"`
+	PRNumber       int      `json:"pr_number,omitempty"`
+	PRTitle        string   `json:"pr_title,omitempty"`
+	PRState        string   `json:"pr_state,omitempty"`
+	PRMerged       bool     `json:"pr_merged,omitempty"`
+	HeadSHA        string   `json:"head_sha,omitempty"`
+	HeadRef        string   `json:"head_ref,omitempty"`
+	Mergeable      *bool    `json:"mergeable,omitempty"`
+	MergeableState string   `json:"mergeable_state,omitempty"`
+	DocumentType   string   `json:"document_type,omitempty"`
+	Labels         []string `json:"labels,omitempty"`
+	ChangedFiles   int      `json:"changed_files,omitempty"`
+	Additions      int      `json:"additions,omitempty"`
+	Deletions      int      `json:"deletions,omitempty"`
+	HTMLURL        string   `json:"html_url,omitempty"`
+}
+
+type reviewDocsPR struct {
+	Number      int              `json:"number"`
+	Title       string           `json:"title"`
+	State       string           `json:"state"`
+	Merged      bool             `json:"merged"`
+	HeadRef     string           `json:"head_ref,omitempty"`
+	HTMLURL     string           `json:"html_url,omitempty"`
+	MergeState  string           `json:"mergeable_state,omitempty"`
+	Changed     int              `json:"changed_files"`
+	Additions   int              `json:"additions"`
+	Deletions   int              `json:"deletions"`
+	DocumentMix map[string]int   `json:"document_mix"`
+	Documents   []rfcCatalogItem `json:"documents"`
+}
+
+type reviewDocsState struct {
+	RepositoryID       string               `json:"repository_id"`
+	PendingReviewCount int                  `json:"pending_review_count"`
+	OpenPRCount        int                  `json:"open_pr_count"`
+	PRStates           prStateCounts        `json:"pr_states"`
+	PullRequests       []reviewDocsPR       `json:"pull_requests"`
+	Documents          []rfcCatalogItem     `json:"documents"`
+	Summary            repositoryRFCSummary `json:"summary"`
 }
 
 type apiError struct {
@@ -195,6 +262,8 @@ func (c cli) runRepo(args []string, stdin io.Reader, stdout, stderr io.Writer) e
 		return c.repoRemove(args[1:], stdout)
 	case "validate":
 		return c.repoValidate(args[1:], stdout)
+	case "review-docs":
+		return c.repoReviewDocs(args[1:], stdout, stderr)
 	case "rotate-token":
 		return c.repoRotateToken(args[1:], stdin, stdout, stderr)
 	case "debug":
@@ -553,6 +622,182 @@ func (c cli) repoValidate(args []string, stdout io.Writer) error {
 		return err
 	}
 	return printValidation(stdout, validation, c.jsonOut)
+}
+
+func (c cli) repoReviewDocs(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("repo review-docs", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	expectDocs := fs.Int("expect-docs", -1, "expected total docs-cms review document count")
+	expectPR := fs.Int("expect-pr", 0, "specific pull request number that must be present")
+	expectPRDocs := fs.Int("expect-pr-docs", -1, "expected review document count for --expect-pr")
+	expectPRState := fs.String("expect-pr-state", "", "expected top-level PR state for --expect-pr")
+	expectMerged := fs.String("expect-merged", "", "expected merged state for --expect-pr: true or false")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	id, err := singleID("repo review-docs", fs.Args())
+	if err != nil {
+		return err
+	}
+
+	state, err := c.fetchReviewDocsState(id)
+	if err != nil {
+		return err
+	}
+	if err := validateReviewDocsExpectations(state, reviewDocsExpectations{
+		expectDocs:    *expectDocs,
+		expectPR:      *expectPR,
+		expectPRDocs:  *expectPRDocs,
+		expectPRState: strings.TrimSpace(*expectPRState),
+		expectMerged:  strings.TrimSpace(*expectMerged),
+	}); err != nil {
+		return err
+	}
+
+	if c.jsonOut {
+		return printJSON(stdout, state)
+	}
+	printReviewDocsState(stdout, state)
+	return nil
+}
+
+func (c cli) fetchReviewDocsState(id string) (reviewDocsState, error) {
+	var page repositoryRFCListResponse
+	if err := c.do(http.MethodGet, "/api/v1/repositories/"+url.PathEscape(id)+"/rfcs", nil, &page); err != nil {
+		return reviewDocsState{}, err
+	}
+
+	state := reviewDocsState{
+		RepositoryID:       id,
+		PendingReviewCount: page.Summary.PendingReviewCount,
+		OpenPRCount:        page.Summary.OpenPRCount,
+		PRStates:           page.Summary.PRStates,
+		Summary:            page.Summary,
+	}
+	byPR := map[int]*reviewDocsPR{}
+	for _, item := range page.Items {
+		if item.SourceType != "pull_request" || item.PRNumber == 0 {
+			continue
+		}
+		state.Documents = append(state.Documents, item)
+		group := byPR[item.PRNumber]
+		if group == nil {
+			group = &reviewDocsPR{
+				Number:      item.PRNumber,
+				Title:       firstNonEmpty(item.PRTitle, item.Title),
+				State:       firstNonEmpty(item.PRState, "open"),
+				Merged:      item.PRMerged,
+				HeadRef:     item.HeadRef,
+				HTMLURL:     item.HTMLURL,
+				MergeState:  item.MergeableState,
+				Changed:     item.ChangedFiles,
+				Additions:   item.Additions,
+				Deletions:   item.Deletions,
+				DocumentMix: map[string]int{},
+			}
+			byPR[item.PRNumber] = group
+		}
+		docType := strings.TrimSpace(item.DocumentType)
+		if docType == "" {
+			docType = "document"
+		}
+		group.DocumentMix[docType]++
+		group.Documents = append(group.Documents, item)
+	}
+	for _, group := range byPR {
+		sortReviewDocuments(group.Documents)
+		state.PullRequests = append(state.PullRequests, *group)
+	}
+	sort.Slice(state.PullRequests, func(i, j int) bool {
+		return state.PullRequests[i].Number < state.PullRequests[j].Number
+	})
+	sortReviewDocuments(state.Documents)
+	return state, nil
+}
+
+type reviewDocsExpectations struct {
+	expectDocs    int
+	expectPR      int
+	expectPRDocs  int
+	expectPRState string
+	expectMerged  string
+}
+
+func validateReviewDocsExpectations(state reviewDocsState, expected reviewDocsExpectations) error {
+	if expected.expectDocs >= 0 && len(state.Documents) != expected.expectDocs {
+		return fmt.Errorf("review docs count = %d, want %d", len(state.Documents), expected.expectDocs)
+	}
+	if expected.expectPR == 0 {
+		if expected.expectPRDocs >= 0 || expected.expectPRState != "" || expected.expectMerged != "" {
+			return errors.New("--expect-pr is required when asserting PR-specific review state")
+		}
+		return nil
+	}
+	var pr *reviewDocsPR
+	for i := range state.PullRequests {
+		if state.PullRequests[i].Number == expected.expectPR {
+			pr = &state.PullRequests[i]
+			break
+		}
+	}
+	if pr == nil {
+		return fmt.Errorf("PR #%d not found in docs review state", expected.expectPR)
+	}
+	if expected.expectPRDocs >= 0 && len(pr.Documents) != expected.expectPRDocs {
+		return fmt.Errorf("PR #%d review docs count = %d, want %d", expected.expectPR, len(pr.Documents), expected.expectPRDocs)
+	}
+	if expected.expectPRState != "" && !strings.EqualFold(pr.State, expected.expectPRState) {
+		return fmt.Errorf("PR #%d state = %s, want %s", expected.expectPR, pr.State, expected.expectPRState)
+	}
+	if expected.expectMerged != "" {
+		wantMerged, err := parseBoolExpectation(expected.expectMerged)
+		if err != nil {
+			return err
+		}
+		if pr.Merged != wantMerged {
+			return fmt.Errorf("PR #%d merged = %t, want %t", expected.expectPR, pr.Merged, wantMerged)
+		}
+	}
+	return nil
+}
+
+func printReviewDocsState(w io.Writer, state reviewDocsState) {
+	fmt.Fprintf(w, "repository: %s\n", state.RepositoryID)
+	fmt.Fprintf(w, "documents waiting for review: %d\n", len(state.Documents))
+	fmt.Fprintf(w, "open PRs: %d\n", state.OpenPRCount)
+	for _, pr := range state.PullRequests {
+		merged := ""
+		if pr.Merged {
+			merged = " merged"
+		}
+		fmt.Fprintf(w, "PR #%d\t%s%s\t%d docs\t%d files\t+%d -%d\t%s\n", pr.Number, pr.State, merged, len(pr.Documents), pr.Changed, pr.Additions, pr.Deletions, pr.Title)
+		for _, doc := range pr.Documents {
+			fmt.Fprintf(w, "  - %s\t%s\t%s\n", firstNonEmpty(doc.DocumentType, "document"), doc.Title, doc.Path)
+		}
+	}
+}
+
+func sortReviewDocuments(items []rfcCatalogItem) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].PRNumber != items[j].PRNumber {
+			return items[i].PRNumber < items[j].PRNumber
+		}
+		if items[i].DocumentType != items[j].DocumentType {
+			return items[i].DocumentType < items[j].DocumentType
+		}
+		return items[i].Path < items[j].Path
+	})
+}
+
+func parseBoolExpectation(value string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "yes", "1":
+		return true, nil
+	case "false", "no", "0":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid boolean expectation %q", value)
+	}
 }
 
 func (c cli) repoRotateToken(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -1389,7 +1634,7 @@ func usage(w io.Writer) {
 
 func repoUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: hermitctl repo <command>")
-	fmt.Fprintln(w, "commands: add, add-local, export-local, import-local, bind-credential, list, get, remove, validate, rotate-token, debug")
+	fmt.Fprintln(w, "commands: add, add-local, export-local, import-local, bind-credential, list, get, remove, validate, review-docs, rotate-token, debug")
 }
 
 func min(a, b int) int {
