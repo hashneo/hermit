@@ -2473,6 +2473,8 @@ private final class MenuBarDashboardStore: ObservableObject {
                 menuBarDebugLog("[MenuBarDashboardStore] load stale-success ignored repo=\(repo.fullName) generation=\(generation)")
                 return
             }
+            let syncedAt = Date()
+            RepositoryStore.shared.markSynced(repo, at: syncedAt)
             stats.recordSuccess()
             setState(
                 RepoState(
@@ -2482,7 +2484,7 @@ private final class MenuBarDashboardStore: ObservableObject {
                     pendingReviewCount: summary.pendingReviewCount,
                     openPRCount: summary.openPRCount,
                     prStateCounts: summary.prStateCounts,
-                    prStatsLoadedAt: Date()
+                    prStatsLoadedAt: syncedAt
                 ),
                 for: repo,
                 reason: "load-success"

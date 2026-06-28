@@ -62,6 +62,7 @@ struct Repository: Identifiable, Codable, Equatable {
     var name:      String         // e.g. "hermit-rfcs"
     var docsPath:  String         // e.g. "docs-cms/rfcs"
     var rfcLabel:  String         // e.g. "hermit:rfc-ready"
+    var lastSyncedAt: Date? = nil
 
     var fullName: String { "\(owner)/\(name)" }
 }
@@ -268,6 +269,12 @@ final class RepositoryStore: ObservableObject {
         NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
     }
 
+    func markSynced(_ repo: Repository, at date: Date = Date()) {
+        guard let idx = repositories.firstIndex(where: { $0.id == repo.id }) else { return }
+        repositories[idx].lastSyncedAt = date
+        save()
+    }
+
     func remove(_ repo: Repository) {
         repositories.removeAll { $0.id == repo.id }
         save()
@@ -297,9 +304,10 @@ final class RepositoryStore: ObservableObject {
                 $0.name.lowercased()  == inbound.name.lowercased()
             }) {
                 // Preserve the existing UUID; update mutable fields.
-                return Repository(id: existing.id, accountID: existing.accountID,
+                return Repository(id: existing.id, serverID: inbound.serverID, accountID: existing.accountID,
                                   owner: inbound.owner, name: inbound.name,
-                                  docsPath: inbound.docsPath, rfcLabel: inbound.rfcLabel)
+                                  docsPath: inbound.docsPath, rfcLabel: inbound.rfcLabel,
+                                  lastSyncedAt: existing.lastSyncedAt)
             }
             return inbound
         }
