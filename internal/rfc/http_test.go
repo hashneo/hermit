@@ -181,6 +181,12 @@ func TestListRepositoryRFCs_IncludesSummary(t *testing.T) {
 		Summary struct {
 			PendingReviewCount int `json:"pending_review_count"`
 			OpenPRCount        int `json:"open_pr_count"`
+			PRStates           struct {
+				Ready       int `json:"ready"`
+				Conflicted  int `json:"conflicted"`
+				Failed      int `json:"failed"`
+				NeedsReview int `json:"needs_review"`
+			} `json:"pr_states"`
 		} `json:"summary"`
 	}
 	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
@@ -191,6 +197,9 @@ func TestListRepositoryRFCs_IncludesSummary(t *testing.T) {
 	}
 	if payload.Summary.OpenPRCount != 1 {
 		t.Fatalf("open_pr_count = %d, want 1", payload.Summary.OpenPRCount)
+	}
+	if payload.Summary.PRStates.NeedsReview != 1 {
+		t.Fatalf("pr_states.needs_review = %d, want 1", payload.Summary.PRStates.NeedsReview)
 	}
 	if payload.Total != len(payload.Items) {
 		t.Fatalf("total = %d, want %d", payload.Total, len(payload.Items))

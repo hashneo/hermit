@@ -88,6 +88,14 @@ type ReviewReadyRFCItem struct {
 type ReviewReadyRFCResult struct {
 	Items       []ReviewReadyRFCItem
 	OpenPRCount int
+	PRStates    PRStateCounts
+}
+
+type PRStateCounts struct {
+	Ready       int `json:"ready"`
+	Conflicted  int `json:"conflicted"`
+	Failed      int `json:"failed"`
+	NeedsReview int `json:"needs_review"`
 }
 
 type HTTPGitHubRFCClient struct {
@@ -267,10 +275,22 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 
 	items := make([]ReviewReadyRFCItem, 0)
 	openPRCount := len(pulls)
+	var prStates PRStateCounts
 	for _, pr := range pulls {
 		if pr.Draft {
+			prStates.add(classifyPRState(pr.Draft, pr.Mergeable, pr.MergeableState))
 			continue
 		}
+
+		mergeable := pr.Mergeable
+		mergeableState := strings.TrimSpace(pr.MergeableState)
+		if mergeable == nil && mergeableState == "" {
+			if detailMergeable, detailState, detailErr := c.getPullRequestMergeState(ctx, apiBase, owner, name, pr.Number, token); detailErr == nil {
+				mergeable = detailMergeable
+				mergeableState = detailState
+			}
+		}
+		prStates.add(classifyPRState(pr.Draft, mergeable, mergeableState))
 
 		labelNames := make([]string, 0, len(pr.Labels))
 		for _, l := range pr.Labels {
@@ -319,15 +339,6 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 			continue // no RFC file in this PR
 		}
 
-		mergeable := pr.Mergeable
-		mergeableState := strings.TrimSpace(pr.MergeableState)
-		if mergeable == nil && mergeableState == "" {
-			if detailMergeable, detailState, detailErr := c.getPullRequestMergeState(ctx, apiBase, owner, name, pr.Number, token); detailErr == nil {
-				mergeable = detailMergeable
-				mergeableState = detailState
-			}
-		}
-
 		title := strings.TrimSuffix(path.Base(primaryFile.Filename), ".md")
 		view, err := c.GetRFC(ctx, baseURL, owner, name, pr.Head.SHA, primaryFile.Filename, token)
 		if err == nil {
@@ -351,7 +362,54 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 		return items[i].PRNumber < items[j].PRNumber
 	})
 
-	return ReviewReadyRFCResult{Items: items, OpenPRCount: openPRCount}, nil
+	return ReviewReadyRFCResult{Items: items, OpenPRCount: openPRCount, PRStates: prStates}, nil
+}
+
+func (counts *PRStateCounts) add(state string) {
+	switch state {
+	case "ready":
+		counts.Ready++
+	case "conflicted":
+		counts.Conflicted++
+	case "failed":
+		counts.Failed++
+	default:
+		counts.NeedsReview++
+	}
+}
+
+func classifyPRState(draft bool, mergeable *bool, mergeableState string) string {
+	normalizedState := strings.ToLower(strings.TrimSpace(mergeableState))
+	if draft {
+		return "needs_review"
+	}
+	if strings.Contains(normalizedState, "dirty") || strings.Contains(normalizedState, "conflict") {
+		return "conflicted"
+	}
+	switch normalizedState {
+	case "clean":
+		return "ready"
+	case "unstable":
+		return "failed"
+	case "blocked", "behind", "has_hooks", "unknown":
+		return "needs_review"
+	case "":
+		if mergeable != nil {
+			if *mergeable {
+				return "ready"
+			}
+			return "conflicted"
+		}
+		return "needs_review"
+	default:
+		if mergeable != nil {
+			if *mergeable {
+				return "ready"
+			}
+			return "conflicted"
+		}
+		return "needs_review"
+	}
 }
 
 func (c *HTTPGitHubRFCClient) getPullRequestMergeState(ctx context.Context, apiBase, owner, name string, prNumber int, token string) (*bool, string, error) {

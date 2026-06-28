@@ -221,6 +221,8 @@ struct MenuBarContentView: View {
                         pendingReviewCount: aggregatePendingReviewCount,
                         openPRCount: aggregateOpenPRCount,
                         publishedCount: aggregatePublishedCount,
+                        prStateSummaries: aggregatePRStateSummaries,
+                        prStatsFreshness: aggregatePRStatsFreshness,
                         serverStatusText: serverStatusText,
                         serverStatusColor: serverStatusColor
                     )
@@ -331,6 +333,8 @@ struct MenuBarContentView: View {
                         pendingReviewCount: aggregatePendingReviewCount,
                         openPRCount: aggregateOpenPRCount,
                         publishedCount: aggregatePublishedCount,
+                        prStateSummaries: aggregatePRStateSummaries,
+                        prStatsFreshness: aggregatePRStatsFreshness,
                         onRefresh: { Task { await refreshDashboard(force: true) } }
                     )
                     PRSummarySection(
@@ -453,6 +457,27 @@ struct MenuBarContentView: View {
             if lhsPR != rhsPR { return lhsPR > rhsPR }
             return lhs.rfc.title < rhs.rfc.title
         }
+    }
+
+    private var aggregatePRStateSummaries: [PRStateSummary] {
+        var counts = PRStateCounts.empty
+        for repo in displayedRepos {
+            counts.add(dashboardStore.state(for: repo.id)?.prStateCounts ?? .empty)
+        }
+        return PRStateSummary.summarize(counts)
+    }
+
+    private var aggregatePRStatsFreshness: PRStatsFreshness {
+        let states = displayedRepos.compactMap { dashboardStore.state(for: $0.id) }
+        let loadedStates = states.filter { $0.prStatsLoadedAt != nil && !$0.isLoading && $0.issue == nil }
+        let newestLoadedAt = loadedStates.compactMap(\.prStatsLoadedAt).max()
+        let isLoading = displayedRepos.count != loadedStates.count || states.contains { $0.isLoading }
+        return PRStatsFreshness(
+            loadedRepositoryCount: loadedStates.count,
+            totalRepositoryCount: displayedRepos.count,
+            newestLoadedAt: newestLoadedAt,
+            isLoading: isLoading
+        )
     }
 
     private var aggregatePendingReviewCount: Int {
@@ -764,6 +789,8 @@ private struct CompactAllRepositoriesSummary: View {
     let pendingReviewCount: Int
     let openPRCount: Int
     let publishedCount: Int
+    let prStateSummaries: [PRStateSummary]
+    let prStatsFreshness: PRStatsFreshness
     let serverStatusText: String
     let serverStatusColor: Color
 
@@ -799,6 +826,9 @@ private struct CompactAllRepositoriesSummary: View {
                 CountBadge(value: openPRCount, label: "PRs", tint: .blue)
                 CountBadge(value: publishedCount, label: "published", tint: .secondary)
             }
+
+            PRStateSummaryStrip(summaries: prStateSummaries)
+            PRStatsFreshnessRow(freshness: prStatsFreshness)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1250,6 +1280,23 @@ private struct PRStateSummarySection: View {
     }
 
     private var summaries: [PRStateSummary] {
+        PRStateSummary.summarize(items)
+    }
+}
+
+private struct PRStateSummary: Identifiable {
+    let descriptor: PRStateDescriptor
+    var count = 0
+    var examples: [String] = []
+
+    var id: String { descriptor.title }
+
+    var examplesText: String {
+        guard !examples.isEmpty else { return "No repositories" }
+        return examples.joined(separator: ", ")
+    }
+
+    static func summarize(_ items: [PendingRFCItem]) -> [PRStateSummary] {
         var grouped: [String: PRStateSummary] = [:]
         for item in items {
             guard case .pullRequest(let pr) = item.rfc.source else { continue }
@@ -1269,18 +1316,83 @@ private struct PRStateSummarySection: View {
             return $0.descriptor.title < $1.descriptor.title
         }
     }
+
+    static func summarize(_ counts: PRStateCounts) -> [PRStateSummary] {
+        [
+            PRStateSummary(descriptor: .conflictedAggregate, count: counts.conflicted),
+            PRStateSummary(descriptor: .failedAggregate, count: counts.failed),
+            PRStateSummary(descriptor: .readyAggregate, count: counts.ready),
+            PRStateSummary(descriptor: .needsReviewAggregate, count: counts.needsReview)
+        ].filter { $0.count > 0 }
+    }
 }
 
-private struct PRStateSummary: Identifiable {
-    let descriptor: PRStateDescriptor
-    var count = 0
-    var examples: [String] = []
+private struct PRStateSummaryStrip: View {
+    let summaries: [PRStateSummary]
 
-    var id: String { descriptor.title }
+    var body: some View {
+        if !summaries.isEmpty {
+            HStack(spacing: 6) {
+                ForEach(summaries) { summary in
+                    StatusBadge(
+                        title: "\(summary.descriptor.title) \(summary.count)",
+                        systemImage: summary.descriptor.systemImage,
+                        tint: summary.descriptor.tint,
+                        compact: true,
+                        help: summary.descriptor.help
+                    )
+                }
+                Spacer(minLength: 0)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
 
-    var examplesText: String {
-        guard !examples.isEmpty else { return "No repositories" }
-        return examples.joined(separator: ", ")
+private struct PRStatsFreshness {
+    let loadedRepositoryCount: Int
+    let totalRepositoryCount: Int
+    let newestLoadedAt: Date?
+    let isLoading: Bool
+
+    var label: String {
+        if loadedRepositoryCount == 0 {
+            return isLoading ? "PR stats loading" : "PR stats not loaded"
+        }
+        if loadedRepositoryCount < totalRepositoryCount {
+            return "Partial PR stats • \(loadedRepositoryCount)/\(totalRepositoryCount) repos"
+        }
+        guard let newestLoadedAt else {
+            return "PR stats loaded"
+        }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        let relativeDate = formatter.localizedString(for: newestLoadedAt, relativeTo: Date())
+        return "Updated \(relativeDate)"
+    }
+
+    var tint: Color {
+        if loadedRepositoryCount == 0 || loadedRepositoryCount < totalRepositoryCount {
+            return .secondary
+        }
+        return .green
+    }
+
+    var systemImage: String {
+        if isLoading { return "arrow.triangle.2.circlepath" }
+        if loadedRepositoryCount == 0 || loadedRepositoryCount < totalRepositoryCount { return "clock" }
+        return "checkmark.circle"
+    }
+}
+
+private struct PRStatsFreshnessRow: View {
+    let freshness: PRStatsFreshness
+
+    var body: some View {
+        Label(freshness.label, systemImage: freshness.systemImage)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(freshness.tint)
+            .lineLimit(1)
     }
 }
 
@@ -1290,6 +1402,8 @@ private struct AllRepositoriesSection: View {
     let pendingReviewCount: Int
     let openPRCount: Int
     let publishedCount: Int
+    let prStateSummaries: [PRStateSummary]
+    let prStatsFreshness: PRStatsFreshness
     let onRefresh: () -> Void
 
     var body: some View {
@@ -1321,6 +1435,9 @@ private struct AllRepositoriesSection: View {
                 CountBadge(value: openPRCount, label: "PRs", tint: .blue)
                 CountBadge(value: publishedCount, label: "published", tint: .secondary)
             }
+
+            PRStateSummaryStrip(summaries: prStateSummaries)
+            PRStatsFreshnessRow(freshness: prStatsFreshness)
         }
     }
 }
@@ -1553,11 +1670,32 @@ private struct PRStateDescriptor {
     let help: String
     let sortOrder: Int
 
+    static let conflictedAggregate = aggregate(
+        title: "Conflicted",
+        help: "Open PRs that are not mergeable or report a conflict state.",
+        sortOrder: 10
+    )
+    static let failedAggregate = aggregate(
+        title: "Failed",
+        help: "Open PRs with failing or unstable checks.",
+        sortOrder: 20
+    )
+    static let readyAggregate = aggregate(
+        title: "Ready",
+        help: "Open PRs that are currently mergeable.",
+        sortOrder: 30
+    )
+    static let needsReviewAggregate = aggregate(
+        title: "Needs review",
+        help: "Open PRs still waiting on review or provider merge-state resolution.",
+        sortOrder: 40
+    )
+
     static func describe(_ pr: RFCPullRequest) -> PRStateDescriptor {
         let normalizedState = (pr.mergeableState ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
         if pr.draft {
-            return descriptor(title: "Draft", rawState: pr.mergeableState, sortOrder: 60)
+            return descriptor(title: "Needs review", rawState: pr.mergeableState, sortOrder: 40)
         }
         if normalizedState.contains("dirty") || normalizedState.contains("conflict") {
             return descriptor(title: "Conflicted", rawState: pr.mergeableState, sortOrder: 10)
@@ -1565,25 +1703,25 @@ private struct PRStateDescriptor {
 
         switch normalizedState {
         case "clean":
-            return descriptor(title: "Mergeable", rawState: pr.mergeableState, sortOrder: 40)
+            return descriptor(title: "Ready", rawState: pr.mergeableState, sortOrder: 30)
         case "blocked":
-            return descriptor(title: "Blocked", rawState: pr.mergeableState, sortOrder: 20)
+            return descriptor(title: "Needs review", rawState: pr.mergeableState, sortOrder: 40)
         case "behind":
-            return descriptor(title: "Behind", rawState: pr.mergeableState, sortOrder: 30)
+            return descriptor(title: "Needs review", rawState: pr.mergeableState, sortOrder: 40)
         case "unstable":
-            return descriptor(title: "Checks failing", rawState: pr.mergeableState, sortOrder: 25)
+            return descriptor(title: "Failed", rawState: pr.mergeableState, sortOrder: 20)
         case "has_hooks":
-            return descriptor(title: "Hooks pending", rawState: pr.mergeableState, sortOrder: 35)
+            return descriptor(title: "Needs review", rawState: pr.mergeableState, sortOrder: 40)
         case "unknown":
-            return descriptor(title: "Checking", rawState: pr.mergeableState, sortOrder: 70)
+            return descriptor(title: "Needs review", rawState: pr.mergeableState, sortOrder: 40)
         default:
             if pr.mergeable == true {
-                return descriptor(title: "Mergeable", rawState: pr.mergeableState, sortOrder: 40)
+                return descriptor(title: "Ready", rawState: pr.mergeableState, sortOrder: 30)
             }
             if pr.mergeable == false {
-                return descriptor(title: "Not mergeable", rawState: pr.mergeableState, sortOrder: 15)
+                return descriptor(title: "Conflicted", rawState: pr.mergeableState, sortOrder: 10)
             }
-            return descriptor(title: "State unknown", rawState: pr.mergeableState, sortOrder: 80)
+            return descriptor(title: "Needs review", rawState: pr.mergeableState, sortOrder: 40)
         }
     }
 
@@ -1604,15 +1742,25 @@ private struct PRStateDescriptor {
         )
     }
 
+    private static func aggregate(title: String, help: String, sortOrder: Int) -> PRStateDescriptor {
+        PRStateDescriptor(
+            title: title,
+            systemImage: systemImage(for: title),
+            tint: tint(for: title),
+            help: help,
+            sortOrder: sortOrder
+        )
+    }
+
     private static func systemImage(for title: String) -> String {
         switch title {
-        case "Mergeable":
+        case "Ready":
             return "checkmark.circle.fill"
-        case "Conflicted", "Not mergeable":
+        case "Conflicted":
             return "exclamationmark.triangle.fill"
-        case "Blocked", "Checks failing":
+        case "Failed":
             return "xmark.octagon.fill"
-        case "Draft", "Behind", "Hooks pending", "Checking":
+        case "Needs review":
             return "clock.fill"
         default:
             return "questionmark.circle"
@@ -1621,13 +1769,13 @@ private struct PRStateDescriptor {
 
     private static func tint(for title: String) -> Color {
         switch title {
-        case "Mergeable":
+        case "Ready":
             return .green
-        case "Conflicted", "Not mergeable":
+        case "Conflicted":
             return .red
-        case "Blocked", "Checks failing":
+        case "Failed":
             return .orange
-        case "Draft", "Behind", "Hooks pending", "Checking":
+        case "Needs review":
             return .secondary
         default:
             return .secondary
@@ -2226,6 +2374,8 @@ private final class MenuBarDashboardStore: ObservableObject {
         var pullRequests: [RFC] = []
         var pendingReviewCount = 0
         var openPRCount = 0
+        var prStateCounts = PRStateCounts.empty
+        var prStatsLoadedAt: Date? = nil
         var issue: MenuBarIssue? = nil
 
         var allRFCs: [RFC] { pullRequests + mainBranch }
@@ -2268,7 +2418,9 @@ private final class MenuBarDashboardStore: ObservableObject {
                     mainBranch: cached.mainBranch,
                     pullRequests: cached.pullRequests,
                     pendingReviewCount: existing?.pendingReviewCount ?? cached.pullRequests.count,
-                    openPRCount: existing?.openPRCount ?? cached.pullRequests.count
+                    openPRCount: existing?.openPRCount ?? cached.pullRequests.count,
+                    prStateCounts: existing?.prStateCounts ?? .empty,
+                    prStatsLoadedAt: existing?.prStatsLoadedAt
                 ),
                 for: repo,
                 reason: "cache-hit"
@@ -2328,7 +2480,9 @@ private final class MenuBarDashboardStore: ObservableObject {
                     mainBranch: mainRFCs,
                     pullRequests: prRFCs,
                     pendingReviewCount: summary.pendingReviewCount,
-                    openPRCount: summary.openPRCount
+                    openPRCount: summary.openPRCount,
+                    prStateCounts: summary.prStateCounts,
+                    prStatsLoadedAt: Date()
                 ),
                 for: repo,
                 reason: "load-success"

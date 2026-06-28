@@ -267,6 +267,9 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *t
 	if result.OpenPRCount != 2 {
 		t.Fatalf("expected open PR count 2, got %d", result.OpenPRCount)
 	}
+	if result.PRStates.Ready != 1 || result.PRStates.NeedsReview != 1 {
+		t.Fatalf("expected PR state counts ready=1 needs_review=1, got %+v", result.PRStates)
+	}
 	if items[0].PRNumber != 10 {
 		t.Fatalf("expected PR number 10, got %d", items[0].PRNumber)
 	}
@@ -358,6 +361,9 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_AutoLabelsRFCWithoutReadyLabel(
 	}
 	if result.OpenPRCount != 2 {
 		t.Fatalf("expected open PR count 2, got %d", result.OpenPRCount)
+	}
+	if result.PRStates.Conflicted != 1 || result.PRStates.Ready != 1 {
+		t.Fatalf("expected PR state counts conflicted=1 ready=1, got %+v", result.PRStates)
 	}
 	if items[0].Mergeable == nil || *items[0].Mergeable != false {
 		t.Fatalf("expected PR mergeable false, got %#v", items[0].Mergeable)
@@ -456,6 +462,11 @@ structure:
 				{"filename": "docs-cms/memos/memo-001-note.md", "status": "added", "additions": 1},
 				{"filename": "docs-cms/prd/prd-001-product.md", "status": "added", "additions": 1},
 			})
+		case r.URL.Path == "/repos/owner/repo/pulls/40":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"mergeable":       true,
+				"mergeable_state": "unstable",
+			})
 		case isIssueLabelPost(r):
 			var payload struct {
 				Labels []string `json:"labels"`
@@ -478,6 +489,9 @@ structure:
 	}
 	if len(result.Items) != 0 {
 		t.Fatalf("expected no RFC review items for non-RFC docs, got %+v", result.Items)
+	}
+	if result.PRStates.Failed != 1 {
+		t.Fatalf("expected failed PR state count 1, got %+v", result.PRStates)
 	}
 	for _, label := range []string{"adr:review", "memo:review", "prd:review"} {
 		if !containsString(appliedLabels, label) {
