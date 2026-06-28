@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 // MARK: - MenuBarContentView
 
@@ -15,6 +18,8 @@ struct MenuBarContentView: View {
     @State private var repoSort: RepoSortOption = .reviewCount
     @State private var repoFilter: RepoFilterOption = .all
     @State private var selectedView: MenuBarPrimaryView = .dashboard
+    @State private var menuAnchor = MenuBarBubbleAnchor.capture()
+    @State private var pointerX = MenuBarBubbleWindowController.fallbackPointerX
 #endif
 
 #if os(macOS)
@@ -23,17 +28,25 @@ struct MenuBarContentView: View {
             .frame(width: renderMode.contentSize.width, height: renderMode.contentSize.height)
             .padding(.top, MenuBarSpeechBubbleShape.pointerHeight)
             .background {
-                MenuBarSpeechBubbleShape()
+                MenuBarBubbleWindowAccessor(
+                    contentSize: renderMode.contentSize,
+                    anchor: menuAnchor,
+                    pointerX: $pointerX
+                )
+            }
+            .background {
+                MenuBarSpeechBubbleShape(pointerX: pointerX)
                     .fill(Color(nsColor: .windowBackgroundColor))
                     .shadow(color: .black.opacity(0.20), radius: 18, x: 0, y: 8)
             }
             .overlay {
-                MenuBarSpeechBubbleShape()
+                MenuBarSpeechBubbleShape(pointerX: pointerX)
                     .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
             }
-            .clipShape(MenuBarSpeechBubbleShape())
+            .clipShape(MenuBarSpeechBubbleShape(pointerX: pointerX))
             .animation(.snappy(duration: 0.22), value: renderMode)
             .onAppear {
+                menuAnchor = MenuBarBubbleAnchor.capture()
                 serverRepoStore.start(portProvider: { serverMgr.port }, accountIDProvider: { accountStore.connections.first?.id })
                 Task {
                     await refreshAll(force: false)
@@ -507,9 +520,9 @@ private struct MenuBarSpeechBubbleShape: InsettableShape {
     static let pointerHeight: CGFloat = 16
 
     private static let pointerWidth: CGFloat = 42
-    private static let pointerCenterX: CGFloat = 54
     private static let cornerRadius: CGFloat = 24
 
+    var pointerX: CGFloat
     var insetAmount: CGFloat = 0
 
     func path(in rect: CGRect) -> Path {
@@ -523,7 +536,7 @@ private struct MenuBarSpeechBubbleShape: InsettableShape {
         let radius = min(Self.cornerRadius, bodyRect.width / 2, bodyRect.height / 2)
         let halfPointer = Self.pointerWidth / 2
         let pointerCenterX = min(
-            max(bodyRect.minX + Self.pointerCenterX, bodyRect.minX + radius + halfPointer),
+            max(bodyRect.minX + pointerX, bodyRect.minX + radius + halfPointer),
             bodyRect.maxX - radius - halfPointer
         )
 
@@ -572,6 +585,127 @@ private struct MenuBarSpeechBubbleShape: InsettableShape {
         var shape = self
         shape.insetAmount += amount
         return shape
+    }
+}
+
+private struct MenuBarBubbleAnchor: Equatable {
+    let screenX: CGFloat
+
+    static func capture() -> MenuBarBubbleAnchor {
+        MenuBarBubbleAnchor(screenX: NSEvent.mouseLocation.x)
+    }
+}
+
+private struct MenuBarBubbleWindowAccessor: NSViewRepresentable {
+    let contentSize: CGSize
+    let anchor: MenuBarBubbleAnchor
+    @Binding var pointerX: CGFloat
+
+    final class Coordinator {
+        var hasAnimatedOpening = false
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        view.postsFrameChangedNotifications = true
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            MenuBarBubbleWindowController.configure(
+                window,
+                contentSize: contentSize,
+                anchor: anchor,
+                pointerX: $pointerX,
+                animateOpening: !context.coordinator.hasAnimatedOpening
+            )
+            context.coordinator.hasAnimatedOpening = true
+        }
+    }
+}
+
+private enum MenuBarBubbleWindowController {
+    static let fallbackPointerX: CGFloat = 54
+
+    private static let screenPadding: CGFloat = 8
+
+    @MainActor
+    static func configure(
+        _ window: NSWindow,
+        contentSize: CGSize,
+        anchor: MenuBarBubbleAnchor,
+        pointerX: Binding<CGFloat>,
+        animateOpening: Bool
+    ) {
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.styleMask.remove([.titled, .closable, .miniaturizable, .resizable])
+        window.collectionBehavior.insert(.transient)
+
+        guard let screen = window.screen ?? NSScreen.screens.first else { return }
+        let desiredSize = NSSize(
+            width: contentSize.width,
+            height: contentSize.height + MenuBarSpeechBubbleShape.pointerHeight
+        )
+        let constrainedOriginX = min(
+            max(anchor.screenX - desiredSize.width / 2, screen.visibleFrame.minX + screenPadding),
+            screen.visibleFrame.maxX - desiredSize.width - screenPadding
+        )
+        let originY = min(
+            window.frame.origin.y,
+            screen.visibleFrame.maxY - desiredSize.height - screenPadding
+        )
+        let frame = NSRect(
+            x: constrainedOriginX,
+            y: max(originY, screen.visibleFrame.minY + screenPadding),
+            width: desiredSize.width,
+            height: desiredSize.height
+        )
+
+        if animateOpening {
+            animateWindowOpen(window, to: frame)
+        } else if !nearlyEqual(window.frame, frame) {
+            window.setFrame(frame, display: true, animate: false)
+        }
+
+        let nextPointerX = anchor.screenX - frame.minX
+        if abs(pointerX.wrappedValue - nextPointerX) > 0.5 {
+            pointerX.wrappedValue = nextPointerX
+        }
+    }
+
+    private static func animateWindowOpen(_ window: NSWindow, to frame: NSRect) {
+        let startFrame = NSRect(
+            x: frame.origin.x,
+            y: frame.origin.y + 10,
+            width: frame.width,
+            height: frame.height
+        )
+        window.alphaValue = 0
+        window.setFrame(startFrame, display: true, animate: false)
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.16
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            window.animator().alphaValue = 1
+            window.animator().setFrame(frame, display: true)
+        }
+    }
+
+    private static func nearlyEqual(_ lhs: NSRect, _ rhs: NSRect) -> Bool {
+        abs(lhs.origin.x - rhs.origin.x) < 0.5 &&
+            abs(lhs.origin.y - rhs.origin.y) < 0.5 &&
+            abs(lhs.size.width - rhs.size.width) < 0.5 &&
+            abs(lhs.size.height - rhs.size.height) < 0.5
     }
 }
 
