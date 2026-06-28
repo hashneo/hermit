@@ -18,8 +18,10 @@ import json
 import plistlib
 import os
 import re
+import subprocess
 import sys
 import uuid
+from urllib.parse import urlparse
 
 # Fixed dev UUIDs — stable across runs so UserDefaults data is idempotent.
 DEV_ACCOUNT_ID = "00000000-0000-0000-0000-000000000001"
@@ -90,6 +92,24 @@ def main():
                     return token
         return ""
 
+    def gh_token_for(endpoint):
+        host = urlparse(endpoint).hostname
+        if not host:
+            return ""
+        if host == "api.github.com":
+            host = "github.com"
+        try:
+            result = subprocess.run(
+                ["gh", "auth", "token", "--hostname", host],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        return result.stdout.strip()
+
     def stable_uuid(kind, key):
         return str(uuid.uuid5(DEV_UUID_NAMESPACE, f"{kind}:{key}"))
 
@@ -134,7 +154,7 @@ def main():
             endpoint = str(account.get("endpoint", "")).rstrip("/")
             account_id = stable_uuid("account", account_key)
             account_ids[account_key] = account_id
-            account_token = token_override or existing_token_for(endpoint)
+            account_token = token_override or existing_token_for(endpoint) or gh_token_for(endpoint)
             next_account = {
                 "id": account_id,
                 "name": account.get("name") or account_key,
