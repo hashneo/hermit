@@ -4,9 +4,21 @@
       "endpoint": "https://github.ibm.com/api/v3",
       "id": "github-ibm",
       "name": "github.ibm.com"
+    },
+    {
+      "endpoint": "https://api.github.com",
+      "id": "github",
+      "name": "github.com"
     }
   ],
   "repositories": [
+    {
+      "account": "github",
+      "docs_path": "docs-cms/rfcs",
+      "name": "merge-god",
+      "owner": "jrepp",
+      "rfc_label": "hermit:rfc-ready"
+    },
     {
       "account": "github-ibm",
       "docs_path": "docs-cms/rfcs",
