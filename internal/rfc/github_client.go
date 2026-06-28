@@ -122,6 +122,10 @@ func (c *HTTPGitHubRFCClient) ListRFCs(ctx context.Context, baseURL, owner, name
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		io.Copy(io.Discard, resp.Body) //nolint:errcheck
+		return nil, nil
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		return nil, fmt.Errorf("list RFCs failed: %d %s", resp.StatusCode, strings.TrimSpace(string(body)))

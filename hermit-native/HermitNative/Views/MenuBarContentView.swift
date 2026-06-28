@@ -95,7 +95,7 @@ struct MenuBarContentView: View {
                 IssueBanner(issue: issue, compact: true, onRetry: {
                     Task { await refreshAll(force: true) }
                 }, onSettings: {
-                    SettingsWindowManager.shared.open()
+                    selectedView = .settings
                 })
             }
         }
@@ -208,7 +208,7 @@ struct MenuBarContentView: View {
                         isActive: repo.id == repoStore.repositories.first?.id,
                         onActivate: { activate(repo) },
                         onRefresh: { Task { await dashboardStore.reload(repo: repo, appState: appState) } },
-                        onOpenSettings: { SettingsWindowManager.shared.open() },
+                        onOpenSettings: { selectedView = .settings },
                         onOpenPR: { rfc in openPRSummary(rfc) },
                         onOpen: { rfc in open(rfc, in: repo) }
                     )
