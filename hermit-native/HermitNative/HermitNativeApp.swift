@@ -295,19 +295,21 @@ final class RFCViewerWindowManager {
 }
 
 @MainActor
-final class MenuBarStatusItemController: NSObject, NSMenuDelegate {
+final class MenuBarStatusItemController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    private let menu = NSMenu()
+    private var panel: NSPanel?
+    private var outsideClickMonitor: Any?
+    private var localClickMonitor: Any?
     private var cancellables: Set<AnyCancellable> = []
 
     func start() {
         guard let button = statusItem.button else { return }
         button.isEnabled = true
+        button.target = self
+        button.action = #selector(togglePanel(_:))
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         button.toolTip = "Hermit"
         updateIcon(hasPendingInvitation: PairingAdvertiser.shared.pendingInvitation != nil)
-        menu.delegate = self
-        menu.autoenablesItems = false
-        statusItem.menu = menu
         Self.log("status item started; buttonFrame=\(button.frame)")
 
         PairingAdvertiser.shared.$pendingInvitation
@@ -319,29 +321,107 @@ final class MenuBarStatusItemController: NSObject, NSMenuDelegate {
     }
 
     func stop() {
+        closePanel()
+        if let outsideClickMonitor {
+            NSEvent.removeMonitor(outsideClickMonitor)
+            self.outsideClickMonitor = nil
+        }
+        if let localClickMonitor {
+            NSEvent.removeMonitor(localClickMonitor)
+            self.localClickMonitor = nil
+        }
         cancellables.removeAll()
         NSStatusBar.system.removeStatusItem(statusItem)
     }
 
-    func menuWillOpen(_ menu: NSMenu) {
+    @objc private func togglePanel(_ sender: Any?) {
+        Self.log("status item clicked; visible=\(panel?.isVisible == true)")
+        if panel?.isVisible == true {
+            closePanel()
+        } else {
+            openPanel()
+        }
+    }
+
+    private func openPanel() {
         guard let button = statusItem.button,
               let buttonWindow = button.window else { return }
 
         let buttonRect = button.convert(button.bounds, to: nil)
         let screenRect = buttonWindow.convertToScreen(buttonRect)
-        let anchorX = screenRect.midX
-        let content = MenuBarContentView(anchorScreenX: anchorX, managesWindowPresentation: false)
+        let content = MenuBarContentView(anchorScreenX: screenRect.midX)
             .environmentObject(AppState.shared)
-        let hosting = NSHostingView(rootView: content)
-        hosting.frame = NSRect(x: 0, y: 0, width: 780, height: 596)
+        let hosting = NSHostingController(rootView: content)
+        hosting.view.wantsLayer = true
+        hosting.view.layer?.backgroundColor = NSColor.clear.cgColor
 
-        let item = NSMenuItem()
-        item.view = hosting
-        item.isEnabled = true
+        let initialFrame = NSRect(
+            x: screenRect.midX - 280,
+            y: screenRect.minY - 486,
+            width: 560,
+            height: 486
+        )
+        let panel = NSPanel(
+            contentRect: initialFrame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.contentViewController = hosting
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.level = .statusBar
+        panel.collectionBehavior = [.transient, .ignoresCycle, .canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isReleasedWhenClosed = false
+        panel.hidesOnDeactivate = false
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
 
-        menu.removeAllItems()
-        menu.addItem(item)
-        Self.log("menu opened; statusRect=\(screenRect)")
+        self.panel = panel
+        panel.orderFrontRegardless()
+        installClickMonitors()
+        Self.log("panel opened; statusRect=\(screenRect) initialFrame=\(initialFrame)")
+    }
+
+    private func closePanel() {
+        guard panel?.isVisible == true else { return }
+        panel?.orderOut(nil)
+        Self.log("panel closed")
+    }
+
+    private func installClickMonitors() {
+        if outsideClickMonitor == nil {
+            outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+                Task { @MainActor in
+                    self?.closeIfClickIsOutsidePanel()
+                }
+            }
+        }
+        if localClickMonitor == nil {
+            localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+                Task { @MainActor in
+                    self?.closeIfClickIsOutsidePanel()
+                }
+                return event
+            }
+        }
+    }
+
+    private func closeIfClickIsOutsidePanel() {
+        guard let panel,
+              panel.isVisible,
+              !panel.frame.contains(NSEvent.mouseLocation),
+              !statusItemFrameContainsMouse() else { return }
+        closePanel()
+    }
+
+    private func statusItemFrameContainsMouse() -> Bool {
+        guard let button = statusItem.button,
+              let buttonWindow = button.window else { return false }
+        let buttonRect = button.convert(button.bounds, to: nil)
+        let screenRect = buttonWindow.convertToScreen(buttonRect)
+        return screenRect.contains(NSEvent.mouseLocation)
     }
 
     private func updateIcon(hasPendingInvitation: Bool) {
