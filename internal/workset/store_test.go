@@ -2,6 +2,7 @@ package workset
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,16 +10,55 @@ import (
 	"time"
 )
 
-func TestStorePersistsCacheEntries(t *testing.T) {
+func TestStoreOpensConfiguredSQLiteDatabase(t *testing.T) {
+	dataDir := t.TempDir()
+	store, err := Open(dataDir)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if _, err := os.Stat(filepath.Join(dataDir, databaseFilename)); err != nil {
+		t.Fatalf("expected sqlite database file: %v", err)
+	}
+	if got := pragmaInt(t, store.db, "busy_timeout"); got != defaultBusyTimeoutMS {
+		t.Fatalf("busy_timeout = %d, want %d", got, defaultBusyTimeoutMS)
+	}
+	if got := pragmaInt(t, store.db, "foreign_keys"); got != 1 {
+		t.Fatalf("foreign_keys = %d, want 1", got)
+	}
+	if got := store.db.Stats().MaxOpenConnections; got != defaultMaxOpenConns {
+		t.Fatalf("max open connections = %d, want %d", got, defaultMaxOpenConns)
+	}
+}
+
+func pragmaInt(t *testing.T, db *sql.DB, name string) int {
+	t.Helper()
+	var v int
+	if err := db.QueryRow("PRAGMA " + name).Scan(&v); err != nil {
+		t.Fatalf("PRAGMA %s: %v", name, err)
+	}
+	return v
+}
+
+func TestStorePersistsRepositoryRFCLists(t *testing.T) {
 	dataDir := t.TempDir()
 	store, err := Open(dataDir)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
 
-	payload := map[string]any{"items": []string{"one"}}
-	if _, err := store.PutCacheSuccess(context.Background(), "test_scope", "test:key", payload); err != nil {
-		t.Fatalf("put cache: %v", err)
+	payload := map[string]any{
+		"items": []map[string]any{
+			{"id": "rfc-1", "title": "Cached RFC"},
+		},
+		"summary": map[string]any{"pending_review_count": 1, "open_pr_count": 2},
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if _, err := store.PutRepositoryRFCListSuccess(context.Background(), "repo-1", payloadJSON); err != nil {
+		t.Fatalf("put repository rfc list: %v", err)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
@@ -30,25 +70,40 @@ func TestStorePersistsCacheEntries(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = reopened.Close() })
 
-	data, meta, ok, err := reopened.GetFreshCache(context.Background(), "test:key", time.Hour)
+	projection, ok, err := reopened.GetFreshRepositoryRFCList(context.Background(), "repo-1", time.Hour)
 	if err != nil {
-		t.Fatalf("get cache: %v", err)
+		t.Fatalf("get repository rfc list: %v", err)
 	}
 	if !ok {
-		t.Fatalf("expected fresh cache entry")
+		t.Fatalf("expected fresh repository rfc list")
 	}
-	if !meta.Cached {
-		t.Fatalf("cache metadata cached = false, want true")
+	if !projection.Cache.Cached {
+		t.Fatalf("repository rfc list metadata cached = false, want true")
 	}
-	var decoded map[string][]string
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("decode payload: %v", err)
+	var decoded struct {
+		Items []struct {
+			Title string `json:"title"`
+		} `json:"items"`
 	}
-	if got := decoded["items"][0]; got != "one" {
-		t.Fatalf("cached item = %q, want one", got)
+	if err := json.Unmarshal(projection.Payload, &decoded); err != nil {
+		t.Fatalf("decode repository rfc list: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dataDir, databaseFilename)); err != nil {
-		t.Fatalf("expected sqlite database file: %v", err)
+	if got := decoded.Items[0].Title; got != "Cached RFC" {
+		t.Fatalf("cached title = %q, want Cached RFC", got)
+	}
+
+	if err := reopened.PutRepositoryRFCListError(context.Background(), "repo-1", "provider_error", "rate limited"); err != nil {
+		t.Fatalf("put repository rfc list error: %v", err)
+	}
+	projection, ok, err = reopened.GetAnyRepositoryRFCList(context.Background(), "repo-1", time.Hour)
+	if err != nil {
+		t.Fatalf("get any repository rfc list: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected stale repository rfc list after error")
+	}
+	if projection.Cache.LastErrorCode != "provider_error" || projection.Cache.LastErrorMessage != "rate limited" {
+		t.Fatalf("error metadata = %q/%q, want provider_error/rate limited", projection.Cache.LastErrorCode, projection.Cache.LastErrorMessage)
 	}
 }
 

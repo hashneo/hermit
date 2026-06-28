@@ -21,6 +21,8 @@ struct RFCPullRequest: Identifiable {
     let htmlURL: String
     let state: String
     let draft: Bool
+    let mergeable: Bool?
+    let mergeableState: String?
     let labels: [String]
 }
 

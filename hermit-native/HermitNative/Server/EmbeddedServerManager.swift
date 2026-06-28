@@ -203,6 +203,10 @@ final class EmbeddedServerManager: ObservableObject {
         let payload: [String: Any] = [
             "repos":   repos,
             "dataDir": dataDir,
+            "cache": [
+                "repositoryRFCListReadTTLSeconds": ConfigStore.shared.cacheReadTTLSeconds,
+                "repositoryRFCListJitterSeconds": ConfigStore.shared.cacheJitterSeconds,
+            ],
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let str  = String(data: data, encoding: .utf8) else {
@@ -219,13 +223,13 @@ final class EmbeddedServerManager: ObservableObject {
     /// Returns the correct API base URL for a registry endpoint.
     ///
     /// The Go server's github_client constructs paths as `{baseURL}/repos/…`
-    /// which is the GitHub REST API layout.  Gitea exposes the same layout
-    /// under `/api/v1`, so any endpoint that is not a github.com host gets
-    /// `/api/v1` appended (unless it is already present).
+    /// which is the GitHub REST API layout. GitHub Enterprise exposes that at
+    /// `/api/v3`, while Gitea exposes the same layout under `/api/v1`.
     static func resolvedAPIBase(for rawEndpoint: String) -> String {
         let trimmed = rawEndpoint.trimmingCharacters(in: .init(charactersIn: "/"))
         guard let host = URL(string: trimmed)?.host else { return trimmed }
         if host == "github.com" || host == "api.github.com" { return trimmed }
+        if trimmed.hasSuffix("/api/v3") { return trimmed }
         if trimmed.hasSuffix("/api/v1") { return trimmed }
         return trimmed + "/api/v1"
     }

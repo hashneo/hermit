@@ -3,16 +3,34 @@ import SwiftUI
 // MARK: - MarkdownRendererView: native SwiftUI renderer for [MarkdownBlock]
 
 struct MarkdownRendererView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let blocks: [MarkdownBlock]
     /// Called when the user taps a block; receives the 1-based raw markdown source line number.
     var onLineTapped: ((Int) -> Void)? = nil
 
     private var codeBackground: Color {
-        Color(red: 0.92, green: 0.98, blue: 0.92)  // light green
+        if colorScheme == .dark {
+            return Color(red: 0.16, green: 0.20, blue: 0.18)
+        }
+        return Color(red: 0.92, green: 0.98, blue: 0.92)
     }
 
     private var codeBackgroundSwiftUIColor: Color {
         codeBackground
+    }
+
+    private var inlineCodeForeground: Color {
+        if colorScheme == .dark {
+            return Color(red: 0.86, green: 0.95, blue: 0.89)
+        }
+        return .primary
+    }
+
+    private var codeBorderColor: Color {
+        if colorScheme == .dark {
+            return Color.white.opacity(0.12)
+        }
+        return Color.secondary.opacity(0.2)
     }
 
     var body: some View {        VStack(alignment: .leading, spacing: 16) {
@@ -118,7 +136,7 @@ struct MarkdownRendererView: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                    .stroke(codeBorderColor, lineWidth: 1)
             )
     }
 
@@ -248,6 +266,7 @@ struct MarkdownRendererView: View {
             var a = AttributedString(s)
             a.font = .system(.body, design: .monospaced)
             a.backgroundColor = codeBackgroundSwiftUIColor
+            a.foregroundColor = inlineCodeForeground
             return a
 
         case .link(let text, let url):

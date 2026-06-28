@@ -28,7 +28,7 @@ struct HermitNativeApp: App {
             MenuBarContentView()
                 .environmentObject(appState)
         }
-        .menuBarExtraStyle(.menu)
+        .menuBarExtraStyle(.window)
 
         Settings {
             SettingsView()

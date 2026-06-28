@@ -25,7 +25,7 @@ final class RFCStore: ObservableObject {
         isLoading = true
         errorMessage = nil
         do {
-            let (mainFiles, prs) = try await client.discoverRFCs()
+            let (mainFiles, prs, _) = try await client.discoverRFCs()
             var result: [RFC] = mainFiles.map {
                 RFC(id: $0.id, title: $0.name,
                     path: $0.path, sha: $0.sha, source: .mainBranch,
