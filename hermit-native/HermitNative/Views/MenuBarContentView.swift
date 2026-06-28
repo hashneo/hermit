@@ -257,9 +257,9 @@ struct MenuBarContentView: View {
                     }
 
                     CompactReviewQueue(
-                        items: Array(pendingRFCItems.prefix(3)),
-                        totalCount: pendingRFCItems.count,
-                        onOpen: { item in openPRSummary(item.rfc) }
+                        groups: Array(pendingPRGroups.prefix(3)),
+                        totalCount: pendingPRGroups.count,
+                        onOpen: { group in openPRSummary(group.primaryRFC) }
                     )
                 }
                 .padding(.horizontal, 14)
@@ -337,10 +337,17 @@ struct MenuBarContentView: View {
                         prStatsFreshness: aggregatePRStatsFreshness,
                         onRefresh: { Task { await refreshDashboard(force: true) } }
                     )
+                    PRReviewSection(
+                        title: "Pull requests needing review",
+                        groups: pendingPRGroups,
+                        emptyText: "No pull requests currently contain reviewable docs-cms documents.",
+                        showsRepository: true,
+                        onOpen: { group in openPRSummary(group.primaryRFC) }
+                    )
                     PRSummarySection(
-                        title: "Review queue",
+                        title: "Documents needing review",
                         items: pendingRFCItems,
-                        emptyText: "No RFC pull requests are currently waiting for review.",
+                        emptyText: "No docs-cms documents are currently waiting for review.",
                         showsRepository: true,
                         onOpen: { item in openPRSummary(item.rfc) }
                     )
@@ -456,6 +463,20 @@ struct MenuBarContentView: View {
             let rhsPR = rhs.prNumber ?? 0
             if lhsPR != rhsPR { return lhsPR > rhsPR }
             return lhs.rfc.title < rhs.rfc.title
+        }
+    }
+
+    private var pendingPRGroups: [PendingPRGroup] {
+        let grouped = Dictionary(grouping: pendingRFCItems) { item in
+            "\(item.repo.id.uuidString)-\(item.prNumber ?? 0)"
+        }
+        return grouped.values.compactMap { items in
+            guard let first = items.first, first.prNumber != nil else { return nil }
+            return PendingPRGroup(repo: first.repo, items: items)
+        }
+        .sorted { lhs, rhs in
+            if lhs.pr.number != rhs.pr.number { return lhs.pr.number > rhs.pr.number }
+            return lhs.repo.fullName < rhs.repo.fullName
         }
     }
 
@@ -807,7 +828,7 @@ private struct CompactAllRepositoriesSummary: View {
                 Text("\(pendingReviewCount)")
                     .font(.title.weight(.semibold))
                     .monospacedDigit()
-                Text(pendingReviewCount == 1 ? "RFC waiting for review" : "RFCs waiting for review")
+                Text(pendingReviewCount == 1 ? "document waiting for review" : "documents waiting for review")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
@@ -838,14 +859,14 @@ private struct CompactAllRepositoriesSummary: View {
 }
 
 private struct CompactReviewQueue: View {
-    let items: [PendingRFCItem]
+    let groups: [PendingPRGroup]
     let totalCount: Int
-    let onOpen: (PendingRFCItem) -> Void
+    let onOpen: (PendingPRGroup) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Review queue")
+                Text("Docs review queue")
                     .font(.headline)
                 Spacer()
                 Text("\(totalCount)")
@@ -854,8 +875,8 @@ private struct CompactReviewQueue: View {
                     .foregroundStyle(.secondary)
             }
 
-            if items.isEmpty {
-                Text("No RFC pull requests are currently waiting for review.")
+            if groups.isEmpty {
+                Text("No pull requests currently contain reviewable docs-cms documents.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .padding(12)
@@ -864,11 +885,11 @@ private struct CompactReviewQueue: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             } else {
                 VStack(spacing: 8) {
-                    ForEach(items) { item in
+                    ForEach(groups) { group in
                         Button {
-                            onOpen(item)
+                            onOpen(group)
                         } label: {
-                            PRSummaryRow(rfc: item.rfc, repoName: item.repo.fullName)
+                            PRReviewSummaryRow(group: group, showsRepository: true)
                         }
                         .buttonStyle(.plain)
                     }
@@ -930,14 +951,14 @@ private struct RepositoryTopRail: View {
                         title: "Review",
                         value: pendingReviewCount,
                         tint: .orange,
-                        help: "RFCs waiting for review across all repositories"
+                        help: "docs-cms documents waiting for review across all repositories"
                     )
                     RepoMetricBadge(
                         systemImage: "arrow.triangle.pull",
                         title: "PR",
                         value: openPRCount,
                         tint: .blue,
-                        help: "Open pull requests with RFCs across all repositories"
+                        help: "Open pull requests with docs-cms review documents across all repositories"
                     )
                 }
 
@@ -1029,14 +1050,14 @@ private struct RepoFilterRow: View {
                             title: "Review",
                             value: state?.pendingReviewCount ?? 0,
                             tint: .orange,
-                            help: "RFCs waiting for review"
+                            help: "docs-cms documents waiting for review"
                         )
                         RepoMetricBadge(
                             systemImage: "arrow.triangle.pull",
                             title: "PR",
                             value: state?.openPRCount ?? 0,
                             tint: .blue,
-                            help: "Open pull requests with RFCs"
+                            help: "Open pull requests with docs-cms review documents"
                         )
                     }
                     .fixedSize(horizontal: true, vertical: false)
@@ -1163,6 +1184,160 @@ private struct PendingRFCItem: Identifiable {
         if case .pullRequest(let pr) = rfc.source { return pr.number }
         return nil
     }
+
+    var documentTypeDisplay: String {
+        guard case .pullRequest(let pr) = rfc.source else { return "Doc" }
+        return displayName(forDocumentType: pr.documentType)
+    }
+}
+
+private struct PendingPRGroup: Identifiable {
+    let repo: Repository
+    let items: [PendingRFCItem]
+
+    var id: String { "\(repo.id.uuidString)-\(pr.number)" }
+    var primaryRFC: RFC { items.first?.rfc ?? RFC(id: "", title: "", path: "", sha: "", source: .pullRequest(pr), lifecycleStatus: nil, htmlURL: "") }
+
+    var pr: RFCPullRequest {
+        for item in items {
+            if case .pullRequest(let pr) = item.rfc.source {
+                return pr
+            }
+        }
+        return RFCPullRequest(
+            id: 0, number: 0, title: "", prTitle: "", body: "",
+            headSHA: "", headRef: "", htmlURL: "", state: "",
+            draft: false, mergeable: nil, mergeableState: nil,
+            documentType: "rfc", labels: [], changedFiles: 0,
+            additions: 0, deletions: 0
+        )
+    }
+
+    var documentCount: Int { items.count }
+
+    var documentSummary: String {
+        let counts = Dictionary(grouping: items, by: { $0.documentTypeDisplay }).mapValues(\.count)
+        return counts.keys.sorted().map { key in
+            "\(key) \(counts[key] ?? 0)"
+        }.joined(separator: ", ")
+    }
+
+    static func groups(for repo: Repository, rfcs: [RFC]) -> [PendingPRGroup] {
+        let items = rfcs.map { PendingRFCItem(repo: repo, rfc: $0) }
+        let grouped = Dictionary(grouping: items) { $0.prNumber ?? 0 }
+        return grouped.values.compactMap { items in
+            guard items.first?.prNumber != nil else { return nil }
+            return PendingPRGroup(repo: repo, items: items)
+        }
+        .sorted { lhs, rhs in lhs.pr.number > rhs.pr.number }
+    }
+}
+
+private struct PRReviewSection: View {
+    let title: String
+    let groups: [PendingPRGroup]
+    let emptyText: String
+    var showsRepository = false
+    let onOpen: (PendingPRGroup) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(title)
+                    .font(.headline)
+                Spacer()
+                Text("\(groups.count)")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.orange.opacity(0.12))
+                    .foregroundStyle(.orange)
+                    .clipShape(Capsule())
+            }
+
+            if groups.isEmpty {
+                Text(emptyText)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.secondary.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(groups) { group in
+                        Button {
+                            onOpen(group)
+                        } label: {
+                            PRReviewSummaryRow(group: group, showsRepository: showsRepository)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct PRReviewSummaryRow: View {
+    let group: PendingPRGroup
+    var showsRepository = false
+
+    var body: some View {
+        let pr = group.pr
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(prTitle(pr))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    PRMergeStateBadge(pr: pr)
+                }
+
+                HStack(spacing: 6) {
+                    StatusBadge(title: "PR #\(pr.number)", systemImage: "arrow.triangle.pull", tint: .orange)
+                    StatusBadge(title: "\(group.documentCount) docs", systemImage: "doc.text", tint: .blue)
+                    StatusBadge(title: "\(changedFiles(pr)) files", tint: .secondary)
+                    StatusBadge(title: "+\(pr.additions) -\(pr.deletions)", tint: .secondary)
+                }
+
+                Text(secondaryText(pr))
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            .layoutPriority(1)
+
+            ReviewPRCallToAction()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .help("Open pull request")
+    }
+
+    private func prTitle(_ pr: RFCPullRequest) -> String {
+        if !pr.prTitle.isEmpty { return pr.prTitle }
+        if !pr.title.isEmpty { return pr.title }
+        return "Pull request"
+    }
+
+    private func changedFiles(_ pr: RFCPullRequest) -> Int {
+        pr.changedFiles > 0 ? pr.changedFiles : group.documentCount
+    }
+
+    private func secondaryText(_ pr: RFCPullRequest) -> String {
+        let prefix = showsRepository ? "\(group.repo.fullName) • " : ""
+        let branch = pr.headRef.isEmpty ? "unknown branch" : pr.headRef
+        if group.documentSummary.isEmpty {
+            return "\(prefix)\(branch)"
+        }
+        return "\(prefix)\(branch) • \(group.documentSummary)"
+    }
 }
 
 private struct PRSummarySection: View {
@@ -1226,7 +1401,7 @@ private struct PRStateSummarySection: View {
                 Text(title)
                     .font(.headline)
                 Spacer()
-                Text("\(items.count)")
+                Text("\(uniquePRCount)")
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -1282,6 +1457,13 @@ private struct PRStateSummarySection: View {
     private var summaries: [PRStateSummary] {
         PRStateSummary.summarize(items)
     }
+
+    private var uniquePRCount: Int {
+        Set(items.compactMap { item -> String? in
+            guard let prNumber = item.prNumber else { return nil }
+            return "\(item.repo.id.uuidString)-\(prNumber)"
+        }).count
+    }
 }
 
 private struct PRStateSummary: Identifiable {
@@ -1298,13 +1480,19 @@ private struct PRStateSummary: Identifiable {
 
     static func summarize(_ items: [PendingRFCItem]) -> [PRStateSummary] {
         var grouped: [String: PRStateSummary] = [:]
-        for item in items {
+        let uniqueItems = Dictionary(grouping: items) { item in
+            "\(item.repo.id.uuidString)-\(item.prNumber ?? 0)"
+        }
+        .values
+        .compactMap(\.first)
+
+        for item in uniqueItems {
             guard case .pullRequest(let pr) = item.rfc.source else { continue }
             let descriptor = PRStateDescriptor.describe(pr)
             var summary = grouped[descriptor.title] ?? PRStateSummary(descriptor: descriptor)
             summary.count += 1
             if summary.examples.count < 2 {
-                summary.examples.append(item.rfc.title)
+                summary.examples.append(pr.prTitle.isEmpty ? item.rfc.title : pr.prTitle)
             }
             grouped[descriptor.title] = summary
         }
@@ -1428,7 +1616,7 @@ private struct AllRepositoriesSection: View {
                 Text("\(pendingReviewCount)")
                     .font(.largeTitle.weight(.semibold))
                     .monospacedDigit()
-                Text(pendingReviewCount == 1 ? "RFC waiting for review" : "RFCs waiting for review")
+                Text(pendingReviewCount == 1 ? "document waiting for review" : "documents waiting for review")
                     .font(.headline)
                     .foregroundStyle(.primary)
                 Spacer(minLength: 8)
@@ -1518,10 +1706,17 @@ private struct SelectedRepoSection: View {
                     emptyText: "No pull request state data is available yet."
                 )
 
+                PRReviewSection(
+                    title: "Pull requests needing review",
+                    groups: PendingPRGroup.groups(for: repo, rfcs: state.pullRequests),
+                    emptyText: "No pull requests currently contain reviewable docs-cms documents.",
+                    onOpen: { group in onOpenPR(group.primaryRFC) }
+                )
+
                 PRSummarySection(
-                    title: "Pull request summaries",
+                    title: "Documents needing review",
                     items: state.pullRequests.map { PendingRFCItem(repo: repo, rfc: $0) },
-                    emptyText: "No RFC pull requests are currently waiting for review.",
+                    emptyText: "No docs-cms documents are currently waiting for review.",
                     onOpen: { item in onOpenPR(item.rfc) }
                 )
 
@@ -1596,6 +1791,7 @@ private struct PRSummaryRow: View {
                 }
 
                 HStack(spacing: 6) {
+                    StatusBadge(title: displayName(forDocumentType: pr.documentType), systemImage: "doc.text", tint: .blue)
                     StatusBadge(title: "PR #\(pr.number)", systemImage: "arrow.triangle.pull", tint: .orange)
                     if let labelTitle {
                         StatusBadge(title: labelTitle, tint: .secondary)
@@ -1620,7 +1816,13 @@ private struct PRSummaryRow: View {
 
     private var pr: RFCPullRequest {
         if case .pullRequest(let pr) = rfc.source { return pr }
-        return RFCPullRequest(id: 0, number: 0, title: "", body: "", headSHA: "", headRef: "", htmlURL: "", state: "", draft: false, mergeable: nil, mergeableState: nil, labels: [])
+        return RFCPullRequest(
+            id: 0, number: 0, title: "", prTitle: "", body: "",
+            headSHA: "", headRef: "", htmlURL: "", state: "",
+            draft: false, mergeable: nil, mergeableState: nil,
+            documentType: "rfc", labels: [], changedFiles: 0,
+            additions: 0, deletions: 0
+        )
     }
 
     private var title: String {
@@ -1637,10 +1839,26 @@ private struct PRSummaryRow: View {
 
     private var secondaryText: String {
         let detail = pr.headRef.isEmpty ? rfc.path : pr.headRef
+        let prTitle = pr.prTitle.isEmpty ? "" : " • \(pr.prTitle)"
         if let repoName {
-            return "\(repoName) • \(detail)"
+            return "\(repoName) • \(detail)\(prTitle)"
         }
-        return detail
+        return "\(detail)\(prTitle)"
+    }
+}
+
+private func displayName(forDocumentType documentType: String) -> String {
+    switch documentType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+    case "adr":
+        return "ADR"
+    case "memo":
+        return "Memo"
+    case "prd":
+        return "PRD"
+    case "rfc", "":
+        return "RFC"
+    default:
+        return documentType.replacingOccurrences(of: "-", with: " ").capitalized
     }
 }
 

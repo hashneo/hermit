@@ -15,6 +15,7 @@ struct RFCPullRequest: Identifiable {
     let id: Int
     let number: Int
     let title: String
+    let prTitle: String
     let body: String
     let headSHA: String
     let headRef: String
@@ -23,7 +24,11 @@ struct RFCPullRequest: Identifiable {
     let draft: Bool
     let mergeable: Bool?
     let mergeableState: String?
+    let documentType: String
     let labels: [String]
+    let changedFiles: Int
+    let additions: Int
+    let deletions: Int
 }
 
 struct ThreadMessage: Identifiable, Hashable {

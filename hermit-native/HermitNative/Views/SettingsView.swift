@@ -151,7 +151,29 @@ private struct AccountSettingsTab: View {
             Text("The token will be deleted from the Keychain.")
         }
         .task(id: store.connections.map(\.id)) {
-            for conn in store.connections { await store.probe(conn) }
+            while !Task.isCancelled {
+                await refreshAccountConnectivity()
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
+    }
+
+    private func refreshAccountConnectivity() async {
+        for conn in store.connections {
+#if os(macOS)
+            let host = resolvedCredentialHost(endpoint: conn.endpoint, override: "")
+            switch await GitCredentialHelper.lookup(host: host) {
+            case .success(let credential):
+                if !credential.password.isEmpty,
+                   credential.password != store.token(for: conn) {
+                    store.updateTokenOnly(conn, token: credential.password)
+                }
+            case .failure:
+                break
+            }
+#endif
+            let refreshed = store.connections.first(where: { $0.id == conn.id }) ?? conn
+            await store.probe(refreshed)
         }
     }
 }
