@@ -501,7 +501,7 @@ struct MenuBarContentView: View {
     private var loadedRepositoryCount: Int {
         displayedRepos.filter { repo in
             guard let state = dashboardStore.state(for: repo.id) else { return false }
-            return !state.allRFCs.isEmpty || state.issue != nil
+            return state.prStatsLoadedAt != nil || state.issue != nil
         }.count
     }
 
@@ -1609,9 +1609,7 @@ private struct PRSummaryRow: View {
             }
             .layoutPriority(1)
 
-            Image(systemName: "arrow.up.right.square")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+            ReviewPRCallToAction()
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1643,6 +1641,21 @@ private struct PRSummaryRow: View {
             return "\(repoName) • \(detail)"
         }
         return detail
+    }
+}
+
+private struct ReviewPRCallToAction: View {
+    var body: some View {
+        Label("Review PR", systemImage: "arrow.up.right.square")
+            .font(.caption.weight(.semibold))
+            .labelStyle(.titleAndIcon)
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(Color.blue.opacity(0.14))
+            .foregroundStyle(.blue)
+            .clipShape(Capsule())
+            .accessibilityLabel("Review pull request")
     }
 }
 
@@ -2412,15 +2425,14 @@ private final class MenuBarDashboardStore: ObservableObject {
     private func load(repo: Repository, appState: AppState, force: Bool) async {
         if !force, let cached = RepoRFCCache.shared.sections(for: repo.id) {
             stats.recordCacheHit()
-            let existing = states[repo.id]
             setState(
                 RepoState(
                     mainBranch: cached.mainBranch,
                     pullRequests: cached.pullRequests,
-                    pendingReviewCount: existing?.pendingReviewCount ?? cached.pullRequests.count,
-                    openPRCount: existing?.openPRCount ?? cached.pullRequests.count,
-                    prStateCounts: existing?.prStateCounts ?? .empty,
-                    prStatsLoadedAt: existing?.prStatsLoadedAt
+                    pendingReviewCount: cached.summary.pendingReviewCount,
+                    openPRCount: cached.summary.openPRCount,
+                    prStateCounts: cached.summary.prStateCounts,
+                    prStatsLoadedAt: cached.loadedAt
                 ),
                 for: repo,
                 reason: "cache-hit"
@@ -2467,13 +2479,18 @@ private final class MenuBarDashboardStore: ObservableObject {
                 return lhs.title < rhs.title
             }
 
-            let sections = RepoRFCLoader.RFCSections(mainBranch: mainRFCs, pullRequests: prRFCs)
-            RepoRFCCache.shared.store(sections, for: repo.id)
             guard isCurrentGeneration(generation, for: repo.id) else {
                 menuBarDebugLog("[MenuBarDashboardStore] load stale-success ignored repo=\(repo.fullName) generation=\(generation)")
                 return
             }
             let syncedAt = Date()
+            let sections = RepoRFCLoader.RFCSections(
+                mainBranch: mainRFCs,
+                pullRequests: prRFCs,
+                summary: summary,
+                loadedAt: syncedAt
+            )
+            RepoRFCCache.shared.store(sections, for: repo.id)
             RepositoryStore.shared.markSynced(repo, at: syncedAt)
             stats.recordSuccess()
             setState(
@@ -2655,5 +2672,7 @@ private enum RepoRFCLoader {
     struct RFCSections {
         let mainBranch: [RFC]
         let pullRequests: [RFC]
+        let summary: RepositoryRFCSummary
+        let loadedAt: Date
     }
 }
