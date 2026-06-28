@@ -9,6 +9,7 @@ struct MenuBarContentView: View {
     @EnvironmentObject private var appState: AppState
 #if os(macOS)
     private let initialAnchorScreenX: CGFloat?
+    private let managesWindowPresentation: Bool
     @ObservedObject private var serverMgr = EmbeddedServerManager.shared
     @ObservedObject private var repoStore = RepositoryStore.shared
     @ObservedObject private var accountStore = AccountStore.shared
@@ -22,9 +23,11 @@ struct MenuBarContentView: View {
     @State private var menuAnchor = MenuBarBubbleAnchor.capture()
     @State private var pointerX = MenuBarBubbleWindowController.fallbackPointerX
 
-    init(anchorScreenX: CGFloat? = nil) {
+    init(anchorScreenX: CGFloat? = nil, managesWindowPresentation: Bool = true) {
         self.initialAnchorScreenX = anchorScreenX
+        self.managesWindowPresentation = managesWindowPresentation
         _menuAnchor = State(initialValue: MenuBarBubbleAnchor.capture(anchorScreenX))
+        _pointerX = State(initialValue: managesWindowPresentation ? MenuBarBubbleWindowController.fallbackPointerX : 280)
     }
 #else
     init() {}
@@ -36,11 +39,13 @@ struct MenuBarContentView: View {
             .frame(width: renderMode.contentSize.width, height: renderMode.contentSize.height)
             .padding(.top, MenuBarSpeechBubbleShape.pointerHeight)
             .background {
-                MenuBarBubbleWindowAccessor(
-                    contentSize: renderMode.contentSize,
-                    anchor: menuAnchor,
-                    pointerX: $pointerX
-                )
+                if managesWindowPresentation {
+                    MenuBarBubbleWindowAccessor(
+                        contentSize: renderMode.contentSize,
+                        anchor: menuAnchor,
+                        pointerX: $pointerX
+                    )
+                }
             }
             .background {
                 MenuBarSpeechBubbleShape(pointerX: pointerX)
@@ -668,10 +673,7 @@ private enum MenuBarBubbleWindowController {
             max(anchor.screenX - desiredSize.width / 2, screen.visibleFrame.minX + screenPadding),
             screen.visibleFrame.maxX - desiredSize.width - screenPadding
         )
-        let originY = min(
-            window.frame.origin.y,
-            screen.visibleFrame.maxY - desiredSize.height - screenPadding
-        )
+        let originY = screen.visibleFrame.maxY - desiredSize.height - screenPadding
         let frame = NSRect(
             x: constrainedOriginX,
             y: max(originY, screen.visibleFrame.minY + screenPadding),

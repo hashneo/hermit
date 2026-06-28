@@ -295,18 +295,20 @@ final class RFCViewerWindowManager {
 }
 
 @MainActor
-final class MenuBarStatusItemController: NSObject {
+final class MenuBarStatusItemController: NSObject, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    private var panel: NSPanel?
-    private var outsideClickMonitor: Any?
+    private let menu = NSMenu()
     private var cancellables: Set<AnyCancellable> = []
 
     func start() {
         guard let button = statusItem.button else { return }
-        button.target = self
-        button.action = #selector(togglePanel(_:))
+        button.isEnabled = true
         button.toolTip = "Hermit"
         updateIcon(hasPendingInvitation: PairingAdvertiser.shared.pendingInvitation != nil)
+        menu.delegate = self
+        menu.autoenablesItems = false
+        statusItem.menu = menu
+        Self.log("status item started; buttonFrame=\(button.frame)")
 
         PairingAdvertiser.shared.$pendingInvitation
             .receive(on: RunLoop.main)
@@ -317,78 +319,47 @@ final class MenuBarStatusItemController: NSObject {
     }
 
     func stop() {
-        closePanel()
-        if let outsideClickMonitor {
-            NSEvent.removeMonitor(outsideClickMonitor)
-            self.outsideClickMonitor = nil
-        }
         cancellables.removeAll()
         NSStatusBar.system.removeStatusItem(statusItem)
     }
 
-    @objc private func togglePanel(_ sender: Any?) {
-        if panel?.isVisible == true {
-            closePanel()
-        } else {
-            openPanel()
-        }
-    }
-
-    private func openPanel() {
+    func menuWillOpen(_ menu: NSMenu) {
         guard let button = statusItem.button,
               let buttonWindow = button.window else { return }
 
         let buttonRect = button.convert(button.bounds, to: nil)
         let screenRect = buttonWindow.convertToScreen(buttonRect)
         let anchorX = screenRect.midX
-
-        let content = MenuBarContentView(anchorScreenX: anchorX)
+        let content = MenuBarContentView(anchorScreenX: anchorX, managesWindowPresentation: false)
             .environmentObject(AppState.shared)
-        let hosting = NSHostingController(rootView: content)
-        hosting.view.wantsLayer = true
-        hosting.view.layer?.backgroundColor = NSColor.clear.cgColor
+        let hosting = NSHostingView(rootView: content)
+        hosting.frame = NSRect(x: 0, y: 0, width: 780, height: 596)
 
-        let panel = NSPanel(
-            contentRect: NSRect(x: anchorX - 280, y: screenRect.minY - 486, width: 560, height: 486),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        panel.contentViewController = hosting
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = false
-        panel.level = .statusBar
-        panel.collectionBehavior = [.transient, .ignoresCycle]
-        panel.isReleasedWhenClosed = false
-        panel.titleVisibility = .hidden
-        panel.titlebarAppearsTransparent = true
-        panel.makeKeyAndOrderFront(nil)
-        self.panel = panel
+        let item = NSMenuItem()
+        item.view = hosting
+        item.isEnabled = true
 
-        installOutsideClickMonitor()
-    }
-
-    private func closePanel() {
-        panel?.orderOut(nil)
-    }
-
-    private func installOutsideClickMonitor() {
-        if outsideClickMonitor != nil { return }
-        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            Task { @MainActor in
-                guard let self,
-                      let panel = self.panel,
-                      panel.isVisible,
-                      !panel.frame.contains(NSEvent.mouseLocation) else { return }
-                self.closePanel()
-            }
-        }
+        menu.removeAllItems()
+        menu.addItem(item)
+        Self.log("menu opened; statusRect=\(screenRect)")
     }
 
     private func updateIcon(hasPendingInvitation: Bool) {
         let symbolName = hasPendingInvitation ? "person.crop.circle.badge.exclamationmark" : "doc.text.magnifyingglass"
         statusItem.button?.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Hermit")
+    }
+
+    private static func log(_ message: String) {
+        let line = "[\(Date())] [MenuBarStatusItemController] \(message)\n"
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("hermit-native-debug.log").path
+        if !FileManager.default.fileExists(atPath: path) {
+            FileManager.default.createFile(atPath: path, contents: nil)
+        }
+        guard let data = line.data(using: .utf8),
+              let handle = FileHandle(forWritingAtPath: path) else { return }
+        handle.seekToEndOfFile()
+        handle.write(data)
+        try? handle.close()
     }
 }
 
