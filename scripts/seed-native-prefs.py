@@ -28,7 +28,7 @@ DEV_UUID_NAMESPACE = uuid.UUID("9df7786a-6338-4bd4-bebb-3f225c005a6a")
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: seed-native-prefs.py <bundle-id> [config/hermit.yaml] [--token TOKEN]", file=sys.stderr)
+        print("Usage: seed-native-prefs.py <bundle-id> [config/hermit.yaml] [--repos-json path] [--token TOKEN]", file=sys.stderr)
         sys.exit(1)
 
     bundle_id = sys.argv[1]
