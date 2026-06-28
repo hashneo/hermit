@@ -16,6 +16,7 @@ GITEA_DATA_DIR := ./data/gitea
 GITEA_SEED_SCRIPT := ./scripts/seed-gitea-pr.sh
 GITEA_TOKEN_SCRIPT := ./scripts/gitea-token.sh
 HERMIT_ENABLE_GITEA ?= 0
+HERMIT_NATIVE_REPOS_JSON ?= config/hermit-repos.meridian.json
 
 .DEFAULT_GOAL := build
 
@@ -202,7 +203,13 @@ native-seed-prefs: ## Write hermit config into the non-sandboxed UserDefaults pl
 	@BUNDLE_ID=$$(grep -E '^HERMIT_BUNDLE_ID\s*=' hermit-native/Local.xcconfig 2>/dev/null | head -1 | sed 's/.*=[ \t]*//;s/[[:space:]]*//g'); \
 	if [ -z "$$BUNDLE_ID" ]; then echo "Warning: HERMIT_BUNDLE_ID not found in Local.xcconfig — skipping pref seed"; exit 0; fi; \
 	REPOS_JSON_ARG=""; \
-	if [ -f config/hermit-repos.meridian.json ]; then REPOS_JSON_ARG="--repos-json config/hermit-repos.meridian.json"; fi; \
+	if [ -n "$(HERMIT_NATIVE_REPOS_JSON)" ]; then \
+		if [ -f "$(HERMIT_NATIVE_REPOS_JSON)" ]; then \
+			REPOS_JSON_ARG="--repos-json $(HERMIT_NATIVE_REPOS_JSON)"; \
+		else \
+			echo "Warning: HERMIT_NATIVE_REPOS_JSON=$(HERMIT_NATIVE_REPOS_JSON) not found — falling back to config/hermit.yaml"; \
+		fi; \
+	fi; \
 	$(PYTHON) scripts/seed-native-prefs.py "$$BUNDLE_ID" config/hermit.yaml $$REPOS_JSON_ARG
 
 native-open: build gomobile-build native-build-macos native-seed-prefs ## Build Go binary + xcframework + macOS app, then launch
