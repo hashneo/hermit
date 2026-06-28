@@ -78,8 +78,9 @@ type CatalogItem struct {
 }
 
 type RepositoryRFCSummary struct {
-	PendingReviewCount int `json:"pending_review_count"`
-	OpenPRCount        int `json:"open_pr_count"`
+	PendingReviewCount int           `json:"pending_review_count"`
+	OpenPRCount        int           `json:"open_pr_count"`
+	PRStates           PRStateCounts `json:"pr_states"`
 }
 
 type RepositoryRFCListResponse struct {
@@ -411,6 +412,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 		Summary: RepositoryRFCSummary{
 			PendingReviewCount: len(prResult.Items),
 			OpenPRCount:        prResult.OpenPRCount,
+			PRStates:           prResult.PRStates,
 		},
 	}
 	if s.workset != nil {

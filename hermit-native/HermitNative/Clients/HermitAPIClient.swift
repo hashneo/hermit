@@ -26,6 +26,27 @@ private func hLog(_ msg: String, log: OSLog = _apiLog, type: OSLogType = .debug)
 struct RepositoryRFCSummary {
     let pendingReviewCount: Int
     let openPRCount: Int
+    let prStateCounts: PRStateCounts
+}
+
+struct PRStateCounts {
+    var ready = 0
+    var conflicted = 0
+    var failed = 0
+    var needsReview = 0
+
+    static let empty = PRStateCounts()
+
+    var total: Int {
+        ready + conflicted + failed + needsReview
+    }
+
+    mutating func add(_ other: PRStateCounts) {
+        ready += other.ready
+        conflicted += other.conflicted
+        failed += other.failed
+        needsReview += other.needsReview
+    }
 }
 
 // MARK: - Shared API protocol
@@ -148,6 +169,13 @@ actor HermitAPIClient: HermitClientProtocol {
         struct Summary: Decodable {
             let pending_review_count: Int
             let open_pr_count: Int
+            let pr_states: PRStateCountsPayload?
+        }
+        struct PRStateCountsPayload: Decodable {
+            let ready: Int?
+            let conflicted: Int?
+            let failed: Int?
+            let needs_review: Int?
         }
         struct RFCPage: Decodable {
             let items: [RFCItem]
@@ -186,7 +214,13 @@ actor HermitAPIClient: HermitClientProtocol {
             prs,
             RepositoryRFCSummary(
                 pendingReviewCount: page.summary?.pending_review_count ?? prs.count,
-                openPRCount: page.summary?.open_pr_count ?? prs.count
+                openPRCount: page.summary?.open_pr_count ?? prs.count,
+                prStateCounts: PRStateCounts(
+                    ready: page.summary?.pr_states?.ready ?? 0,
+                    conflicted: page.summary?.pr_states?.conflicted ?? 0,
+                    failed: page.summary?.pr_states?.failed ?? 0,
+                    needsReview: page.summary?.pr_states?.needs_review ?? 0
+                )
             )
         )
     }
