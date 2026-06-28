@@ -333,17 +333,17 @@ struct MenuBarContentView: View {
                         publishedCount: aggregatePublishedCount,
                         onRefresh: { Task { await refreshDashboard(force: true) } }
                     )
-                    PRStateSummarySection(
-                        title: "PR states",
-                        items: pendingRFCItems,
-                        emptyText: "No pull request state data is available yet."
-                    )
                     PRSummarySection(
-                        title: "Pull request summaries",
+                        title: "Review queue",
                         items: pendingRFCItems,
                         emptyText: "No RFC pull requests are currently waiting for review.",
                         showsRepository: true,
                         onOpen: { item in openPRSummary(item.rfc) }
+                    )
+                    PRStateSummarySection(
+                        title: "PR states",
+                        items: pendingRFCItems,
+                        emptyText: "No pull request state data is available yet."
                     )
                 } else if let repo = selectedRepo {
                     SelectedRepoSection(
@@ -768,18 +768,23 @@ private struct CompactAllRepositoriesSummary: View {
     let serverStatusColor: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text("All repositories")
+                Text("Review workflow")
                     .font(.headline)
                 Spacer()
                 StatusCapsule(title: "\(loadedCount)/\(repoCount) loaded", systemImage: "shippingbox", tint: .secondary)
             }
 
-            HStack(spacing: 8) {
-                CompactMetricTile(title: "Review", value: pendingReviewCount, systemImage: "text.bubble", tint: .orange)
-                CompactMetricTile(title: "Open PRs", value: openPRCount, systemImage: "arrow.triangle.pull", tint: .blue)
-                CompactMetricTile(title: "Published", value: publishedCount, systemImage: "doc.text", tint: .green)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\(pendingReviewCount)")
+                    .font(.title.weight(.semibold))
+                    .monospacedDigit()
+                Text(pendingReviewCount == 1 ? "RFC waiting for review" : "RFCs waiting for review")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
             }
 
             HStack(spacing: 8) {
@@ -791,38 +796,14 @@ private struct CompactAllRepositoriesSummary: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer()
+                CountBadge(value: openPRCount, label: "PRs", tint: .blue)
+                CountBadge(value: publishedCount, label: "published", tint: .secondary)
             }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-}
-
-private struct CompactMetricTile: View {
-    let title: String
-    let value: Int
-    let systemImage: String
-    let tint: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Image(systemName: systemImage)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(tint)
-            Text("\(value)")
-                .font(.title2.weight(.semibold))
-                .monospacedDigit()
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tint.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(Color.secondary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -893,7 +874,7 @@ private struct PairingInviteBanner: View {
 }
 
 private struct RepositoryTopRail: View {
-    private static let rowHeight: CGFloat = 82
+    private static let rowHeight: CGFloat = 66
 
     let repoCount: Int
     let pendingReviewCount: Int
@@ -905,7 +886,7 @@ private struct RepositoryTopRail: View {
 
     var body: some View {
         Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Label("All repositories", systemImage: "tray.full")
                         .font(.caption.weight(.semibold))
@@ -914,10 +895,6 @@ private struct RepositoryTopRail: View {
 
                     Spacer(minLength: 6)
 
-                    StatusBadge(title: "\(repoCount)", tint: .secondary, compact: true, help: "Configured repositories")
-                }
-
-                HStack(spacing: 6) {
                     RepoMetricBadge(
                         systemImage: "text.bubble",
                         title: "Review",
@@ -932,7 +909,6 @@ private struct RepositoryTopRail: View {
                         tint: .blue,
                         help: "Open pull requests with RFCs across all repositories"
                     )
-                    Spacer(minLength: 0)
                 }
 
                 HStack(spacing: 6) {
@@ -959,10 +935,12 @@ private struct RepositoryTopRail: View {
                             .font(.caption2)
                     }
                     .menuStyle(.borderlessButton)
+
+                    StatusBadge(title: "\(repoCount) repos", tint: .secondary, compact: true, help: "Configured repositories")
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.vertical, 7)
             .frame(height: Self.rowHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(isSelected ? Color.accentColor.opacity(0.10) : Color.secondary.opacity(0.06))
@@ -1315,23 +1293,31 @@ private struct AllRepositoriesSection: View {
     let onRefresh: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("All repositories")
+                    Text("Review workflow")
                         .font(.title3.weight(.semibold))
                     Text("\(loadedCount) of \(repoCount) repositories loaded")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Refresh All", action: onRefresh)
+                Button(action: onRefresh) {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             }
 
-            HStack(spacing: 8) {
-                CountBadge(value: pendingReviewCount, label: "review", tint: .orange)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("\(pendingReviewCount)")
+                    .font(.largeTitle.weight(.semibold))
+                    .monospacedDigit()
+                Text(pendingReviewCount == 1 ? "RFC waiting for review" : "RFCs waiting for review")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 8)
                 CountBadge(value: openPRCount, label: "PRs", tint: .blue)
                 CountBadge(value: publishedCount, label: "published", tint: .secondary)
             }
