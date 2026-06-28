@@ -16,6 +16,8 @@ struct RFCPullRequest: Identifiable {
     let number: Int
     let title: String
     let prTitle: String
+    let prState: String
+    let prMerged: Bool
     let body: String
     let headSHA: String
     let headRef: String

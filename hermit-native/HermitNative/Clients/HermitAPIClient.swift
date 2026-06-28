@@ -159,6 +159,8 @@ actor HermitAPIClient: HermitClientProtocol {
             let pr_number: Int?
             let head_sha: String?
             let head_ref: String?
+            let pr_state: String?
+            let pr_merged: Bool?
             let mergeable: Bool?
             let mergeable_state: String?
             let document_type: String?
@@ -198,11 +200,13 @@ actor HermitAPIClient: HermitClientProtocol {
                     id: prNumber, number: prNumber,
                     title: item.title,
                     prTitle: item.pr_title ?? item.title,
+                    prState: item.pr_state ?? "open",
+                    prMerged: item.pr_merged ?? false,
                     body: "",
                     headSHA: item.head_sha ?? "",
                     headRef: item.head_ref ?? "",
                     htmlURL: item.html_url ?? "",
-                    state: "open",
+                    state: item.pr_state ?? "open",
                     draft: false,
                     mergeable: item.mergeable,
                     mergeableState: item.mergeable_state,
@@ -589,7 +593,8 @@ actor HermitAPIClient: HermitClientProtocol {
         }
         let pr = try JSONDecoder().decode(PR.self, from: data)
         return RFCPullRequest(id: pr.number, number: pr.number,
-                              title: pr.title, prTitle: pr.title, body: pr.body,
+                              title: pr.title, prTitle: pr.title,
+                              prState: "open", prMerged: false, body: pr.body,
                               headSHA: pr.headSHA, headRef: pr.headRef,
                               htmlURL: pr.htmlURL, state: pr.state,
                               draft: pr.draft, mergeable: nil,
