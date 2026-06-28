@@ -782,11 +782,13 @@ private struct AddRepoSheet: View {
     @State private var name     = ""
     @State private var docsPath = ""
     @State private var rfcLabel = "hermit:rfc-ready"
+    @State private var isSaving = false
 
     var canSave: Bool {
         selectedAccountID != nil &&
         !owner.trimmingCharacters(in: .whitespaces).isEmpty &&
-        !name.trimmingCharacters(in: .whitespaces).isEmpty
+        !name.trimmingCharacters(in: .whitespaces).isEmpty &&
+        !isSaving
     }
 
     var body: some View {
@@ -841,15 +843,7 @@ private struct AddRepoSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        guard let aid = selectedAccountID else { return }
-                        repoStore.add(
-                            accountID: aid,
-                            owner:     owner.trimmingCharacters(in: .whitespaces),
-                            name:      name.trimmingCharacters(in: .whitespaces),
-                            docsPath:  docsPath.isEmpty ? "docs-cms/rfcs" : docsPath.trimmingCharacters(in: .whitespaces),
-                            rfcLabel:  rfcLabel.isEmpty ? "hermit:rfc-ready" : rfcLabel.trimmingCharacters(in: .whitespaces)
-                        )
-                        isPresented = false
+                        Task { await saveRepository() }
                     }
                     .disabled(!canSave)
                 }
@@ -863,6 +857,85 @@ private struct AddRepoSheet: View {
 #if os(macOS)
         .frame(width: 480, height: 380)
 #endif
+    }
+
+    private func saveRepository() async {
+        guard let aid = selectedAccountID else { return }
+        isSaving = true
+        defer { isSaving = false }
+
+        var repo = Repository(
+            accountID: aid,
+            owner: owner.trimmingCharacters(in: .whitespaces),
+            name: name.trimmingCharacters(in: .whitespaces),
+            docsPath: docsPath.isEmpty ? "docs-cms/rfcs" : docsPath.trimmingCharacters(in: .whitespaces),
+            rfcLabel: rfcLabel.isEmpty ? "hermit:rfc-ready" : rfcLabel.trimmingCharacters(in: .whitespaces)
+        )
+        let registeredServerID = await registerWithRunningServer(repo)
+        if let serverID = registeredServerID {
+            repo.serverID = serverID
+            repo.lastSyncedAt = Date()
+        }
+        repoStore.add(repo, requiresRestart: registeredServerID == nil)
+        isPresented = false
+    }
+
+    private func registerWithRunningServer(_ repo: Repository) async -> String? {
+        guard let account = accountStore.connections.first(where: { $0.id == repo.accountID }),
+              let token = accountStore.token(for: account), !token.isEmpty,
+              !AppState.shared.serverBaseURL.isEmpty,
+              let base = URL(string: AppState.shared.serverBaseURL) else {
+            return nil
+        }
+
+        var req = URLRequest(url: base.appendingPathComponent("api/v1/repositories"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 5
+        let payload: [String: String] = [
+            "owner": repo.owner,
+            "name": repo.name,
+            "base_url": resolvedAPIBase(for: account.endpoint),
+            "personal_access_token": token,
+            "docs_path_policy": repo.docsPath,
+            "rfc_label": repo.rfcLabel
+        ]
+        req.httpBody = try? JSONEncoder().encode(payload)
+
+        guard let (data, response) = try? await URLSession.shared.data(for: req),
+              let http = response as? HTTPURLResponse else { return nil }
+        if http.statusCode == 409 {
+            return await findServerRepositoryID(for: repo, token: token, base: base)
+        }
+        guard (200..<300).contains(http.statusCode) else { return nil }
+        struct CreatedRepository: Decodable { let id: String }
+        return try? JSONDecoder().decode(CreatedRepository.self, from: data).id
+    }
+
+    private func findServerRepositoryID(for repo: Repository, token: String, base: URL) async -> String? {
+        var req = URLRequest(url: base.appendingPathComponent("api/v1/repositories"))
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 5
+        guard let (data, response) = try? await URLSession.shared.data(for: req),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else { return nil }
+        struct Item: Decodable { let id: String; let owner: String; let name: String }
+        struct Page: Decodable { let items: [Item] }
+        guard let page = try? JSONDecoder().decode(Page.self, from: data) else { return nil }
+        return page.items.first {
+            $0.owner.caseInsensitiveCompare(repo.owner) == .orderedSame &&
+            $0.name.caseInsensitiveCompare(repo.name) == .orderedSame
+        }?.id
+    }
+
+    private func resolvedAPIBase(for rawEndpoint: String) -> String {
+        let trimmed = rawEndpoint.trimmingCharacters(in: .init(charactersIn: "/"))
+        guard let host = URL(string: trimmed)?.host else { return trimmed }
+        if host == "github.com" || host == "api.github.com" { return trimmed }
+        if trimmed.hasSuffix("/api/v3") { return trimmed }
+        if trimmed.hasSuffix("/api/v1") { return trimmed }
+        return trimmed + "/api/v1"
     }
 }
 

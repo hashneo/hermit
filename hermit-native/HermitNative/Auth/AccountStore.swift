@@ -255,10 +255,16 @@ final class RepositoryStore: ObservableObject {
              docsPath: String = "docs-cms/rfcs", rfcLabel: String = "hermit:rfc-ready") {
         let repo = Repository(accountID: accountID, owner: owner, name: name,
                               docsPath: docsPath, rfcLabel: rfcLabel)
+        add(repo)
+    }
+
+    func add(_ repo: Repository, requiresRestart: Bool = true) {
         repositories.append(repo)
         save()
-        // hermit-9ds: no live server restart — user must relaunch to apply config changes.
-        NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
+        if requiresRestart {
+            // hermit-9ds: no live server restart — user must relaunch to apply config changes.
+            NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
+        }
     }
 
     func update(_ repo: Repository) {
