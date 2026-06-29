@@ -27,7 +27,7 @@ func isPrivilegedPermission(_ permission: String) -> Bool {
 struct RFCLifecycleToolbar: ToolbarContent {
     let rfc: RFC
     /// For PR RFCs: the direct blob URL to the RFC file on the PR branch.
-    /// When non-empty, used by "Open RFC File" instead of the PR landing page URL.
+    /// When non-empty, used by "Open Source Doc" instead of the PR landing page URL.
     var fileURL: String = ""
     /// Permission level fetched asynchronously by RFCDetailView after load.
     var callerPermission: String = "none"
@@ -406,7 +406,7 @@ struct RFCLifecycleToolbar: ToolbarContent {
                     Button {
                         openURL(fileURL)
                     } label: {
-                        Label("Open RFC File", systemImage: "doc.text")
+                        Label("Open Source Doc", systemImage: "doc.text")
                     }
                 } else {
                     Button {

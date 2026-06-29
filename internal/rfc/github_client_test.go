@@ -667,6 +667,65 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_IncludesClosedLabeledDocsCMSPR(
 	}
 }
 
+func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_DiscoversReviewSessionMarker(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case isDocuchangoProjectConfigProbe(r):
+			http.NotFound(w, r)
+		case r.URL.Path == "/repos/owner/repo/pulls":
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{
+					"number":          77,
+					"title":           "docs(review): new review for prd-001-loop",
+					"state":           "open",
+					"draft":           false,
+					"mergeable":       true,
+					"mergeable_state": "clean",
+					"head":            map[string]any{"sha": "sha-marker", "ref": "hermit/review/prd-001-loop"},
+					"html_url":        "https://github.test/owner/repo/pull/77",
+					"labels":          []map[string]any{{"name": "prd:review"}},
+				},
+			})
+		case r.URL.Path == "/repos/owner/repo/pulls/77/files":
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"filename": ".hermit/reviews/20260629T000000Z-prd-001-loop.json", "status": "added", "additions": 11, "deletions": 0},
+			})
+		case r.URL.Path == "/repos/owner/repo/contents/.hermit/reviews/20260629T000000Z-prd-001-loop.json":
+			if r.URL.Query().Get("ref") != "sha-marker" {
+				t.Fatalf("expected marker lookup at head sha, got %q", r.URL.Query().Get("ref"))
+			}
+			writeContentResponse(t, w, "marker.json", `{"version":1,"source_path":"docs-cms/prd/prd-001-loop.md","source_title":"Automated PR Processing Loop","document_type":"prd","base_branch":"main","base_sha":"base"}`)
+		case r.URL.Path == "/repos/owner/repo/contents/docs-cms/prd/prd-001-loop.md":
+			if r.URL.Query().Get("ref") != "sha-marker" {
+				t.Fatalf("expected source document lookup at head sha, got %q", r.URL.Query().Get("ref"))
+			}
+			writeContentResponse(t, w, "prd-001-loop.md", "---\ntitle: Automated PR Processing Loop\n---\n# Automated PR Processing Loop\n")
+		default:
+			t.Fatalf("unexpected request path: %s?%s", r.URL.Path, r.URL.RawQuery)
+		}
+	}))
+	defer server.Close()
+
+	client := NewHTTPGitHubRFCClient()
+	result, err := client.ListReviewReadyRFCs(context.Background(), server.URL, "owner", "repo", "docs-cms/rfcs", "hermit:rfc-ready", "token")
+	if err != nil {
+		t.Fatalf("ListReviewReadyRFCs returned error: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("expected one marker-backed review item, got %+v", result.Items)
+	}
+	item := result.Items[0]
+	if item.PRNumber != 77 || item.Path != "docs-cms/prd/prd-001-loop.md" || item.DocumentType != "prd" {
+		t.Fatalf("unexpected marker review item: %+v", item)
+	}
+	if item.ChangedFiles != 1 || item.Additions != 11 || item.Deletions != 0 {
+		t.Fatalf("expected marker PR stats, got changed=%d additions=%d deletions=%d", item.ChangedFiles, item.Additions, item.Deletions)
+	}
+	if item.Title != "Automated PR Processing Loop" {
+		t.Fatalf("expected source document title, got %q", item.Title)
+	}
+}
+
 func TestHTTPGitHubRFCClient_GetRFCFromPullRequest_UsesHeadSHAAndValidatesMembership(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -706,6 +765,47 @@ func TestHTTPGitHubRFCClient_GetRFCFromPullRequest_UsesHeadSHAAndValidatesMember
 	_, err = client.GetRFCFromPullRequest(context.Background(), server.URL, "owner", "repo", 23, "docs-cms/rfcs/rfc-999-missing.md", "token")
 	if err == nil {
 		t.Fatalf("expected error when requested file is not part of PR")
+	}
+}
+
+func TestHTTPGitHubRFCClient_GetRFCFromPullRequest_AllowsReviewSessionMarkerSource(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/owner/repo/pulls/88":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"head": map[string]any{"sha": "sha-review-session"},
+				"user": map[string]any{"login": "alice"},
+			})
+		case r.URL.Path == "/repos/owner/repo/pulls/88/files":
+			_ = json.NewEncoder(w).Encode([]map[string]string{
+				{"filename": ".hermit/reviews/20260629T000000Z-rfc-001-source.json", "status": "added"},
+			})
+		case r.URL.Path == "/repos/owner/repo/contents/.hermit/reviews/20260629T000000Z-rfc-001-source.json":
+			if r.URL.Query().Get("ref") != "sha-review-session" {
+				t.Fatalf("expected marker lookup at PR head sha, got %q", r.URL.Query().Get("ref"))
+			}
+			writeContentResponse(t, w, "marker.json", `{"version":1,"source_path":"docs-cms/rfcs/rfc-001-source.md","document_type":"rfc","base_branch":"main","base_sha":"base"}`)
+		case r.URL.Path == "/repos/owner/repo/contents/docs-cms/rfcs/rfc-001-source.md":
+			if r.URL.Query().Get("ref") != "sha-review-session" {
+				t.Fatalf("expected source lookup at PR head sha, got %q", r.URL.Query().Get("ref"))
+			}
+			writeContentResponse(t, w, "rfc-001-source.md", "# Source RFC\n")
+		default:
+			t.Fatalf("unexpected request path: %s?%s", r.URL.Path, r.URL.RawQuery)
+		}
+	}))
+	defer server.Close()
+
+	client := NewHTTPGitHubRFCClient()
+	view, err := client.GetRFCFromPullRequest(context.Background(), server.URL, "owner", "repo", 88, "docs-cms/rfcs/rfc-001-source.md", "token")
+	if err != nil {
+		t.Fatalf("GetRFCFromPullRequest returned error: %v", err)
+	}
+	if !strings.Contains(view.MarkdownSource, "Source RFC") {
+		t.Fatalf("expected markdown_source to include source markdown")
+	}
+	if view.PRAuthorLogin != "alice" {
+		t.Fatalf("expected PR author login alice, got %q", view.PRAuthorLogin)
 	}
 }
 

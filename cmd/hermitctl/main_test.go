@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -112,6 +113,44 @@ func TestReviewStateValidatesExpectations(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "approved: true") {
 		t.Fatalf("expected approval state in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestReviewStartPostsReviewSessionAndValidatesResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/api/v1/repositories/repo-1/review-sessions" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["file_path"] != "docs-cms/prd/prd-001-loop.md" {
+			t.Fatalf("file_path = %#v", body["file_path"])
+		}
+		if body["previous_pr_number"] != float64(7) {
+			t.Fatalf("previous_pr_number = %#v", body["previous_pr_number"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"pr_number":88,"html_url":"https://example.test/pr/88","branch":"hermit/review/prd-001-loop-20260629T000000Z","file_path":"docs-cms/prd/prd-001-loop.md","marker_path":".hermit/reviews/20260629T000000Z-prd-001-loop.json","document_type":"prd","previous_pr_number":7}`))
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"--addr", server.URL, "review", "start", "--file", "docs-cms/prd/prd-001-loop.md", "--previous-pr", "7", "--expect-pr", "88", "--expect-file", "docs-cms/prd/prd-001-loop.md", "--expect-doc-type", "prd", "repo-1"}, strings.NewReader(""), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run returned error: %v; stderr=%s", err, stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "started review session PR #88 in repo-1") {
+		t.Fatalf("expected review session output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "doc_type: prd") {
+		t.Fatalf("expected doc type in output, got:\n%s", output)
 	}
 }
 
