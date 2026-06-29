@@ -105,6 +105,15 @@ func TestStorePersistsRepositoryRFCLists(t *testing.T) {
 	if projection.Cache.LastErrorCode != "provider_error" || projection.Cache.LastErrorMessage != "rate limited" {
 		t.Fatalf("error metadata = %q/%q, want provider_error/rate limited", projection.Cache.LastErrorCode, projection.Cache.LastErrorMessage)
 	}
+
+	if err := reopened.InvalidateRepositoryRFCList(context.Background(), "repo-1"); err != nil {
+		t.Fatalf("invalidate repository rfc list: %v", err)
+	}
+	if _, ok, err := reopened.GetFreshRepositoryRFCList(context.Background(), "repo-1", time.Hour); err != nil {
+		t.Fatalf("get invalidated repository rfc list: %v", err)
+	} else if ok {
+		t.Fatalf("expected invalidated repository rfc list cache miss")
+	}
 }
 
 func TestStoreEnqueuesOperationMetadata(t *testing.T) {

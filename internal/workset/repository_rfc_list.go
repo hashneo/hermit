@@ -94,6 +94,14 @@ func (s *Store) PutRepositoryRFCListError(ctx context.Context, repositoryID, cod
 	return err
 }
 
+func (s *Store) InvalidateRepositoryRFCList(ctx context.Context, repositoryID string) error {
+	if repositoryID == "" {
+		return errors.New("repository id is required")
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM repository_rfc_lists WHERE repository_id = ?`, repositoryID)
+	return err
+}
+
 func (s *Store) getRepositoryRFCList(ctx context.Context, repositoryID string) (cacheRecord, bool, error) {
 	var payload, successText, attemptedText, errorCode, errorMessage string
 	err := s.db.QueryRowContext(ctx, `
