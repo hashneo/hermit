@@ -17,12 +17,16 @@ Without an explicit selection signal, discovering commentable PR RFCs requires s
 
 # Decision
 
-Hermit will use a GitHub label as the primary candidate signal for PR RFC commentable state.
+Hermit will use GitHub labels as the candidate and workflow-state signal for PR RFC commentable state.
 
 For v1:
 
-- Required positive label: `hermit:rfc-ready`
-- Hermit will only evaluate RFC files in PRs that are open, non-draft, and carry the required label.
+- Compatibility RFC label: `hermit:rfc-ready`
+- Docuchango workflow labels: `<doc-type>:<state>`, such as `rfc:needs-review`, `adr:needs-review`, `rfc:needs-changes`, and `rfc:reviewed`.
+- Hermit evaluates open, non-draft PRs for changed docs-cms documents and auto-applies `<doc-type>:needs-review` when a changed document is reviewable.
+- Hermit treats `<doc-type>:needs-review`, legacy `<doc-type>:review`, and `<doc-type>:needs-changes` as active review queue states.
+- Hermit treats `<doc-type>:reviewed` as completed review history; it does not keep a closed PR in the active review queue.
+- When Hermit applies a new workflow state for a document type, it removes older Hermit workflow-state labels for that same document type so the label state is idempotent.
 - Hermit will still validate RFC file path and naming conventions before enabling commentability.
 
 Main-branch RFCs remain non-commentable and support status transitions only.

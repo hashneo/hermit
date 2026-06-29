@@ -52,6 +52,8 @@ type GitHubRFCClient interface {
 	LabelExists(ctx context.Context, baseURL, owner, name, label, token string) (bool, error)
 	// AddLabels appends labels to a pull request (issues API).
 	AddLabels(ctx context.Context, baseURL, owner, name string, prNumber int, labels []string, token string) error
+	// RemoveLabel removes a label from a pull request (issues API). Missing labels are treated as success.
+	RemoveLabel(ctx context.Context, baseURL, owner, name string, prNumber int, label, token string) error
 
 	// Access control — returns "admin", "maintain", "write", "triage", "read", or "none".
 	GetCollaboratorPermission(ctx context.Context, baseURL, owner, name, username, token string) (string, error)
@@ -359,7 +361,7 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 				docTypes = append(docTypes, fallbackDocuchangoDocTypes(sourcePath, docsPath)...)
 				docTypes = uniqueDocuchangoDocTypes(docTypes)
 				for _, docType := range docTypes {
-					workflowLabels[docuchangoWorkflowLabel(docType, docuchangoWorkflowStateReview)] = struct{}{}
+					workflowLabels[docuchangoWorkflowLabel(docType, docuchangoWorkflowStateNeedsReview)] = struct{}{}
 				}
 				docType := primaryReviewDocumentType(docTypes)
 				if docType == "" {
@@ -383,7 +385,7 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 			docTypes = append(docTypes, fallbackDocuchangoDocTypes(prFile.Filename, docsPath)...)
 			docTypes = uniqueDocuchangoDocTypes(docTypes)
 			for _, docType := range docTypes {
-				workflowLabels[docuchangoWorkflowLabel(docType, docuchangoWorkflowStateReview)] = struct{}{}
+				workflowLabels[docuchangoWorkflowLabel(docType, docuchangoWorkflowStateNeedsReview)] = struct{}{}
 			}
 			docType := primaryReviewDocumentType(docTypes)
 			if docType == "" {
@@ -399,7 +401,7 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 				DocumentType: docType,
 			})
 		}
-		if len(workflowLabels) > 0 {
+		if prState == "open" && len(workflowLabels) > 0 {
 			appliedLabels, err := c.ensureAndApplyWorkflowLabels(ctx, baseURL, owner, name, pr.Number, workflowLabels, labelNames, token)
 			if err != nil {
 				slog.Warn("auto-apply Hermit workflow labels failed", "owner", owner, "repo", name, "pr", pr.Number, "error", err)
@@ -1537,7 +1539,8 @@ func prHasReviewWorkflowLabel(labels []struct {
 		if name == strings.ToLower(strings.TrimSpace(rfcLabel)) {
 			return true
 		}
-		if strings.HasSuffix(name, ":review") || strings.HasSuffix(name, ":needs-changes") {
+		_, state, ok := docuchangoWorkflowLabelParts(name)
+		if ok && docuchangoWorkflowStateKeepsReviewQueued(state) {
 			return true
 		}
 	}
@@ -1547,7 +1550,17 @@ func prHasReviewWorkflowLabel(labels []struct {
 func (c *HTTPGitHubRFCClient) ensureAndApplyWorkflowLabels(ctx context.Context, baseURL, owner, name string, prNumber int, labels map[string]struct{}, existing []string, token string) ([]string, error) {
 	existingSet := map[string]struct{}{}
 	for _, label := range existing {
-		existingSet[label] = struct{}{}
+		existingSet[strings.ToLower(strings.TrimSpace(label))] = struct{}{}
+	}
+
+	desiredDocTypes := map[string]struct{}{}
+	desiredLabels := map[string]struct{}{}
+	for label := range labels {
+		docType, _, ok := docuchangoWorkflowLabelParts(label)
+		if ok {
+			desiredDocTypes[docType] = struct{}{}
+			desiredLabels[strings.ToLower(strings.TrimSpace(label))] = struct{}{}
+		}
 	}
 
 	missing := make([]string, 0, len(labels))
@@ -1555,7 +1568,7 @@ func (c *HTTPGitHubRFCClient) ensureAndApplyWorkflowLabels(ctx context.Context, 
 		if label == "" {
 			continue
 		}
-		if _, ok := existingSet[label]; ok {
+		if _, ok := existingSet[strings.ToLower(strings.TrimSpace(label))]; ok {
 			continue
 		}
 		if err := c.EnsureLabel(ctx, baseURL, owner, name, label, "0075ca", docuchangoWorkflowLabelDescription(label), token); err != nil {
@@ -1564,21 +1577,38 @@ func (c *HTTPGitHubRFCClient) ensureAndApplyWorkflowLabels(ctx context.Context, 
 		missing = append(missing, label)
 	}
 	sort.Strings(missing)
-	if len(missing) == 0 {
-		return existing, nil
-	}
-	if err := c.AddLabels(ctx, baseURL, owner, name, prNumber, missing, token); err != nil {
-		return existing, err
-	}
 	out := append([]string{}, existing...)
-	out = append(out, missing...)
+	if len(missing) > 0 {
+		if err := c.AddLabels(ctx, baseURL, owner, name, prNumber, missing, token); err != nil {
+			return existing, err
+		}
+		out = append(out, missing...)
+	}
+	for _, label := range existing {
+		docType, _, ok := docuchangoWorkflowLabelParts(label)
+		if !ok {
+			continue
+		}
+		if _, ok := desiredDocTypes[docType]; !ok {
+			continue
+		}
+		if _, ok := desiredLabels[strings.ToLower(strings.TrimSpace(label))]; ok {
+			continue
+		}
+		if err := c.RemoveLabel(ctx, baseURL, owner, name, prNumber, label, token); err != nil {
+			return existing, err
+		}
+		out = removeStringFold(out, label)
+	}
 	sort.Strings(out)
 	return out, nil
 }
 
 const (
+	docuchangoWorkflowStateNeedsReview  = "needs-review"
 	docuchangoWorkflowStateReview       = "review"
 	docuchangoWorkflowStateNeedsChanges = "needs-changes"
+	docuchangoWorkflowStateReviewed     = "reviewed"
 	docuchangoWorkflowStateReady        = "ready"
 )
 
@@ -1594,13 +1624,61 @@ func docuchangoWorkflowLabel(docType, state string) string {
 func normalizeDocuchangoWorkflowState(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	switch value {
+	case docuchangoWorkflowStateNeedsReview:
+		return docuchangoWorkflowStateNeedsReview
+	case docuchangoWorkflowStateReview:
+		return docuchangoWorkflowStateReview
 	case docuchangoWorkflowStateNeedsChanges:
 		return docuchangoWorkflowStateNeedsChanges
+	case docuchangoWorkflowStateReviewed:
+		return docuchangoWorkflowStateReviewed
 	case docuchangoWorkflowStateReady:
 		return docuchangoWorkflowStateReady
 	default:
-		return docuchangoWorkflowStateReview
+		return docuchangoWorkflowStateNeedsReview
 	}
+}
+
+func docuchangoWorkflowLabelParts(label string) (docType, state string, ok bool) {
+	docType, state, ok = strings.Cut(strings.ToLower(strings.TrimSpace(label)), ":")
+	if !ok {
+		return "", "", false
+	}
+	docType = normalizeDocuchangoDocType(docType)
+	state = strings.ToLower(strings.TrimSpace(state))
+	if docType == "" || !isDocuchangoWorkflowState(state) {
+		return "", "", false
+	}
+	return docType, state, true
+}
+
+func isDocuchangoWorkflowState(state string) bool {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case docuchangoWorkflowStateNeedsReview, docuchangoWorkflowStateReview, docuchangoWorkflowStateNeedsChanges, docuchangoWorkflowStateReviewed, docuchangoWorkflowStateReady:
+		return true
+	default:
+		return false
+	}
+}
+
+func docuchangoWorkflowStateKeepsReviewQueued(state string) bool {
+	switch normalizeDocuchangoWorkflowState(state) {
+	case docuchangoWorkflowStateNeedsReview, docuchangoWorkflowStateReview, docuchangoWorkflowStateNeedsChanges:
+		return true
+	default:
+		return false
+	}
+}
+
+func removeStringFold(values []string, target string) []string {
+	out := values[:0]
+	for _, value := range values {
+		if strings.EqualFold(value, target) {
+			continue
+		}
+		out = append(out, value)
+	}
+	return out
 }
 
 func docuchangoWorkflowLabelDescription(label string) string {
@@ -2092,6 +2170,34 @@ func (c *HTTPGitHubRFCClient) AddLabels(ctx context.Context, baseURL, owner, nam
 	resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("add labels failed: %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// RemoveLabel removes a label from a pull request via the GitHub Issues API.
+func (c *HTTPGitHubRFCClient) RemoveLabel(ctx context.Context, baseURL, owner, name string, prNumber int, label, token string) error {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return nil
+	}
+	apiBase := strings.TrimRight(baseURL, "/")
+	u := fmt.Sprintf("%s/repos/%s/%s/issues/%d/labels/%s", apiBase, owner, name, prNumber, url.PathEscape(label))
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
+	if err != nil {
+		return err
+	}
+	setGitHubHeaders(req, token)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	io.Copy(io.Discard, resp.Body) //nolint:errcheck
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("remove label failed: %d", resp.StatusCode)
 	}
 	return nil
 }

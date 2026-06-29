@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path"
 	"strings"
 	"testing"
 )
@@ -285,19 +286,20 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *t
 	if items[0].Title != "Ready PR RFC" {
 		t.Fatalf("expected title from markdown content, got %q", items[0].Title)
 	}
-	if !containsString(items[0].Labels, "hermit:rfc-ready") || !containsString(items[0].Labels, "rfc:review") {
-		t.Fatalf("expected labels to contain hermit:rfc-ready and rfc:review, got %v", items[0].Labels)
+	if !containsString(items[0].Labels, "hermit:rfc-ready") || !containsString(items[0].Labels, "rfc:needs-review") {
+		t.Fatalf("expected labels to contain hermit:rfc-ready and rfc:needs-review, got %v", items[0].Labels)
 	}
 }
 
 func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_AutoLabelsRFCWithoutReadyLabel(t *testing.T) {
 	var appliedLabels []string
+	var removedLabels []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/repos/owner/repo/pulls":
 			_ = json.NewEncoder(w).Encode([]map[string]any{
 				{"number": 20, "draft": false, "head": map[string]any{"sha": "sha-labeled"}, "labels": []map[string]any{{"name": "hermit:rfc-ready"}}},
-				{"number": 21, "draft": false, "head": map[string]any{"sha": "sha-unlabeled"}, "labels": []map[string]any{}},
+				{"number": 21, "draft": false, "head": map[string]any{"sha": "sha-unlabeled"}, "labels": []map[string]any{{"name": "rfc:review"}}},
 			})
 		case r.URL.Path == "/repos/owner/repo/pulls/20/files":
 			_ = json.NewEncoder(w).Encode([]map[string]string{
@@ -337,6 +339,9 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_AutoLabelsRFCWithoutReadyLabel(
 			_ = json.NewDecoder(r.Body).Decode(&payload)
 			appliedLabels = append(appliedLabels, payload.Labels...)
 			_ = json.NewEncoder(w).Encode(payload)
+		case isIssueLabelDelete(r):
+			removedLabels = append(removedLabels, path.Base(r.URL.Path))
+			w.WriteHeader(http.StatusOK)
 		case handleWorkflowLabelTestRequest(w, r):
 			return
 		default:
@@ -374,8 +379,11 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_AutoLabelsRFCWithoutReadyLabel(
 	if containsString(appliedLabels, "hermit:rfc-ready") {
 		t.Fatalf("expected discovery not to auto-apply legacy RFC ready label, got %v", appliedLabels)
 	}
-	if !containsString(appliedLabels, "rfc:review") {
+	if !containsString(appliedLabels, "rfc:needs-review") {
 		t.Fatalf("expected auto-applied RFC review workflow label, got %v", appliedLabels)
+	}
+	if !containsString(removedLabels, "rfc:review") {
+		t.Fatalf("expected superseded RFC review workflow label to be removed, got %v", removedLabels)
 	}
 }
 
@@ -404,13 +412,13 @@ indexes:
 				"mergeable":       true,
 				"mergeable_state": "clean",
 			})
-		case "/repos/owner/repo/labels/rfc:review":
+		case "/repos/owner/repo/labels/rfc:needs-review":
 			http.NotFound(w, r)
 		case "/repos/owner/repo/labels":
 			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(map[string]any{"name": "rfc:review"})
+			_ = json.NewEncoder(w).Encode(map[string]any{"name": "rfc:needs-review"})
 		case "/repos/owner/repo/issues/30/labels":
-			_ = json.NewEncoder(w).Encode(map[string]any{"labels": []string{"rfc:review"}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"labels": []string{"rfc:needs-review"}})
 		case "/repos/owner/repo/contents/docs/proposals/rfc-030-indexed.md":
 			writeContentResponse(t, w, "rfc-030-indexed.md", "---\ntitle: Indexed RFC\n---\n# Indexed RFC\n")
 		default:
@@ -528,7 +536,7 @@ structure:
 			t.Fatalf("item %d missing PR html url: %q", i, got.HTMLURL)
 		}
 	}
-	for _, label := range []string{"adr:review", "memo:review", "prd:review", "rfc:review"} {
+	for _, label := range []string{"adr:needs-review", "memo:needs-review", "prd:needs-review", "rfc:needs-review"} {
 		if !containsString(appliedLabels, label) {
 			t.Fatalf("expected applied labels to contain %s, got %v", label, appliedLabels)
 		}
@@ -624,6 +632,14 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_IncludesClosedLabeledDocsCMSPR(
 					"head":   map[string]any{"sha": "sha-old", "ref": "docs-old"},
 					"labels": []map[string]any{},
 				},
+				{
+					"number": 44,
+					"title":  "docs: already reviewed",
+					"state":  "closed",
+					"draft":  false,
+					"head":   map[string]any{"sha": "sha-reviewed", "ref": "docs-reviewed"},
+					"labels": []map[string]any{{"name": "adr:reviewed"}},
+				},
 			})
 		case r.URL.Path == "/repos/owner/repo/pulls/42":
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -637,6 +653,8 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_IncludesClosedLabeledDocsCMSPR(
 			})
 		case r.URL.Path == "/repos/owner/repo/pulls/43/files":
 			t.Fatalf("unlabeled closed PR files should not be requested")
+		case r.URL.Path == "/repos/owner/repo/pulls/44/files":
+			t.Fatalf("reviewed closed PR files should not be requested")
 		case r.URL.Path == "/repos/owner/repo/contents/docs-cms/adr/adr-042-closed.md":
 			writeContentResponse(t, w, "adr-042-closed.md", "---\ntitle: Closed ADR\n---\n# Closed ADR\n")
 		case handleWorkflowLabelTestRequest(w, r):
@@ -683,7 +701,7 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_DiscoversReviewSessionMarker(t 
 					"mergeable_state": "clean",
 					"head":            map[string]any{"sha": "sha-marker", "ref": "hermit/review/prd-001-loop"},
 					"html_url":        "https://github.test/owner/repo/pull/77",
-					"labels":          []map[string]any{{"name": "prd:review"}},
+					"labels":          []map[string]any{{"name": "prd:needs-review"}},
 				},
 			})
 		case r.URL.Path == "/repos/owner/repo/pulls/77/files":
@@ -827,11 +845,19 @@ func handleWorkflowLabelTestRequest(w http.ResponseWriter, r *http.Request) bool
 		_ = json.NewEncoder(w).Encode(payload)
 		return true
 	}
+	if isIssueLabelDelete(r) {
+		w.WriteHeader(http.StatusOK)
+		return true
+	}
 	return false
 }
 
 func isIssueLabelPost(r *http.Request) bool {
 	return r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/repos/owner/repo/issues/") && strings.HasSuffix(r.URL.Path, "/labels")
+}
+
+func isIssueLabelDelete(r *http.Request) bool {
+	return r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/repos/owner/repo/issues/") && strings.Contains(r.URL.Path, "/labels/")
 }
 
 func isDocuchangoProjectConfigProbe(r *http.Request) bool {

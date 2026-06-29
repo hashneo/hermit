@@ -57,16 +57,20 @@ Use labels with the format:
 
 `<state>` is one of:
 
-- `review`: document is in active review. Hermit may auto-apply this when an open, non-draft PR changes a docs-cms document.
+- `needs-review`: document is waiting for review. Hermit auto-applies this when an open, non-draft PR changes a docs-cms document.
+- `review`: legacy active-review state. Hermit continues to treat this as queued work for compatibility, but new automation writes `needs-review`.
 - `needs-changes`: reviewers have requested author updates.
 - `ready`: reviewers consider the document ready for acceptance, merge, or the next workflow step.
+- `reviewed`: review is complete. Hermit keeps this as visible GitHub state and does not include the PR in the active review queue.
+
+The state labels are idempotent per document type. When Hermit applies a new state for a document type, it removes older Hermit workflow-state labels for that same type, such as replacing `rfc:review` with `rfc:needs-review`.
 
 Example labels:
 
-- `rfc:review`
+- `rfc:needs-review`
 - `rfc:needs-changes`
 - `rfc:ready`
-- `adr:review`
+- `adr:reviewed`
 
 The older `hermit:rfc-ready` label remains a compatibility label for existing RFC submit/review flows, but new automatic docs-cms detection should use `<doc-type>:<state>`.
 
@@ -77,7 +81,7 @@ For each configured repository:
 1. Query open PRs and skip drafts.
 2. Fetch changed files for each open, non-draft PR.
 3. Load Docuchango metadata from `docs-project.yaml` and match changed files to configured document types.
-4. Auto-apply `<doc-type>:review` labels for matched docs-cms document changes when the label is missing.
+4. Auto-apply `<doc-type>:needs-review` labels for matched docs-cms document changes when the label is missing, removing superseded `<doc-type>:review`, `<doc-type>:needs-changes`, `<doc-type>:ready`, or `<doc-type>:reviewed` labels for the same document type.
 5. Keep RFC files that satisfy all conditions:
    - path matches the configured RFC document location or index target
    - filename format `rfc-NNN-short-description.md`
@@ -88,6 +92,8 @@ For each configured repository:
 9. Merge with `main_rfc` catalog into one response model.
 
 Hermit still validates file path and format even when labels exist. Labels are workflow-state signals, not sole truth.
+
+Closed PRs are inspected only when they already carry an active review workflow label (`<doc-type>:needs-review`, legacy `<doc-type>:review`, or `<doc-type>:needs-changes`). A closed PR with `<doc-type>:reviewed` is treated as completed history, not active review work.
 
 ## Review Session PRs
 
@@ -102,7 +108,7 @@ The PR contains a marker file, not a source document rewrite. Marker files live 
 - `base_branch` and `base_sha`: source branch context used to open the session
 - `previous_pr_number`: optional prior PR history
 
-Hermit applies `<doc-type>:review` to the new PR. RFC review-session PRs may also carry the legacy `hermit:rfc-ready` label for compatibility.
+Hermit applies `<doc-type>:needs-review` to the new PR. RFC review-session PRs may also carry the legacy `hermit:rfc-ready` label for compatibility.
 
 ## API Changes
 
@@ -144,7 +150,7 @@ Extend RFC list view model:
 ## Migration Strategy
 
 1. Keep legacy RFC label configuration with default `hermit:rfc-ready` for existing submit-for-review flows.
-2. Implement Docuchango-driven candidate PR discovery and automatic `<doc-type>:review` labels.
+2. Implement Docuchango-driven candidate PR discovery and automatic `<doc-type>:needs-review` labels.
 3. Introduce merged RFC list response fields.
 4. Update UI to gate actions by `commentable` and `status_mutable`.
 5. Roll out with docs and operator guidance for label usage.
@@ -177,7 +183,6 @@ Not chosen because many teams use draft state inconsistently and still need an e
 
 # Unresolved Questions
 
-- Should Hermit remove stale state labels when a document moves from `review` to `needs-changes` or `ready`?
 - Should multiple ready-state labels be supported per repository policy?
 - Should label configuration be global or per repository in Hermit config?
 

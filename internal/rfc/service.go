@@ -611,7 +611,7 @@ func (s *Service) StartReviewSession(ctx context.Context, repositoryID string, r
 		return StartReviewSessionResult{}, fmt.Errorf("fetch source document: %w", err)
 	}
 
-	workflowLabel := docuchangoWorkflowLabel(docType, docuchangoWorkflowStateReview)
+	workflowLabel := docuchangoWorkflowLabel(docType, docuchangoWorkflowStateNeedsReview)
 	if err := client.EnsureLabel(ctx, baseURL, owner, name, workflowLabel, "0075ca", docuchangoWorkflowLabelDescription(workflowLabel), token); err != nil {
 		return StartReviewSessionResult{}, fmt.Errorf("ensure label: %w", err)
 	}
@@ -708,7 +708,7 @@ func (s *Service) AcceptRFC(ctx context.Context, repositoryID string, prNumber i
 	if s.repoResolver == nil {
 		return AcceptRFCResult{}, fmt.Errorf("repository resolver is not configured")
 	}
-	owner, name, registry, repoBaseURL, _, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, _, docsPath, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return AcceptRFCResult{}, fmt.Errorf("repository not found")
 	}
@@ -748,6 +748,12 @@ func (s *Service) AcceptRFC(ctx context.Context, repositoryID string, prNumber i
 	} else {
 		// Already accepted — use the current PR head SHA for CI polling.
 		sha = headSHA
+	}
+
+	if docType := primaryReviewDocumentType(fallbackDocuchangoDocTypes(filePath, docsPath)); docType != "" {
+		if err := setDocuchangoWorkflowState(ctx, client, baseURL, owner, name, prNumber, docType, docuchangoWorkflowStateReviewed, token); err != nil {
+			return AcceptRFCResult{}, fmt.Errorf("mark review workflow state: %w", err)
+		}
 	}
 
 	// 4a. Ironhide path: if both labels exist on the repo, apply them and hand off.
@@ -796,6 +802,35 @@ func (s *Service) AcceptRFC(ctx context.Context, repositoryID string, prNumber i
 	}
 
 	return AcceptRFCResult{Merged: merged, BlockedByCI: blockedByCI, CommitSHA: sha}, nil
+}
+
+func setDocuchangoWorkflowState(ctx context.Context, client GitHubRFCClient, baseURL, owner, name string, prNumber int, docType, state, token string) error {
+	label := docuchangoWorkflowLabel(docType, state)
+	if label == "" {
+		return nil
+	}
+	if err := client.EnsureLabel(ctx, baseURL, owner, name, label, "0075ca", docuchangoWorkflowLabelDescription(label), token); err != nil {
+		return err
+	}
+	if err := client.AddLabels(ctx, baseURL, owner, name, prNumber, []string{label}, token); err != nil {
+		return err
+	}
+	for _, oldState := range []string{
+		docuchangoWorkflowStateNeedsReview,
+		docuchangoWorkflowStateReview,
+		docuchangoWorkflowStateNeedsChanges,
+		docuchangoWorkflowStateReady,
+		docuchangoWorkflowStateReviewed,
+	} {
+		oldLabel := docuchangoWorkflowLabel(docType, oldState)
+		if oldLabel == "" || oldLabel == label {
+			continue
+		}
+		if err := client.RemoveLabel(ctx, baseURL, owner, name, prNumber, oldLabel, token); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // resolveOpenThreads resolves every open review thread on the PR and verifies
