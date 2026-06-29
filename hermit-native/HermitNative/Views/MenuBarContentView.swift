@@ -259,7 +259,7 @@ struct MenuBarContentView: View {
                     CompactReviewQueue(
                         groups: Array(pendingPRGroups.prefix(3)),
                         totalCount: pendingPRGroups.count,
-                        onOpen: { group in openPRSummary(group.primaryRFC) }
+                        onOpen: { group in open(group.primaryRFC, in: group.repo) }
                     )
                 }
                 .padding(.horizontal, 14)
@@ -342,14 +342,14 @@ struct MenuBarContentView: View {
                         groups: pendingPRGroups,
                         emptyText: "No pull requests currently contain reviewable docs-cms documents.",
                         showsRepository: true,
-                        onOpen: { group in openPRSummary(group.primaryRFC) }
+                        onOpen: { group in open(group.primaryRFC, in: group.repo) }
                     )
                     PRSummarySection(
                         title: "Documents needing review",
                         items: pendingRFCItems,
                         emptyText: "No docs-cms documents are currently waiting for review.",
                         showsRepository: true,
-                        onOpen: { item in openPRSummary(item.rfc) }
+                        onOpen: { item in open(item.rfc, in: item.repo) }
                     )
                     PRStateSummarySection(
                         title: "PR states",
@@ -364,7 +364,7 @@ struct MenuBarContentView: View {
                         onActivate: { activate(repo) },
                         onRefresh: { Task { await dashboardStore.reload(repo: repo, appState: appState) } },
                         onOpenSettings: { selectedView = .settings },
-                        onOpenPR: { rfc in openPRSummary(rfc) },
+                        onOpenPR: { rfc in open(rfc, in: repo) },
                         onOpen: { rfc in open(rfc, in: repo) }
                     )
                 }
@@ -561,13 +561,6 @@ struct MenuBarContentView: View {
     private func open(_ rfc: RFC, in repo: Repository) {
         RecentRFCStore.shared.record(rfc, repoID: repo.id)
         RFCViewerWindowManager.shared.open(rfc: rfc, repo: repo, appState: appState)
-    }
-
-    private func openPRSummary(_ rfc: RFC) {
-        guard case .pullRequest(let pr) = rfc.source,
-              !pr.htmlURL.isEmpty,
-              let url = URL(string: pr.htmlURL) else { return }
-        NSWorkspace.shared.open(url)
     }
 
 #else
