@@ -556,7 +556,7 @@ struct RFCLifecycleToolbar: ToolbarContent {
                 .font: monoFont,
                 .foregroundColor: NSColor.labelColor,
                 .paragraphStyle: para,
-                .backgroundColor: NSColor(red: 0.92, green: 0.98, blue: 0.92, alpha: 1)
+                .backgroundColor: NSColor.secondaryLabelColor.withAlphaComponent(0.12)
             ])
 
         case .mermaidBlock(let source, _, _):

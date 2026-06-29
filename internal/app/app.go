@@ -26,23 +26,34 @@ const shutdownTimeout = 10 * time.Second
 
 // App wires foundational HTTP services for the Hermit monolith.
 type App struct {
-	server *http.Server
+	server  *http.Server
+	closers []io.Closer
 }
 
 // New creates an application with baseline routing and server configuration.
 func New(cfg config.Config) *App {
 	mux := newMux(cfg)
+	closers := []io.Closer{}
+	accessLogStore, err := observability.OpenAccessLog(cfg.DataDir)
+	if err != nil {
+		slog.Warn("sqlite access log disabled", "dataDir", cfg.DataDir, "error", err)
+	} else {
+		closers = append(closers, accessLogStore)
+		mux.HandleFunc("GET /api/v1/logs", observability.NewLogHandler(accessLogStore).List)
+	}
 
 	return &App{
 		server: &http.Server{
 			Addr:    cfg.ListenAddress,
-			Handler: observability.Middleware(mux),
+			Handler: observability.MiddlewareWithAccessLog(mux, accessLogStore),
 		},
+		closers: closers,
 	}
 }
 
 // Run starts the HTTP server and blocks until context cancellation or server error.
 func (a *App) Run(ctx context.Context) error {
+	defer a.close()
 	errCh := make(chan error, 1)
 
 	go func() {
@@ -71,6 +82,14 @@ func (a *App) Run(ctx context.Context) error {
 		}
 
 		return fmt.Errorf("start server: %w", err)
+	}
+}
+
+func (a *App) close() {
+	for _, closer := range a.closers {
+		if err := closer.Close(); err != nil {
+			slog.Warn("close app resource failed", "error", err)
+		}
 	}
 }
 

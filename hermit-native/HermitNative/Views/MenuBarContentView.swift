@@ -1196,7 +1196,8 @@ private struct PendingPRGroup: Identifiable {
             prState: "open", prMerged: false, body: "",
             headSHA: "", headRef: "", htmlURL: "", state: "",
             draft: false, mergeable: nil, mergeableState: nil,
-            documentType: "rfc", labels: [], changedFiles: 0,
+            documentType: "rfc", documentPath: "", catalogID: "",
+            labels: [], changedFiles: 0,
             additions: 0, deletions: 0
         )
     }
@@ -1881,7 +1882,8 @@ private struct PRSummaryRow: View {
             prState: "open", prMerged: false, body: "",
             headSHA: "", headRef: "", htmlURL: "", state: "",
             draft: false, mergeable: nil, mergeableState: nil,
-            documentType: "rfc", labels: [], changedFiles: 0,
+            documentType: "rfc", documentPath: "", catalogID: "",
+            labels: [], changedFiles: 0,
             additions: 0, deletions: 0
         )
     }
@@ -2833,7 +2835,7 @@ private final class MenuBarDashboardStore: ObservableObject {
                     htmlURL: $0.htmlURL)
             }.sorted { $0.title < $1.title }
             let prRFCs = prs.map {
-                RFC(id: "pr-\($0.id)", title: $0.title, path: $0.headRef, sha: $0.headSHA,
+                RFC(id: $0.catalogID, title: $0.title, path: $0.documentPath, sha: $0.headSHA,
                     source: .pullRequest($0), lifecycleStatus: nil,
                     htmlURL: $0.htmlURL)
             }.sorted { lhs, rhs in

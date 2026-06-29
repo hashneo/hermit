@@ -130,6 +130,29 @@ type reviewDocsState struct {
 	Summary            repositoryRFCSummary `json:"summary"`
 }
 
+type logListResponse struct {
+	Items []logEntry `json:"items"`
+	Total int        `json:"total"`
+}
+
+type logEntry struct {
+	ID            int64  `json:"id"`
+	StartedAt     string `json:"started_at"`
+	CompletedAt   string `json:"completed_at"`
+	Kind          string `json:"kind"`
+	Method        string `json:"method"`
+	Path          string `json:"path"`
+	Query         string `json:"query,omitempty"`
+	Status        int    `json:"status"`
+	DurationMS    int64  `json:"duration_ms"`
+	CorrelationID string `json:"correlation_id"`
+	RemoteAddr    string `json:"remote_addr,omitempty"`
+	UserAgent     string `json:"user_agent,omitempty"`
+	BytesWritten  int    `json:"bytes_written"`
+	ErrorCode     string `json:"error_code,omitempty"`
+	ErrorMessage  string `json:"error_message,omitempty"`
+}
+
 type apiError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -233,9 +256,62 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return c.runRepo(remaining[1:], stdin, stdout, stderr)
 	case "health":
 		return c.runHealth(stdout)
+	case "logs":
+		return c.runLogs(remaining[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown command %q", remaining[0])
 	}
+}
+
+func (c cli) runLogs(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	kind := fs.String("kind", "all", "log kind: all, access, or error")
+	limit := fs.Int("limit", 50, "maximum log entries to return")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("usage: hermitctl logs [--kind all|access|error] [--limit N]")
+	}
+	normalizedKind := strings.ToLower(strings.TrimSpace(*kind))
+	switch normalizedKind {
+	case "", "all", "access", "error":
+	default:
+		return fmt.Errorf("invalid log kind %q", *kind)
+	}
+	if *limit < 1 || *limit > 500 {
+		return errors.New("limit must be between 1 and 500")
+	}
+	values := url.Values{}
+	values.Set("kind", normalizedKind)
+	values.Set("limit", fmt.Sprintf("%d", *limit))
+	var response logListResponse
+	if err := c.do(http.MethodGet, "/api/v1/logs?"+values.Encode(), nil, &response); err != nil {
+		return err
+	}
+	if c.jsonOut {
+		return printJSON(stdout, response)
+	}
+	for _, entry := range response.Items {
+		target := entry.Path
+		if entry.Query != "" {
+			target += "?" + entry.Query
+		}
+		fmt.Fprintf(stdout, "%s\t%s\t%d\t%dms\t%s\t%s",
+			entry.StartedAt,
+			strings.ToUpper(entry.Kind),
+			entry.Status,
+			entry.DurationMS,
+			entry.Method,
+			target,
+		)
+		if entry.ErrorCode != "" || entry.ErrorMessage != "" {
+			fmt.Fprintf(stdout, "\t%s\t%s", entry.ErrorCode, entry.ErrorMessage)
+		}
+		fmt.Fprintln(stdout)
+	}
+	return nil
 }
 
 func (c cli) runRepo(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -1629,7 +1705,7 @@ func printJSON(w io.Writer, value any) error {
 
 func usage(w io.Writer) {
 	fmt.Fprintln(w, "usage: hermitctl [--addr URL|HOST:PORT] [--config path] [--json] <command>")
-	fmt.Fprintln(w, "commands: health, repo, token")
+	fmt.Fprintln(w, "commands: health, logs, repo, token")
 }
 
 func repoUsage(w io.Writer) {

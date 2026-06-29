@@ -379,7 +379,12 @@ struct RFCDetailView: View {
             case .mainBranch:
                 markdown = try await client.fetchRFCContent(path: rfc.path, ref: "main")
             case .pullRequest(let pr):
-                markdown = try await client.fetchPRRFCContent(prNumber: pr.number)
+                let requestedPath = rfc.path.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !requestedPath.isEmpty && requestedPath != pr.headRef {
+                    markdown = try await client.fetchPRRFCContent(prNumber: pr.number, filePath: requestedPath)
+                } else {
+                    markdown = try await client.fetchPRRFCContent(prNumber: pr.number)
+                }
                 if let login = try? await client.fetchPRAuthorLogin(prNumber: pr.number), !login.isEmpty {
                     prAuthorLogin = login
                 }
@@ -400,7 +405,10 @@ struct RFCDetailView: View {
         // This is done regardless of whether a commentStore is present.
         if case .pullRequest(let pr) = rfc.source {
             let resolvedPath: String
-            if let changed = try? await client.listPRChangedFiles(prNumber: pr.number, docsPath: ""),
+            let requestedPath = rfc.path.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !requestedPath.isEmpty && requestedPath != pr.headRef {
+                resolvedPath = requestedPath
+            } else if let changed = try? await client.listPRChangedFiles(prNumber: pr.number, docsPath: ""),
                let first = changed.first, !first.isEmpty {
                 resolvedPath = first
             } else {
