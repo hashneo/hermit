@@ -416,11 +416,16 @@ struct RFCDetailView: View {
             }
             resolvedFilePath = resolvedPath
             // pr.htmlURL is e.g. "https://github.com/owner/repo/pull/123"
-            // → strip "/pull/N" → append "/blob/{headRef}/{filePath}"
+            // -> strip "/pull/N" -> append "/blob/{headSHA}/{filePath}".
+            // Use the immutable PR head SHA when available because closed/merged
+            // PR branches are often deleted, which makes /blob/{headRef}/... 404.
             if URL(string: pr.htmlURL) != nil,
                let prRange = pr.htmlURL.range(of: "/pull/", options: .backwards) {
                 let repoBase = String(pr.htmlURL[..<prRange.lowerBound])
-                resolvedFileURL = "\(repoBase)/blob/\(pr.headRef)/\(resolvedPath)"
+                let blobRef = pr.headSHA.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? pr.headRef
+                    : pr.headSHA
+                resolvedFileURL = "\(repoBase)/blob/\(blobRef)/\(resolvedPath)"
             }
 
             // Configure and load comments if a store is present.
