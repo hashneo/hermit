@@ -954,7 +954,7 @@ private struct RepositoryTopRail: View {
                         systemImage: "arrow.triangle.pull",
                         title: "PR",
                         value: openPRCount,
-                        tint: .blue,
+                        tint: .secondary,
                         help: "Open pull requests with docs-cms review documents across all repositories"
                     )
                 }
@@ -1050,7 +1050,7 @@ private struct RepoFilterRow: View {
                             systemImage: "arrow.triangle.pull",
                             title: "PR",
                             value: state?.openPRCount ?? 0,
-                            tint: .blue,
+                            tint: .secondary,
                             help: "Open pull requests with docs-cms review documents"
                         )
                     }
@@ -1251,8 +1251,8 @@ private struct PRReviewSection: View {
                     .monospacedDigit()
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Color.orange.opacity(0.12))
-                    .foregroundStyle(.orange)
+                    .background(Color.secondary.opacity(0.10))
+                    .foregroundStyle(.secondary)
                     .clipShape(Capsule())
             }
 
@@ -1298,15 +1298,15 @@ private struct PRReviewSummaryRow: View {
                 }
 
                 HStack(spacing: 6) {
-                    StatusBadge(title: "PR #\(pr.number)", systemImage: "arrow.triangle.pull", tint: .orange)
+                    StatusBadge(title: "PR #\(pr.number)", systemImage: "arrow.triangle.pull", tint: .secondary)
                     DocumentMixStrip(counts: group.documentTypeCounts)
                 }
 
                 PRMetricStrip(items: [
-                    PRMetricItem(label: "Docs", value: "\(group.documentCount)", tint: .blue),
+                    PRMetricItem(label: "Docs", value: "\(group.documentCount)", tint: .secondary),
                     PRMetricItem(label: "Files", value: "\(changedFiles(pr))", tint: .secondary),
-                    PRMetricItem(label: "Added", value: "+\(pr.additions)", tint: .green),
-                    PRMetricItem(label: "Removed", value: "-\(pr.deletions)", tint: .red)
+                    PRMetricItem(label: "Added", value: "+\(pr.additions)", tint: .secondary),
+                    PRMetricItem(label: "Removed", value: "-\(pr.deletions)", tint: .secondary)
                 ])
 
                 Text(contextText(pr))
@@ -1316,7 +1316,7 @@ private struct PRReviewSummaryRow: View {
             }
             .layoutPriority(1)
 
-            OpenReviewDocumentsCallToAction()
+            ReviewDocumentsCallToAction(documentCount: group.documentCount)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1348,7 +1348,7 @@ private struct DocumentMixStrip: View {
     var body: some View {
         HStack(spacing: 5) {
             ForEach(counts, id: \.label) { item in
-                StatusBadge(title: "\(item.label) \(item.count)", systemImage: documentTypeSystemImage(item.label), tint: .blue, compact: true)
+                StatusBadge(title: "\(item.label) \(item.count)", systemImage: documentTypeSystemImage(item.label), tint: .secondary, compact: true)
             }
         }
     }
@@ -1425,8 +1425,8 @@ private struct PRSummarySection: View {
                     .monospacedDigit()
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Color.orange.opacity(0.12))
-                    .foregroundStyle(.orange)
+                    .background(Color.secondary.opacity(0.10))
+                    .foregroundStyle(.secondary)
                     .clipShape(Capsule())
             }
 
@@ -1746,8 +1746,8 @@ private struct SelectedRepoSection: View {
 
                 if let state {
                     HStack(spacing: 8) {
-                        CountBadge(value: state.pullRequests.count, label: "review", tint: .orange)
-                        CountBadge(value: state.mainBranch.count, label: "published", tint: .blue)
+                        CountBadge(value: state.pullRequests.count, label: "review", tint: .secondary)
+                        CountBadge(value: state.mainBranch.count, label: "published", tint: .secondary)
                     }
                 }
             }
@@ -1858,8 +1858,8 @@ private struct PRSummaryRow: View {
                 }
 
                 HStack(spacing: 6) {
-                    StatusBadge(title: displayName(forDocumentType: pr.documentType), systemImage: "doc.text", tint: .blue)
-                    StatusBadge(title: "PR #\(pr.number)", systemImage: "arrow.triangle.pull", tint: .orange)
+                    StatusBadge(title: displayName(forDocumentType: pr.documentType), systemImage: "doc.text", tint: .secondary)
+                    StatusBadge(title: "PR #\(pr.number)", systemImage: "arrow.triangle.pull", tint: .secondary)
                     if let labelTitle {
                         StatusBadge(title: labelTitle, tint: .secondary)
                     }
@@ -1872,7 +1872,7 @@ private struct PRSummaryRow: View {
             }
             .layoutPriority(1)
 
-            OpenReviewDocumentsCallToAction()
+            ReviewDocumentsCallToAction(documentCount: 1)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1976,8 +1976,8 @@ private struct ReviewQueueCallToAction: View {
         }
         .padding(.horizontal, value > 0 ? 8 : 5)
         .frame(height: 18)
-        .background(Color.orange.opacity(0.12))
-        .foregroundStyle(.orange)
+        .background(Color.accentColor.opacity(0.14))
+        .foregroundStyle(Color.accentColor)
         .clipShape(Capsule())
         .fixedSize(horizontal: true, vertical: false)
         .help(help ?? "")
@@ -1985,22 +1985,28 @@ private struct ReviewQueueCallToAction: View {
     }
 }
 
-private struct OpenReviewDocumentsCallToAction: View {
+private struct ReviewDocumentsCallToAction: View {
+    let documentCount: Int
+
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "arrow.up.right.square")
-                .font(.caption.weight(.semibold))
-            Text("Open documents")
-                .font(.caption.weight(.semibold))
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
+            Image(systemName: "arrow.right")
+                .font(.caption.weight(.bold))
         }
-        .padding(.horizontal, 12)
-        .frame(height: 32)
-        .background(Color.blue.opacity(0.14))
-        .foregroundStyle(.blue)
-        .clipShape(Capsule())
+        .padding(.horizontal, 14)
+        .frame(height: 36)
+        .background(Color.accentColor)
+        .foregroundStyle(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .fixedSize(horizontal: true, vertical: false)
-        .accessibilityLabel("Open documents queued for review")
+        .accessibilityLabel(title)
+    }
+
+    private var title: String {
+        documentCount == 1 ? "Review doc" : "Review \(documentCount) docs"
     }
 }
 
