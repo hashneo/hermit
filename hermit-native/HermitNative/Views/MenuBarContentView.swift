@@ -946,12 +946,9 @@ private struct RepositoryTopRail: View {
 
                     Spacer(minLength: 6)
 
-                    RepoMetricBadge(
-                        systemImage: "text.bubble",
-                        title: "Review",
+                    ReviewQueueCallToAction(
                         value: pendingReviewCount,
-                        tint: .orange,
-                        help: "docs-cms documents waiting for review across all repositories"
+                        help: "Open docs-cms documents waiting for review across all repositories"
                     )
                     RepoMetricBadge(
                         systemImage: "arrow.triangle.pull",
@@ -1045,12 +1042,9 @@ private struct RepoFilterRow: View {
 
                     HStack(spacing: 5) {
                         RepoSyncIndicator(isLoading: state?.isLoading == true)
-                        RepoMetricBadge(
-                            systemImage: "text.bubble",
-                            title: "Review",
+                        ReviewQueueCallToAction(
                             value: state?.pendingReviewCount ?? 0,
-                            tint: .orange,
-                            help: "docs-cms documents waiting for review"
+                            help: "Open docs-cms documents waiting for review"
                         )
                         RepoMetricBadge(
                             systemImage: "arrow.triangle.pull",
@@ -1322,7 +1316,7 @@ private struct PRReviewSummaryRow: View {
             }
             .layoutPriority(1)
 
-            ReviewPRCallToAction()
+            OpenReviewDocumentsCallToAction()
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1878,7 +1872,7 @@ private struct PRSummaryRow: View {
             }
             .layoutPriority(1)
 
-            ReviewPRCallToAction()
+            OpenReviewDocumentsCallToAction()
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1966,18 +1960,47 @@ private func documentTypeSystemImage(_ label: String) -> String {
     }
 }
 
-private struct ReviewPRCallToAction: View {
+private struct ReviewQueueCallToAction: View {
+    let value: Int
+    var help: String? = nil
+
     var body: some View {
-        Label("Review PR", systemImage: "arrow.up.right.square")
-            .font(.caption.weight(.semibold))
-            .labelStyle(.titleAndIcon)
-            .lineLimit(1)
-            .padding(.horizontal, 10)
-            .frame(height: 28)
-            .background(Color.blue.opacity(0.14))
-            .foregroundStyle(.blue)
-            .clipShape(Capsule())
-            .accessibilityLabel("Review pull request")
+        HStack(spacing: 4) {
+            Image(systemName: "text.bubble")
+                .font(.caption2.weight(.semibold))
+            Text(value > 0 ? "Open queue" : "Review")
+                .font(.caption2.weight(.semibold))
+            Text("\(value)")
+                .font(.caption2.weight(.semibold))
+                .monospacedDigit()
+        }
+        .padding(.horizontal, value > 0 ? 8 : 5)
+        .frame(height: 18)
+        .background(Color.orange.opacity(0.12))
+        .foregroundStyle(.orange)
+        .clipShape(Capsule())
+        .fixedSize(horizontal: true, vertical: false)
+        .help(help ?? "")
+        .accessibilityLabel(value > 0 ? "Open review queue with \(value) documents" : "No documents waiting for review")
+    }
+}
+
+private struct OpenReviewDocumentsCallToAction: View {
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.up.right.square")
+                .font(.caption.weight(.semibold))
+            Text("Open documents")
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 32)
+        .background(Color.blue.opacity(0.14))
+        .foregroundStyle(.blue)
+        .clipShape(Capsule())
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityLabel("Open documents queued for review")
     }
 }
 
