@@ -27,6 +27,8 @@ struct RFCPullRequest: Identifiable {
     let mergeable: Bool?
     let mergeableState: String?
     let documentType: String
+    let documentPath: String
+    let catalogID: String
     let labels: [String]
     let changedFiles: Int
     let additions: Int

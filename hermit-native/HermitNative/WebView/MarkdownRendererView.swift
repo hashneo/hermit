@@ -9,10 +9,7 @@ struct MarkdownRendererView: View {
     var onLineTapped: ((Int) -> Void)? = nil
 
     private var codeBackground: Color {
-        if colorScheme == .dark {
-            return Color(red: 0.16, green: 0.20, blue: 0.18)
-        }
-        return Color(red: 0.92, green: 0.98, blue: 0.92)
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06)
     }
 
     private var codeBackgroundSwiftUIColor: Color {
@@ -20,9 +17,6 @@ struct MarkdownRendererView: View {
     }
 
     private var inlineCodeForeground: Color {
-        if colorScheme == .dark {
-            return Color(red: 0.86, green: 0.95, blue: 0.89)
-        }
         return .primary
     }
 

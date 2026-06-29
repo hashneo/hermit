@@ -400,6 +400,8 @@ struct GutterMarkdownView: View {
 // MARK: - MarkdownBlockView
 
 struct MarkdownBlockView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let block: MarkdownBlock
     var onQuoteSelected: ((String) -> Void)? = nil
     /// Called when text selection changes inside this block.
@@ -411,7 +413,7 @@ struct MarkdownBlockView: View {
     var onLinkTapped: ((URL) -> Void)? = nil
 
     private var codeBackground: Color {
-        Color(red: 0.92, green: 0.98, blue: 0.92)  // light green
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06)
     }
 
 #if os(macOS)

@@ -59,3 +59,35 @@ func TestRepoReviewDocsExpectationFailure(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestLogsPrintsErrorEntries(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/logs" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("kind") != "error" {
+			t.Fatalf("kind = %q, want error", r.URL.Query().Get("kind"))
+		}
+		if r.URL.Query().Get("limit") != "2" {
+			t.Fatalf("limit = %q, want 2", r.URL.Query().Get("limit"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"items": [
+				{"id":7,"started_at":"2026-06-29T00:00:00Z","completed_at":"2026-06-29T00:00:00Z","kind":"error","method":"GET","path":"/api/v1/repositories/repo-1/rfcs/pr:1:docs-cms/rfcs/rfc-001.md","status":404,"duration_ms":12,"correlation_id":"corr-test","bytes_written":92,"error_code":"rfc_not_found","error_message":"document not found"}
+			],
+			"total": 1
+		}`))
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"--addr", server.URL, "logs", "--kind", "error", "--limit", "2"}, strings.NewReader(""), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run returned error: %v; stderr=%s", err, stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "ERROR\t404\t12ms\tGET\t/api/v1/repositories/repo-1/rfcs/pr:1:docs-cms/rfcs/rfc-001.md\trfc_not_found\tdocument not found") {
+		t.Fatalf("unexpected output:\n%s", output)
+	}
+}

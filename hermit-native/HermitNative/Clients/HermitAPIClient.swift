@@ -58,6 +58,7 @@ protocol HermitClientProtocol: Actor {
     func listMainBranchRFCs() async throws -> [RFCFile]
     func fetchRFCContent(path: String, ref: String) async throws -> String
     func fetchPRRFCContent(prNumber: Int) async throws -> String
+    func fetchPRRFCContent(prNumber: Int, filePath: String) async throws -> String
     func fetchPRAuthorLogin(prNumber: Int) async throws -> String
     func listFilesOnRef(docsPath: String, ref: String) async throws -> [String]
     func listPRChangedFiles(prNumber: Int, docsPath: String) async throws -> [String]
@@ -211,6 +212,8 @@ actor HermitAPIClient: HermitClientProtocol {
                     mergeable: item.mergeable,
                     mergeableState: item.mergeable_state,
                     documentType: item.document_type ?? "rfc",
+                    documentPath: item.path,
+                    catalogID: item.id,
                     labels: item.labels ?? [],
                     changedFiles: item.changed_files ?? 0,
                     additions: item.additions ?? 0,
@@ -267,6 +270,19 @@ actor HermitAPIClient: HermitClientProtocol {
     func fetchPRRFCContent(prNumber: Int) async throws -> String {
         let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/rfc/render")
+        let data = try await get(u)
+        struct RFCDoc: Decodable { let markdown_source: String }
+        return (try? JSONDecoder().decode(RFCDoc.self, from: data))?.markdown_source
+            ?? String(data: data, encoding: .utf8) ?? ""
+    }
+
+    func fetchPRRFCContent(prNumber: Int, filePath: String) async throws -> String {
+        let repoID = try await repoID()
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove("/")
+        let catalogID = "pr:\(prNumber):\(filePath)"
+        let encodedID = catalogID.addingPercentEncoding(withAllowedCharacters: allowed) ?? catalogID
+        let u = url("/api/v1/repositories/\(repoID)/rfcs/\(encodedID)")
         let data = try await get(u)
         struct RFCDoc: Decodable { let markdown_source: String }
         return (try? JSONDecoder().decode(RFCDoc.self, from: data))?.markdown_source
@@ -599,6 +615,7 @@ actor HermitAPIClient: HermitClientProtocol {
                               htmlURL: pr.htmlURL, state: pr.state,
                               draft: pr.draft, mergeable: nil,
                               mergeableState: nil, documentType: "rfc",
+                              documentPath: "", catalogID: "pr-\(pr.number)",
                               labels: pr.labels, changedFiles: 0,
                               additions: 0, deletions: 0)
     }

@@ -321,6 +321,15 @@ extension Array where Element == MarkdownInline {
 
 extension MarkdownInline {
 #if os(macOS)
+    private static var inlineCodeBackgroundColor: NSColor {
+        NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return isDark
+                ? NSColor(calibratedWhite: 1.0, alpha: 0.14)
+                : NSColor(calibratedWhite: 0.0, alpha: 0.08)
+        }
+    }
+
     func nsAttributedString(baseFont: NSFont? = nil) -> NSAttributedString {
         let bodyFont = baseFont ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
         switch self {
@@ -336,7 +345,7 @@ extension MarkdownInline {
             let mono = NSFont.monospacedSystemFont(ofSize: bodyFont.pointSize - 1, weight: .regular)
             return NSAttributedString(string: s, attributes: [
                 .font: mono,
-                .backgroundColor: NSColor(red: 0.92, green: 0.98, blue: 0.92, alpha: 1.0),  // light green
+                .backgroundColor: Self.inlineCodeBackgroundColor,
                 .foregroundColor: NSColor.labelColor
             ])
         case .link(let text, let url):
@@ -348,6 +357,14 @@ extension MarkdownInline {
         }
     }
 #else
+    private static var inlineCodeBackgroundColor: UIColor {
+        UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(white: 1.0, alpha: 0.14)
+                : UIColor(white: 0.0, alpha: 0.08)
+        }
+    }
+
     func nsAttributedString(baseFont: UIFont? = nil) -> NSAttributedString {
         let bodyFont = baseFont ?? UIFont.preferredFont(forTextStyle: .body)
         switch self {
@@ -364,7 +381,7 @@ extension MarkdownInline {
             let mono = UIFont.monospacedSystemFont(ofSize: bodyFont.pointSize - 1, weight: .regular)
             return NSAttributedString(string: s, attributes: [
                 .font: mono,
-                .backgroundColor: UIColor(red: 0.92, green: 0.98, blue: 0.92, alpha: 1.0),  // light green
+                .backgroundColor: Self.inlineCodeBackgroundColor,
                 .foregroundColor: UIColor.label
             ])
         case .link(let text, let url):

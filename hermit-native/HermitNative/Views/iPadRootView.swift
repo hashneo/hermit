@@ -32,8 +32,8 @@ final class RFCStore: ObservableObject {
                     lifecycleStatus: $0.lifecycleStatus, htmlURL: $0.htmlURL)
             }
             for pr in prs {
-                result.append(RFC(id: "pr-\(pr.id)", title: pr.title,
-                                  path: pr.headRef,   // unused for PR RFCs — fetchPRRFCContent uses prNumber
+                result.append(RFC(id: pr.catalogID, title: pr.title,
+                                  path: pr.documentPath,
                                   sha: pr.headSHA,
                                   source: .pullRequest(pr),
                                   lifecycleStatus: nil, htmlURL: pr.htmlURL))
