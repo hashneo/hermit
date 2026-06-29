@@ -844,7 +844,7 @@ private struct CompactAllRepositoriesSummary: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer()
-                CountBadge(value: openPRCount, label: "PRs", tint: .blue)
+                CountBadge(value: openPRCount, label: "open PRs", tint: .blue)
                 CountBadge(value: publishedCount, label: "published", tint: .secondary)
             }
 
@@ -1216,11 +1216,16 @@ private struct PendingPRGroup: Identifiable {
 
     var documentCount: Int { items.count }
 
-    var documentSummary: String {
+    var documentTypeCounts: [(label: String, count: Int)] {
         let counts = Dictionary(grouping: items, by: { $0.documentTypeDisplay }).mapValues(\.count)
-        return counts.keys.sorted().map { key in
-            "\(key) \(counts[key] ?? 0)"
-        }.joined(separator: ", ")
+        return counts.keys.sorted { lhs, rhs in
+            let lhsOrder = documentTypeDisplaySortOrder(lhs)
+            let rhsOrder = documentTypeDisplaySortOrder(rhs)
+            if lhsOrder != rhsOrder { return lhsOrder < rhsOrder }
+            return lhs < rhs
+        }.map { label in
+            (label: label, count: counts[label] ?? 0)
+        }
     }
 
     static func groups(for repo: Repository, rfcs: [RFC]) -> [PendingPRGroup] {
@@ -1300,12 +1305,17 @@ private struct PRReviewSummaryRow: View {
 
                 HStack(spacing: 6) {
                     StatusBadge(title: "PR #\(pr.number)", systemImage: "arrow.triangle.pull", tint: .orange)
-                    StatusBadge(title: "\(group.documentCount) docs", systemImage: "doc.text", tint: .blue)
-                    StatusBadge(title: "\(changedFiles(pr)) files", tint: .secondary)
-                    StatusBadge(title: "+\(pr.additions) -\(pr.deletions)", tint: .secondary)
+                    DocumentMixStrip(counts: group.documentTypeCounts)
                 }
 
-                Text(secondaryText(pr))
+                PRMetricStrip(items: [
+                    PRMetricItem(label: "Docs", value: "\(group.documentCount)", tint: .blue),
+                    PRMetricItem(label: "Files", value: "\(changedFiles(pr))", tint: .secondary),
+                    PRMetricItem(label: "Added", value: "+\(pr.additions)", tint: .green),
+                    PRMetricItem(label: "Removed", value: "-\(pr.deletions)", tint: .red)
+                ])
+
+                Text(contextText(pr))
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
@@ -1331,13 +1341,75 @@ private struct PRReviewSummaryRow: View {
         pr.changedFiles > 0 ? pr.changedFiles : group.documentCount
     }
 
-    private func secondaryText(_ pr: RFCPullRequest) -> String {
+    private func contextText(_ pr: RFCPullRequest) -> String {
         let prefix = showsRepository ? "\(group.repo.fullName) • " : ""
         let branch = pr.headRef.isEmpty ? "unknown branch" : pr.headRef
-        if group.documentSummary.isEmpty {
-            return "\(prefix)\(branch)"
+        return "\(prefix)\(branch)"
+    }
+}
+
+private struct DocumentMixStrip: View {
+    let counts: [(label: String, count: Int)]
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(counts, id: \.label) { item in
+                StatusBadge(title: "\(item.label) \(item.count)", systemImage: documentTypeSystemImage(item.label), tint: .blue, compact: true)
+            }
         }
-        return "\(prefix)\(branch) • \(group.documentSummary)"
+    }
+}
+
+private struct PRMetricItem {
+    let label: String
+    let value: String
+    let tint: Color
+}
+
+private struct PRMetricStrip: View {
+    let items: [PRMetricItem]
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                ForEach(items, id: \.label) { item in
+                    PRMetricTile(item: item)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    ForEach(Array(items.prefix(2)), id: \.label) { item in
+                        PRMetricTile(item: item)
+                    }
+                }
+                HStack(spacing: 8) {
+                    ForEach(Array(items.dropFirst(2)), id: \.label) { item in
+                        PRMetricTile(item: item)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct PRMetricTile: View {
+    let item: PRMetricItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(item.label)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Text(item.value)
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(item.tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(width: 64, alignment: .leading)
     }
 }
 
@@ -1621,7 +1693,7 @@ private struct AllRepositoriesSection: View {
                     .font(.headline)
                     .foregroundStyle(.primary)
                 Spacer(minLength: 8)
-                CountBadge(value: openPRCount, label: "PRs", tint: .blue)
+                CountBadge(value: openPRCount, label: "open PRs", tint: .blue)
                 CountBadge(value: publishedCount, label: "published", tint: .secondary)
             }
 
@@ -1861,6 +1933,36 @@ private func displayName(forDocumentType documentType: String) -> String {
         return "RFC"
     default:
         return documentType.replacingOccurrences(of: "-", with: " ").capitalized
+    }
+}
+
+private func documentTypeDisplaySortOrder(_ label: String) -> Int {
+    switch label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+    case "adr":
+        return 10
+    case "prd":
+        return 20
+    case "rfc":
+        return 30
+    case "memo":
+        return 40
+    default:
+        return 100
+    }
+}
+
+private func documentTypeSystemImage(_ label: String) -> String {
+    switch label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+    case "adr":
+        return "building.columns"
+    case "memo":
+        return "note.text"
+    case "prd":
+        return "doc.plaintext"
+    case "rfc":
+        return "doc.text"
+    default:
+        return "doc"
     }
 }
 
