@@ -134,3 +134,42 @@ func TestStoreEnqueuesOperationMetadata(t *testing.T) {
 		t.Fatalf("enqueue operation: %v", err)
 	}
 }
+
+func TestStoreCachesRenderedReviewDocumentsByCommit(t *testing.T) {
+	dataDir := t.TempDir()
+	store, err := Open(dataDir)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+
+	payload := []byte(`{"id":"pr:7:docs-cms/rfcs/rfc-007-cache.md","title":"Cached Render","path":"docs-cms/rfcs/rfc-007-cache.md","head_sha":"abc123","markdown_source":"# Cached Render\n"}`)
+	if err := store.PutRenderedReviewDocument(context.Background(), "repo-1", "ABC123", "/docs-cms/rfcs/rfc-007-cache.md", payload); err != nil {
+		t.Fatalf("put rendered review document: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	reopened, err := Open(dataDir)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+
+	got, ok, err := reopened.GetRenderedReviewDocument(context.Background(), "repo-1", "abc123", "docs-cms/rfcs/rfc-007-cache.md")
+	if err != nil {
+		t.Fatalf("get rendered review document: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected rendered review document cache hit")
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("cached payload = %s, want %s", got, payload)
+	}
+
+	if _, ok, err := reopened.GetRenderedReviewDocument(context.Background(), "repo-1", "def456", "docs-cms/rfcs/rfc-007-cache.md"); err != nil {
+		t.Fatalf("get rendered review document miss: %v", err)
+	} else if ok {
+		t.Fatalf("expected different commit sha to miss rendered review document cache")
+	}
+}

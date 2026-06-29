@@ -43,6 +43,8 @@ For each repository and refreshable view, Hermit will store:
 
 Repository RFC list endpoints may return cached data when the cache is fresh enough. On app startup, menu/popout refreshes must first read cached projections and skip upstream calls until the configured minimum refresh interval has elapsed.
 
+PR-backed review document renders may also be cached as immutable projections keyed by repository, PR head commit SHA, and document path. When a reviewer opens the same document at the same commit, Hermit can return the cached rendered document payload without reconstructing the document from PR files and repository contents. If the PR head changes, the commit SHA changes and Hermit fetches and caches a fresh projection.
+
 Default v1 policy:
 
 - Repository RFC summary/list freshness TTL: 10 minutes.
@@ -72,6 +74,8 @@ The queue will:
 Write operations must be idempotent or carry idempotency metadata before being retried automatically. Non-idempotent writes may be queued and rate-limited, but must not be blindly replayed after an ambiguous failure.
 
 The SQLite workset database must not store sensitive information. In particular, it must not store PATs, authorization headers, raw comment bodies, or unpublished RFC draft content. Those values remain in the existing credential and request paths. SQLite stores only working-set metadata and cached provider projections needed to avoid repeated upstream reads.
+
+Rendered review document cache entries are limited to documents already published in repository commits. They must not be used for unpublished local drafts or comment bodies.
 
 Initial operation classes:
 
