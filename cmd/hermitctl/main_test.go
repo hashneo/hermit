@@ -91,3 +91,113 @@ func TestLogsPrintsErrorEntries(t *testing.T) {
 		t.Fatalf("unexpected output:\n%s", output)
 	}
 }
+
+func TestReviewStateValidatesExpectations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/api/v1/repositories/repo-1/pull-requests/7/review" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"approved":true,"reviewers":["alice"]}`))
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"--addr", server.URL, "review", "state", "--expect-approved", "true", "--expect-reviewer", "alice", "repo-1", "7"}, strings.NewReader(""), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run returned error: %v; stderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "approved: true") {
+		t.Fatalf("expected approval state in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestReviewListValidatesReviewIDAndState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/api/v1/repositories/repo-1/pull-requests/7/review/list" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[{"id":42,"state":"CHANGES_REQUESTED","body":"fix it","user":"alice","submitted_at":"2026-06-29T00:00:00Z"}]}`))
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"--addr", server.URL, "review", "list", "--expect-count", "1", "--expect-state", "CHANGES_REQUESTED", "--expect-review-id", "42", "repo-1", "7"}, strings.NewReader(""), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run returned error: %v; stderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "42\tCHANGES_REQUESTED\talice") {
+		t.Fatalf("expected review row in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestReviewActionsUseReviewAPIPaths(t *testing.T) {
+	seen := map[string]bool{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := r.Method + " " + r.URL.Path
+		seen[key] = true
+		w.Header().Set("Content-Type", "application/json")
+		switch key {
+		case "POST /api/v1/repositories/repo-1/pull-requests/7/review/approve":
+			_, _ = w.Write([]byte(`{"repository_id":"repo-1","pr_number":7,"state":"approved","reviewer":"alice","github_review_id":"101","updated_at":"2026-06-29T00:00:00Z"}`))
+		case "POST /api/v1/repositories/repo-1/pull-requests/7/review/request-changes":
+			_, _ = w.Write([]byte(`{"github_review_id":"102","reviewer":"alice"}`))
+		case "GET /api/v1/repositories/repo-1/pull-requests/7/review/merge-status":
+			_, _ = w.Write([]byte(`{"behind":true}`))
+		case "PUT /api/v1/repositories/repo-1/pull-requests/7/review/102/dismiss",
+			"PUT /api/v1/repositories/repo-1/pull-requests/7/review/update-branch":
+			w.WriteHeader(http.StatusNoContent)
+		case "POST /api/v1/repositories/repo-1/pull-requests/7/accept":
+			_, _ = w.Write([]byte(`{"merged":false,"blocked_by_ci":true,"commit_sha":"abc123"}`))
+		case "POST /api/v1/repositories/repo-1/pull-requests/7/merge":
+			_, _ = w.Write([]byte(`{"merged":true,"blocked_by_ci":false}`))
+		case "GET /api/v1/repositories/repo-1/ci-status":
+			if r.URL.Query().Get("sha") != "abc123" {
+				t.Fatalf("sha = %q, want abc123", r.URL.Query().Get("sha"))
+			}
+			_, _ = w.Write([]byte(`{"status":"success"}`))
+		default:
+			t.Fatalf("unexpected request: %s", key)
+		}
+	}))
+	defer server.Close()
+
+	commands := [][]string{
+		{"--addr", server.URL, "review", "approve", "--body", "looks good", "repo-1", "7"},
+		{"--addr", server.URL, "review", "request-changes", "--body", "fix it", "repo-1", "7"},
+		{"--addr", server.URL, "review", "merge-status", "--expect-behind", "true", "repo-1", "7"},
+		{"--addr", server.URL, "review", "dismiss", "--message", "resolved", "repo-1", "7", "102"},
+		{"--addr", server.URL, "review", "update-branch", "repo-1", "7"},
+		{"--addr", server.URL, "review", "accept", "--file", "docs-cms/rfcs/rfc-001.md", "--expect-merged", "false", "--expect-blocked-by-ci", "true", "repo-1", "7"},
+		{"--addr", server.URL, "review", "merge", "--expect-merged", "true", "--expect-blocked-by-ci", "false", "repo-1", "7"},
+		{"--addr", server.URL, "review", "ci-status", "--sha", "abc123", "--expect-status", "success", "repo-1"},
+	}
+	for _, args := range commands {
+		var stdout, stderr bytes.Buffer
+		if err := run(args, strings.NewReader(""), &stdout, &stderr); err != nil {
+			t.Fatalf("run %v returned error: %v; stderr=%s", args, err, stderr.String())
+		}
+	}
+
+	for _, key := range []string{
+		"POST /api/v1/repositories/repo-1/pull-requests/7/review/approve",
+		"POST /api/v1/repositories/repo-1/pull-requests/7/review/request-changes",
+		"GET /api/v1/repositories/repo-1/pull-requests/7/review/merge-status",
+		"PUT /api/v1/repositories/repo-1/pull-requests/7/review/102/dismiss",
+		"PUT /api/v1/repositories/repo-1/pull-requests/7/review/update-branch",
+		"POST /api/v1/repositories/repo-1/pull-requests/7/accept",
+		"POST /api/v1/repositories/repo-1/pull-requests/7/merge",
+		"GET /api/v1/repositories/repo-1/ci-status",
+	} {
+		if !seen[key] {
+			t.Fatalf("expected request %s", key)
+		}
+	}
+}

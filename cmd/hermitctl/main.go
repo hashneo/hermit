@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -128,6 +129,58 @@ type reviewDocsState struct {
 	PullRequests       []reviewDocsPR       `json:"pull_requests"`
 	Documents          []rfcCatalogItem     `json:"documents"`
 	Summary            repositoryRFCSummary `json:"summary"`
+}
+
+type reviewStateResponse struct {
+	Approved  bool     `json:"approved"`
+	Reviewers []string `json:"reviewers"`
+}
+
+type reviewActionState struct {
+	RepositoryID   string `json:"repository_id"`
+	PRNumber       int    `json:"pr_number"`
+	State          string `json:"state"`
+	Reviewer       string `json:"reviewer,omitempty"`
+	GitHubReviewID string `json:"github_review_id,omitempty"`
+	UpdatedAt      string `json:"updated_at"`
+}
+
+type reviewActionResult struct {
+	GitHubReviewID string `json:"github_review_id"`
+	Reviewer       string `json:"reviewer"`
+}
+
+type reviewListResponse struct {
+	Items []reviewItem `json:"items"`
+}
+
+type reviewItem struct {
+	ID          int64  `json:"id"`
+	State       string `json:"state"`
+	Body        string `json:"body"`
+	User        string `json:"user"`
+	SubmittedAt string `json:"submitted_at"`
+}
+
+type reviewMergeStatusResponse struct {
+	Behind bool `json:"behind"`
+}
+
+type reviewAcceptResult struct {
+	Merged           bool   `json:"merged"`
+	BlockedByCI      bool   `json:"blocked_by_ci"`
+	CommitSHA        string `json:"commit_sha,omitempty"`
+	HandedToIronhide bool   `json:"handed_to_ironhide,omitempty"`
+}
+
+type reviewMergeResult struct {
+	Merged      bool   `json:"merged"`
+	BlockedByCI bool   `json:"blocked_by_ci"`
+	CommitSHA   string `json:"commit_sha,omitempty"`
+}
+
+type reviewCIStatusResponse struct {
+	Status string `json:"status"`
 }
 
 type logListResponse struct {
@@ -254,6 +307,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	switch remaining[0] {
 	case "repo":
 		return c.runRepo(remaining[1:], stdin, stdout, stderr)
+	case "review":
+		return c.runReview(remaining[1:], stdout, stderr)
 	case "health":
 		return c.runHealth(stdout)
 	case "logs":
@@ -261,6 +316,337 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	default:
 		return fmt.Errorf("unknown command %q", remaining[0])
 	}
+}
+
+func (c cli) runReview(args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		reviewUsage(stdout)
+		return nil
+	}
+	switch args[0] {
+	case "state":
+		return c.reviewState(args[1:], stdout, stderr)
+	case "list":
+		return c.reviewList(args[1:], stdout, stderr)
+	case "merge-status":
+		return c.reviewMergeStatus(args[1:], stdout, stderr)
+	case "approve":
+		return c.reviewApprove(args[1:], stdout, stderr)
+	case "request-changes":
+		return c.reviewRequestChanges(args[1:], stdout, stderr)
+	case "dismiss":
+		return c.reviewDismiss(args[1:], stdout, stderr)
+	case "update-branch":
+		return c.reviewUpdateBranch(args[1:], stdout, stderr)
+	case "accept":
+		return c.reviewAccept(args[1:], stdout, stderr)
+	case "merge":
+		return c.reviewMerge(args[1:], stdout, stderr)
+	case "ci-status":
+		return c.reviewCIStatus(args[1:], stdout, stderr)
+	case "help", "-h", "--help":
+		reviewUsage(stdout)
+		return nil
+	default:
+		return fmt.Errorf("unknown review command %q", args[0])
+	}
+}
+
+func (c cli) reviewState(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("review state", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	expectApproved := fs.String("expect-approved", "", "expected approval state: true or false")
+	expectReviewer := fs.String("expect-reviewer", "", "reviewer login that must be present")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	repoID, prNumber, err := repoPR("review state", fs.Args())
+	if err != nil {
+		return err
+	}
+	var state reviewStateResponse
+	if err := c.do(http.MethodGet, reviewPath(repoID, prNumber), nil, &state); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*expectApproved) != "" {
+		want, err := parseBoolExpectation(*expectApproved)
+		if err != nil {
+			return err
+		}
+		if state.Approved != want {
+			return fmt.Errorf("review approved = %t, want %t", state.Approved, want)
+		}
+	}
+	if reviewer := strings.TrimSpace(*expectReviewer); reviewer != "" && !containsString(state.Reviewers, reviewer) {
+		return fmt.Errorf("reviewers %v do not include %q", state.Reviewers, reviewer)
+	}
+	if c.jsonOut {
+		return printJSON(stdout, state)
+	}
+	fmt.Fprintf(stdout, "approved: %t\n", state.Approved)
+	if len(state.Reviewers) > 0 {
+		fmt.Fprintf(stdout, "reviewers: %s\n", strings.Join(state.Reviewers, ", "))
+	}
+	return nil
+}
+
+func (c cli) reviewList(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("review list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	expectCount := fs.Int("expect-count", -1, "expected review count")
+	expectState := fs.String("expect-state", "", "review state that must be present, e.g. APPROVED")
+	expectReviewID := fs.Int64("expect-review-id", 0, "review id that must be present")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	repoID, prNumber, err := repoPR("review list", fs.Args())
+	if err != nil {
+		return err
+	}
+	var list reviewListResponse
+	if err := c.do(http.MethodGet, reviewPath(repoID, prNumber)+"/list", nil, &list); err != nil {
+		return err
+	}
+	if *expectCount >= 0 && len(list.Items) != *expectCount {
+		return fmt.Errorf("review count = %d, want %d", len(list.Items), *expectCount)
+	}
+	if state := strings.TrimSpace(*expectState); state != "" && !reviewListHasState(list.Items, state) {
+		return fmt.Errorf("review list does not include state %q", state)
+	}
+	if *expectReviewID > 0 && !reviewListHasID(list.Items, *expectReviewID) {
+		return fmt.Errorf("review list does not include review id %d", *expectReviewID)
+	}
+	if c.jsonOut {
+		return printJSON(stdout, list)
+	}
+	for _, item := range list.Items {
+		fmt.Fprintf(stdout, "%d\t%s\t%s\t%s\n", item.ID, item.State, item.User, item.SubmittedAt)
+	}
+	return nil
+}
+
+func (c cli) reviewMergeStatus(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("review merge-status", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	expectBehind := fs.String("expect-behind", "", "expected branch-behind state: true or false")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	repoID, prNumber, err := repoPR("review merge-status", fs.Args())
+	if err != nil {
+		return err
+	}
+	var status reviewMergeStatusResponse
+	if err := c.do(http.MethodGet, reviewPath(repoID, prNumber)+"/merge-status", nil, &status); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*expectBehind) != "" {
+		want, err := parseBoolExpectation(*expectBehind)
+		if err != nil {
+			return err
+		}
+		if status.Behind != want {
+			return fmt.Errorf("merge behind = %t, want %t", status.Behind, want)
+		}
+	}
+	if c.jsonOut {
+		return printJSON(stdout, status)
+	}
+	fmt.Fprintf(stdout, "behind: %t\n", status.Behind)
+	return nil
+}
+
+func (c cli) reviewApprove(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("review approve", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	body := fs.String("body", "", "approval review body")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	repoID, prNumber, err := repoPR("review approve", fs.Args())
+	if err != nil {
+		return err
+	}
+	var state reviewActionState
+	if err := c.do(http.MethodPost, reviewPath(repoID, prNumber)+"/approve", map[string]string{"body": *body}, &state); err != nil {
+		return err
+	}
+	if c.jsonOut {
+		return printJSON(stdout, state)
+	}
+	fmt.Fprintf(stdout, "approved PR #%d in %s", prNumber, repoID)
+	if state.GitHubReviewID != "" {
+		fmt.Fprintf(stdout, "\treview_id: %s", state.GitHubReviewID)
+	}
+	if state.Reviewer != "" {
+		fmt.Fprintf(stdout, "\treviewer: %s", state.Reviewer)
+	}
+	fmt.Fprintln(stdout)
+	return nil
+}
+
+func (c cli) reviewRequestChanges(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("review request-changes", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	body := fs.String("body", "", "required request-changes review body")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*body) == "" {
+		return errors.New("review request-changes requires --body")
+	}
+	repoID, prNumber, err := repoPR("review request-changes", fs.Args())
+	if err != nil {
+		return err
+	}
+	var result reviewActionResult
+	if err := c.do(http.MethodPost, reviewPath(repoID, prNumber)+"/request-changes", map[string]string{"body": *body}, &result); err != nil {
+		return err
+	}
+	if c.jsonOut {
+		return printJSON(stdout, result)
+	}
+	fmt.Fprintf(stdout, "requested changes on PR #%d in %s", prNumber, repoID)
+	if result.GitHubReviewID != "" {
+		fmt.Fprintf(stdout, "\treview_id: %s", result.GitHubReviewID)
+	}
+	if result.Reviewer != "" {
+		fmt.Fprintf(stdout, "\treviewer: %s", result.Reviewer)
+	}
+	fmt.Fprintln(stdout)
+	return nil
+}
+
+func (c cli) reviewDismiss(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("review dismiss", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	message := fs.String("message", "Review dismissed.", "dismissal message")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if len(fs.Args()) != 3 {
+		return errors.New("usage: hermitctl review dismiss <repository-id> <pr-number> <review-id>")
+	}
+	repoID, prNumber, err := repoPR("review dismiss", fs.Args()[:2])
+	if err != nil {
+		return err
+	}
+	reviewID, err := strconv.ParseInt(strings.TrimSpace(fs.Args()[2]), 10, 64)
+	if err != nil || reviewID <= 0 {
+		return errors.New("review-id must be a positive integer")
+	}
+	if err := c.do(http.MethodPut, reviewPath(repoID, prNumber)+"/"+strconv.FormatInt(reviewID, 10)+"/dismiss", map[string]string{"message": *message}, nil); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "dismissed review %d on PR #%d in %s\n", reviewID, prNumber, repoID)
+	return nil
+}
+
+func (c cli) reviewUpdateBranch(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("review update-branch", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	repoID, prNumber, err := repoPR("review update-branch", fs.Args())
+	if err != nil {
+		return err
+	}
+	if err := c.do(http.MethodPut, reviewPath(repoID, prNumber)+"/update-branch", nil, nil); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "updated branch for PR #%d in %s\n", prNumber, repoID)
+	return nil
+}
+
+func (c cli) reviewAccept(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("review accept", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	filePath := fs.String("file", "", "docs-cms document path to mark accepted before merge")
+	expectMerged := fs.String("expect-merged", "", "expected merged state: true or false")
+	expectBlockedByCI := fs.String("expect-blocked-by-ci", "", "expected CI-blocked state: true or false")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*filePath) == "" {
+		return errors.New("review accept requires --file")
+	}
+	repoID, prNumber, err := repoPR("review accept", fs.Args())
+	if err != nil {
+		return err
+	}
+	var result reviewAcceptResult
+	if err := c.do(http.MethodPost, "/api/v1/repositories/"+url.PathEscape(repoID)+"/pull-requests/"+strconv.Itoa(prNumber)+"/accept", map[string]string{"file_path": *filePath}, &result); err != nil {
+		return err
+	}
+	if err := validateMergeResult(result.Merged, result.BlockedByCI, *expectMerged, *expectBlockedByCI); err != nil {
+		return err
+	}
+	if c.jsonOut {
+		return printJSON(stdout, result)
+	}
+	printMergeOutcome(stdout, "accepted", repoID, prNumber, result.Merged, result.BlockedByCI, result.CommitSHA)
+	if result.HandedToIronhide {
+		fmt.Fprintln(stdout, "handed_to_ironhide: true")
+	}
+	return nil
+}
+
+func (c cli) reviewMerge(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("review merge", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	expectMerged := fs.String("expect-merged", "", "expected merged state: true or false")
+	expectBlockedByCI := fs.String("expect-blocked-by-ci", "", "expected CI-blocked state: true or false")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	repoID, prNumber, err := repoPR("review merge", fs.Args())
+	if err != nil {
+		return err
+	}
+	var result reviewMergeResult
+	if err := c.do(http.MethodPost, "/api/v1/repositories/"+url.PathEscape(repoID)+"/pull-requests/"+strconv.Itoa(prNumber)+"/merge", nil, &result); err != nil {
+		return err
+	}
+	if err := validateMergeResult(result.Merged, result.BlockedByCI, *expectMerged, *expectBlockedByCI); err != nil {
+		return err
+	}
+	if c.jsonOut {
+		return printJSON(stdout, result)
+	}
+	printMergeOutcome(stdout, "merged", repoID, prNumber, result.Merged, result.BlockedByCI, result.CommitSHA)
+	return nil
+}
+
+func (c cli) reviewCIStatus(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("review ci-status", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	sha := fs.String("sha", "", "commit SHA to check")
+	expectStatus := fs.String("expect-status", "", "expected CI status: pending, success, or failure")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*sha) == "" {
+		return errors.New("review ci-status requires --sha")
+	}
+	if len(fs.Args()) != 1 || strings.TrimSpace(fs.Args()[0]) == "" {
+		return errors.New("usage: hermitctl review ci-status <repository-id> --sha <commit-sha>")
+	}
+	repoID := strings.TrimSpace(fs.Args()[0])
+	var result reviewCIStatusResponse
+	values := url.Values{}
+	values.Set("sha", strings.TrimSpace(*sha))
+	if err := c.do(http.MethodGet, "/api/v1/repositories/"+url.PathEscape(repoID)+"/ci-status?"+values.Encode(), nil, &result); err != nil {
+		return err
+	}
+	if expected := strings.TrimSpace(*expectStatus); expected != "" && !strings.EqualFold(result.Status, expected) {
+		return fmt.Errorf("ci status = %s, want %s", result.Status, expected)
+	}
+	if c.jsonOut {
+		return printJSON(stdout, result)
+	}
+	fmt.Fprintf(stdout, "ci status: %s\n", result.Status)
+	return nil
 }
 
 func (c cli) runLogs(args []string, stdout, stderr io.Writer) error {
@@ -874,6 +1260,78 @@ func parseBoolExpectation(value string) (bool, error) {
 	default:
 		return false, fmt.Errorf("invalid boolean expectation %q", value)
 	}
+}
+
+func repoPR(command string, args []string) (string, int, error) {
+	if len(args) != 2 || strings.TrimSpace(args[0]) == "" || strings.TrimSpace(args[1]) == "" {
+		return "", 0, fmt.Errorf("usage: hermitctl %s <repository-id> <pr-number>", command)
+	}
+	prNumber, err := strconv.Atoi(strings.TrimSpace(args[1]))
+	if err != nil || prNumber <= 0 {
+		return "", 0, errors.New("pr-number must be a positive integer")
+	}
+	return strings.TrimSpace(args[0]), prNumber, nil
+}
+
+func reviewPath(repoID string, prNumber int) string {
+	return "/api/v1/repositories/" + url.PathEscape(repoID) + "/pull-requests/" + strconv.Itoa(prNumber) + "/review"
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func reviewListHasState(items []reviewItem, state string) bool {
+	for _, item := range items {
+		if strings.EqualFold(item.State, state) {
+			return true
+		}
+	}
+	return false
+}
+
+func reviewListHasID(items []reviewItem, id int64) bool {
+	for _, item := range items {
+		if item.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func validateMergeResult(merged, blockedByCI bool, expectMerged, expectBlockedByCI string) error {
+	if strings.TrimSpace(expectMerged) != "" {
+		want, err := parseBoolExpectation(expectMerged)
+		if err != nil {
+			return err
+		}
+		if merged != want {
+			return fmt.Errorf("merged = %t, want %t", merged, want)
+		}
+	}
+	if strings.TrimSpace(expectBlockedByCI) != "" {
+		want, err := parseBoolExpectation(expectBlockedByCI)
+		if err != nil {
+			return err
+		}
+		if blockedByCI != want {
+			return fmt.Errorf("blocked_by_ci = %t, want %t", blockedByCI, want)
+		}
+	}
+	return nil
+}
+
+func printMergeOutcome(w io.Writer, action, repoID string, prNumber int, merged, blockedByCI bool, commitSHA string) {
+	fmt.Fprintf(w, "%s PR #%d in %s\tmerged: %t\tblocked_by_ci: %t", action, prNumber, repoID, merged, blockedByCI)
+	if commitSHA != "" {
+		fmt.Fprintf(w, "\tcommit_sha: %s", commitSHA)
+	}
+	fmt.Fprintln(w)
 }
 
 func (c cli) repoRotateToken(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -1705,12 +2163,17 @@ func printJSON(w io.Writer, value any) error {
 
 func usage(w io.Writer) {
 	fmt.Fprintln(w, "usage: hermitctl [--addr URL|HOST:PORT] [--config path] [--json] <command>")
-	fmt.Fprintln(w, "commands: health, logs, repo, token")
+	fmt.Fprintln(w, "commands: health, logs, repo, review, token")
 }
 
 func repoUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: hermitctl repo <command>")
 	fmt.Fprintln(w, "commands: add, add-local, export-local, import-local, bind-credential, list, get, remove, validate, review-docs, rotate-token, debug")
+}
+
+func reviewUsage(w io.Writer) {
+	fmt.Fprintln(w, "usage: hermitctl review <command>")
+	fmt.Fprintln(w, "commands: state, list, merge-status, approve, request-changes, dismiss, update-branch, accept, merge, ci-status")
 }
 
 func min(a, b int) int {
