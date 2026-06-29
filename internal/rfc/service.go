@@ -668,6 +668,11 @@ func (s *Service) StartReviewSession(ctx context.Context, repositoryID string, r
 	if err != nil {
 		return StartReviewSessionResult{}, fmt.Errorf("create PR: %w", err)
 	}
+	if s.workset != nil {
+		if err := s.workset.InvalidateRepositoryRFCList(ctx, repositoryID); err != nil {
+			slog.Warn("invalidate repository RFC list cache failed", "repository_id", repositoryID, "error", err)
+		}
+	}
 
 	return StartReviewSessionResult{
 		PRNumber:         pr.Number,
