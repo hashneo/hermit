@@ -130,6 +130,31 @@ func (h *Handler) SubmitForReview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, result)
 }
 
+func (h *Handler) StartReviewSession(w http.ResponseWriter, r *http.Request) {
+	repositoryID := r.PathValue("repositoryId")
+	if repositoryID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_repository_id", "repositoryId path parameter is required")
+		return
+	}
+
+	var body StartReviewSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body must be JSON")
+		return
+	}
+	result, err := h.service.StartReviewSession(r.Context(), repositoryID, body)
+	if err != nil {
+		if strings.Contains(err.Error(), "file_path") {
+			writeError(w, http.StatusBadRequest, "invalid_file_path", err.Error())
+			return
+		}
+		writeError(w, http.StatusBadGateway, "start_review_session_failed", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
+}
+
 // AcceptRFC rewrites the RFC status to "accepted" on the PR branch and
 // attempts an immediate squash-merge.  The request body must contain:
 //

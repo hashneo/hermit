@@ -183,6 +183,16 @@ type reviewCIStatusResponse struct {
 	Status string `json:"status"`
 }
 
+type reviewSessionResult struct {
+	PRNumber         int    `json:"pr_number"`
+	HTMLURL          string `json:"html_url"`
+	Branch           string `json:"branch"`
+	FilePath         string `json:"file_path"`
+	MarkerPath       string `json:"marker_path"`
+	DocumentType     string `json:"document_type"`
+	PreviousPRNumber int    `json:"previous_pr_number,omitempty"`
+}
+
 type logListResponse struct {
 	Items []logEntry `json:"items"`
 	Total int        `json:"total"`
@@ -326,6 +336,8 @@ func (c cli) runReview(args []string, stdout, stderr io.Writer) error {
 	switch args[0] {
 	case "state":
 		return c.reviewState(args[1:], stdout, stderr)
+	case "start":
+		return c.reviewStart(args[1:], stdout, stderr)
 	case "list":
 		return c.reviewList(args[1:], stdout, stderr)
 	case "merge-status":
@@ -350,6 +362,66 @@ func (c cli) runReview(args []string, stdout, stderr io.Writer) error {
 	default:
 		return fmt.Errorf("unknown review command %q", args[0])
 	}
+}
+
+func (c cli) reviewStart(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("review start", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	filePath := fs.String("file", "", "docs-cms source document path")
+	previousPR := fs.Int("previous-pr", 0, "previous pull request number for review history")
+	expectPR := fs.Int("expect-pr", 0, "expected new pull request number")
+	expectFile := fs.String("expect-file", "", "expected source document path")
+	expectDocType := fs.String("expect-doc-type", "", "expected document type, e.g. adr, prd, rfc, memo")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*filePath) == "" {
+		return errors.New("review start requires --file")
+	}
+	if *previousPR < 0 {
+		return errors.New("previous-pr must be zero or a positive integer")
+	}
+	if len(fs.Args()) != 1 || strings.TrimSpace(fs.Args()[0]) == "" {
+		return errors.New("usage: hermitctl review start <repository-id> --file <docs-cms-path> [--previous-pr N]")
+	}
+	repoID := strings.TrimSpace(fs.Args()[0])
+	body := map[string]any{
+		"file_path": strings.Trim(strings.TrimSpace(*filePath), "/"),
+	}
+	if *previousPR > 0 {
+		body["previous_pr_number"] = *previousPR
+	}
+	var result reviewSessionResult
+	if err := c.do(http.MethodPost, "/api/v1/repositories/"+url.PathEscape(repoID)+"/review-sessions", body, &result); err != nil {
+		return err
+	}
+	if *expectPR > 0 && result.PRNumber != *expectPR {
+		return fmt.Errorf("review session PR = %d, want %d", result.PRNumber, *expectPR)
+	}
+	if expected := strings.Trim(strings.TrimSpace(*expectFile), "/"); expected != "" && result.FilePath != expected {
+		return fmt.Errorf("review session file = %s, want %s", result.FilePath, expected)
+	}
+	if expected := strings.TrimSpace(*expectDocType); expected != "" && !strings.EqualFold(result.DocumentType, expected) {
+		return fmt.Errorf("review session doc type = %s, want %s", result.DocumentType, expected)
+	}
+	if c.jsonOut {
+		return printJSON(stdout, result)
+	}
+	fmt.Fprintf(stdout, "started review session PR #%d in %s\tfile: %s\tdoc_type: %s\tbranch: %s",
+		result.PRNumber,
+		repoID,
+		result.FilePath,
+		result.DocumentType,
+		result.Branch,
+	)
+	if result.MarkerPath != "" {
+		fmt.Fprintf(stdout, "\tmarker: %s", result.MarkerPath)
+	}
+	if result.HTMLURL != "" {
+		fmt.Fprintf(stdout, "\turl: %s", result.HTMLURL)
+	}
+	fmt.Fprintln(stdout)
+	return nil
 }
 
 func (c cli) reviewState(args []string, stdout, stderr io.Writer) error {
@@ -2173,7 +2245,7 @@ func repoUsage(w io.Writer) {
 
 func reviewUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: hermitctl review <command>")
-	fmt.Fprintln(w, "commands: state, list, merge-status, approve, request-changes, dismiss, update-branch, accept, merge, ci-status")
+	fmt.Fprintln(w, "commands: start, state, list, merge-status, approve, request-changes, dismiss, update-branch, accept, merge, ci-status")
 }
 
 func min(a, b int) int {

@@ -131,6 +131,7 @@ func newMux(cfg config.Config) *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/rfcs", rfcHandler.ListRepositoryRFCs)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/rfcs/{rfcId}", rfcHandler.RenderRepositoryRFCByID)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rfcs/{rfcId}/submit-for-review", rfcHandler.SubmitForReview)
+	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/review-sessions", rfcHandler.StartReviewSession)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/accept", rfcHandler.AcceptRFC)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/merge", rfcHandler.MergePR)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/ci-status", rfcHandler.GetCIStatus)

@@ -484,6 +484,25 @@ type SubmitForReviewResult struct {
 	Branch   string `json:"branch"`
 }
 
+// StartReviewSessionRequest identifies an existing docs-cms document that needs
+// a fresh review PR even when its original PR is already closed.
+type StartReviewSessionRequest struct {
+	FilePath         string `json:"file_path"`
+	PreviousPRNumber int    `json:"previous_pr_number,omitempty"`
+}
+
+// StartReviewSessionResult is returned after Hermit opens a marker PR for a
+// fresh document review session.
+type StartReviewSessionResult struct {
+	PRNumber         int    `json:"pr_number"`
+	HTMLURL          string `json:"html_url"`
+	Branch           string `json:"branch"`
+	FilePath         string `json:"file_path"`
+	MarkerPath       string `json:"marker_path"`
+	DocumentType     string `json:"document_type"`
+	PreviousPRNumber int    `json:"previous_pr_number,omitempty"`
+}
+
 // SubmitForReview promotes a draft RFC on the main branch to "in-review" by:
 //  1. Ensuring the hermit:rfc-ready label exists on the repository.
 //  2. Fetching the current RFC content and rewriting its frontmatter status to "in-review".
@@ -552,6 +571,113 @@ func (s *Service) SubmitForReview(ctx context.Context, repositoryID, rfcPath str
 	}
 
 	return SubmitForReviewResult{PRNumber: pr.Number, HTMLURL: pr.HTMLURL, Branch: reviewBranch}, nil
+}
+
+// StartReviewSession opens a new marker-only PR for a source document that
+// needs another Hermit review session after the original PR has closed.
+func (s *Service) StartReviewSession(ctx context.Context, repositoryID string, req StartReviewSessionRequest) (StartReviewSessionResult, error) {
+	if s.repoResolver == nil {
+		return StartReviewSessionResult{}, fmt.Errorf("repository resolver is not configured")
+	}
+
+	filePath := strings.Trim(strings.TrimSpace(req.FilePath), "/")
+	if filePath == "" {
+		return StartReviewSessionResult{}, fmt.Errorf("file_path is required")
+	}
+
+	owner, name, registry, repoBaseURL, branch, docsPath, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	if !ok {
+		return StartReviewSessionResult{}, fmt.Errorf("repository not found")
+	}
+	if token == "" {
+		return StartReviewSessionResult{}, fmt.Errorf("repository token unavailable")
+	}
+
+	docTypes := fallbackDocuchangoDocTypes(filePath, docsPath)
+	docType := primaryReviewDocumentType(docTypes)
+	if docType == "" {
+		return StartReviewSessionResult{}, fmt.Errorf("file_path %q is not a reviewable docs-cms document", filePath)
+	}
+
+	client, ok := s.githubClients[registry]
+	if !ok {
+		client = NewHTTPGitHubRFCClient()
+	}
+	baseURL := s.registryBaseURL(registry, repoBaseURL)
+
+	view, err := client.GetRFC(ctx, baseURL, owner, name, branch, filePath, token)
+	if err != nil {
+		return StartReviewSessionResult{}, fmt.Errorf("fetch source document: %w", err)
+	}
+
+	workflowLabel := docuchangoWorkflowLabel(docType, docuchangoWorkflowStateReview)
+	if err := client.EnsureLabel(ctx, baseURL, owner, name, workflowLabel, "0075ca", docuchangoWorkflowLabelDescription(workflowLabel), token); err != nil {
+		return StartReviewSessionResult{}, fmt.Errorf("ensure label: %w", err)
+	}
+	if docType == "rfc" && rfcLabel != "" && rfcLabel != workflowLabel {
+		if err := client.EnsureLabel(ctx, baseURL, owner, name, rfcLabel, "0075ca", "RFC ready for review", token); err != nil {
+			return StartReviewSessionResult{}, fmt.Errorf("ensure RFC label: %w", err)
+		}
+	}
+
+	headSHA, err := client.GetMainBranchSHA(ctx, baseURL, owner, name, branch, token)
+	if err != nil {
+		return StartReviewSessionResult{}, fmt.Errorf("get branch SHA: %w", err)
+	}
+
+	now := time.Now().UTC()
+	reviewBranch := reviewSessionBranchName(filePath, now)
+	if err := client.CreateBranch(ctx, baseURL, owner, name, reviewBranch, headSHA, token); err != nil {
+		return StartReviewSessionResult{}, fmt.Errorf("create branch: %w", err)
+	}
+
+	markerPath := reviewSessionMarkerPath(filePath, now)
+	marker := reviewSessionMarker{
+		Version:          1,
+		SourcePath:       filePath,
+		SourceTitle:      view.Title,
+		DocumentType:     docType,
+		BaseBranch:       branch,
+		BaseSHA:          headSHA,
+		PreviousPRNumber: req.PreviousPRNumber,
+		CreatedAt:        now.Format(time.RFC3339),
+	}
+	markerJSON, err := json.MarshalIndent(marker, "", "  ")
+	if err != nil {
+		return StartReviewSessionResult{}, err
+	}
+	markerJSON = append(markerJSON, '\n')
+
+	docName := strings.TrimSuffix(path.Base(filePath), path.Ext(filePath))
+	commitMsg := fmt.Sprintf("docs(review): new review for %s", docName)
+	if _, err := client.CommitFile(ctx, baseURL, owner, name, reviewBranch, markerPath, string(markerJSON), commitMsg, token); err != nil {
+		return StartReviewSessionResult{}, fmt.Errorf("commit marker: %w", err)
+	}
+
+	body := fmt.Sprintf("Opens a new Hermit review session for `%s`.", filePath)
+	if req.PreviousPRNumber > 0 {
+		body += fmt.Sprintf("\n\nPrevious PR: #%d.", req.PreviousPRNumber)
+	}
+	body += "\n\n<!-- hermit-review-session -->"
+
+	labels := []string{workflowLabel}
+	if docType == "rfc" && rfcLabel != "" && rfcLabel != workflowLabel {
+		labels = append(labels, rfcLabel)
+	}
+	pr, err := client.CreatePR(ctx, baseURL, owner, name, commitMsg, body, reviewBranch, branch, labels, token)
+	if err != nil {
+		return StartReviewSessionResult{}, fmt.Errorf("create PR: %w", err)
+	}
+
+	return StartReviewSessionResult{
+		PRNumber:         pr.Number,
+		HTMLURL:          pr.HTMLURL,
+		Branch:           reviewBranch,
+		FilePath:         filePath,
+		MarkerPath:       markerPath,
+		DocumentType:     docType,
+		PreviousPRNumber: req.PreviousPRNumber,
+	}, nil
 }
 
 // AcceptRFCResult is returned by AcceptRFC.
@@ -887,6 +1013,53 @@ func rewriteFrontmatterStatus(markdown, newStatus string) string {
 func reviewBranchName(rfcPath string) string {
 	base := strings.TrimSuffix(path.Base(rfcPath), ".md")
 	return "rfc-review/" + base
+}
+
+func reviewSessionBranchName(filePath string, t time.Time) string {
+	return "hermit/review/" + slugFromPath(filePath) + "-" + reviewSessionTimestamp(t)
+}
+
+func reviewSessionMarkerPath(filePath string, t time.Time) string {
+	return ".hermit/reviews/" + reviewSessionTimestamp(t) + "-" + slugFromPath(filePath) + ".json"
+}
+
+func reviewSessionTimestamp(t time.Time) string {
+	t = t.UTC()
+	return fmt.Sprintf("%s%09dZ", t.Format("20060102T150405"), t.Nanosecond())
+}
+
+func slugFromPath(filePath string) string {
+	base := strings.TrimSuffix(path.Base(filePath), path.Ext(filePath))
+	base = strings.ToLower(strings.TrimSpace(base))
+	var out strings.Builder
+	lastDash := false
+	for _, r := range base {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			out.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			out.WriteByte('-')
+			lastDash = true
+		}
+	}
+	slug := strings.Trim(out.String(), "-")
+	if slug == "" {
+		return "document"
+	}
+	return slug
+}
+
+type reviewSessionMarker struct {
+	Version          int    `json:"version"`
+	SourcePath       string `json:"source_path"`
+	SourceTitle      string `json:"source_title,omitempty"`
+	DocumentType     string `json:"document_type,omitempty"`
+	BaseBranch       string `json:"base_branch"`
+	BaseSHA          string `json:"base_sha"`
+	PreviousPRNumber int    `json:"previous_pr_number,omitempty"`
+	CreatedAt        string `json:"created_at"`
 }
 
 // RenderPRRFC fetches the RFC file from the PR's head branch and renders it.

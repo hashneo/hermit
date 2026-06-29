@@ -338,11 +338,44 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 			DocumentType string
 		}
 		documents := make([]reviewDocument, 0)
+		documentSeen := map[string]struct{}{}
 		prAdditions := 0
 		prDeletions := 0
 		for _, prFile := range prFiles {
 			prAdditions += prFile.Additions
 			prDeletions += prFile.Deletions
+			if isReviewSessionMarkerPath(prFile.Filename) {
+				marker, err := c.getReviewSessionMarker(ctx, apiBase, owner, name, pr.Head.SHA, prFile.Filename, token)
+				if err != nil {
+					slog.Warn("read Hermit review session marker failed", "owner", owner, "repo", name, "pr", pr.Number, "file", prFile.Filename, "error", err)
+					continue
+				}
+				sourcePath := strings.Trim(strings.TrimSpace(marker.SourcePath), "/")
+				if sourcePath == "" {
+					continue
+				}
+				docTypes := []string{marker.DocumentType}
+				docTypes = append(docTypes, docMatcher.Match(sourcePath)...)
+				docTypes = append(docTypes, fallbackDocuchangoDocTypes(sourcePath, docsPath)...)
+				docTypes = uniqueDocuchangoDocTypes(docTypes)
+				for _, docType := range docTypes {
+					workflowLabels[docuchangoWorkflowLabel(docType, docuchangoWorkflowStateReview)] = struct{}{}
+				}
+				docType := primaryReviewDocumentType(docTypes)
+				if docType == "" {
+					continue
+				}
+				if _, ok := documentSeen[sourcePath]; ok {
+					continue
+				}
+				documentSeen[sourcePath] = struct{}{}
+				documents = append(documents, reviewDocument{
+					Filename:     sourcePath,
+					Additions:    prFile.Additions,
+					DocumentType: docType,
+				})
+				continue
+			}
 			docTypes := docMatcher.Match(prFile.Filename)
 			if !hasDocuchangoProject && isRFCPathInDocs(prFile.Filename, docsPath) {
 				docTypes = append(docTypes, "rfc")
@@ -356,6 +389,10 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 			if docType == "" {
 				continue
 			}
+			if _, ok := documentSeen[prFile.Filename]; ok {
+				continue
+			}
+			documentSeen[prFile.Filename] = struct{}{}
 			documents = append(documents, reviewDocument{
 				Filename:     prFile.Filename,
 				Additions:    prFile.Additions,
@@ -544,7 +581,16 @@ func (c *HTTPGitHubRFCClient) GetRFCFromPullRequest(ctx context.Context, baseURL
 	requestedPath := strings.Trim(strings.TrimSpace(filePath), "/")
 	allowed := false
 	for _, prFile := range prFiles {
-		if strings.Trim(strings.TrimSpace(prFile.Filename), "/") == requestedPath {
+		fileName := strings.Trim(strings.TrimSpace(prFile.Filename), "/")
+		if fileName == requestedPath {
+			allowed = true
+			break
+		}
+		if !isReviewSessionMarkerPath(fileName) {
+			continue
+		}
+		marker, markerErr := c.getReviewSessionMarker(ctx, apiBase, owner, name, pull.Head.SHA, fileName, token)
+		if markerErr == nil && strings.Trim(strings.TrimSpace(marker.SourcePath), "/") == requestedPath {
 			allowed = true
 			break
 		}
@@ -559,6 +605,63 @@ func (c *HTTPGitHubRFCClient) GetRFCFromPullRequest(ctx context.Context, baseURL
 	}
 	view.PRAuthorLogin = pull.User.Login
 	return view, nil
+}
+
+func isReviewSessionMarkerPath(filePath string) bool {
+	filePath = strings.Trim(strings.TrimSpace(filePath), "/")
+	return strings.HasPrefix(filePath, ".hermit/reviews/") && strings.HasSuffix(filePath, ".json")
+}
+
+func (c *HTTPGitHubRFCClient) getReviewSessionMarker(ctx context.Context, apiBase, owner, name, ref, filePath, token string) (reviewSessionMarker, error) {
+	content, err := c.getFileText(ctx, apiBase, owner, name, ref, filePath, token)
+	if err != nil {
+		return reviewSessionMarker{}, err
+	}
+	var marker reviewSessionMarker
+	if err := json.Unmarshal([]byte(content), &marker); err != nil {
+		return reviewSessionMarker{}, err
+	}
+	marker.SourcePath = strings.Trim(strings.TrimSpace(marker.SourcePath), "/")
+	marker.DocumentType = normalizeDocuchangoDocType(marker.DocumentType)
+	return marker, nil
+}
+
+func (c *HTTPGitHubRFCClient) getFileText(ctx context.Context, apiBase, owner, name, ref, filePath, token string) (string, error) {
+	contentURL := fmt.Sprintf("%s/repos/%s/%s/contents/%s?ref=%s",
+		strings.TrimRight(apiBase, "/"),
+		owner,
+		name,
+		path.Clean(strings.TrimPrefix(filePath, "/")),
+		url.QueryEscape(ref),
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, contentURL, nil)
+	if err != nil {
+		return "", err
+	}
+	setGitHubHeaders(req, token)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return "", fmt.Errorf("get file failed: %d %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var payload struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", err
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(payload.Content, "\n", ""))
+	if err != nil {
+		return "", err
+	}
+	return string(decoded), nil
 }
 
 func (c *HTTPGitHubRFCClient) listPullRequestFiles(ctx context.Context, apiBase, owner, name string, prNumber int, token string) ([]struct {

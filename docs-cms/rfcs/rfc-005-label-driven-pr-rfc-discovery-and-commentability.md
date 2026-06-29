@@ -37,6 +37,10 @@ Hermit introduces two source types in the unified RFC list:
   - source: document changed in an open PR
   - action policy: thread comments enabled
   - comments: enabled only when PR is in commentable state
+- `review_session_pr`
+  - source: a source document referenced by a Hermit marker file in a PR
+  - action policy: thread comments enabled against the new review-session PR
+  - comments: enabled when a document needs another review after its original PR has closed
 
 ## Label Contract
 
@@ -78,10 +82,27 @@ For each configured repository:
    - path matches the configured RFC document location or index target
    - filename format `rfc-NNN-short-description.md`
    - markdown extension and non-empty content
-6. Build `pr_rfc` entries for valid RFC files.
-7. Merge with `main_rfc` catalog into one response model.
+6. Detect Hermit review-session marker files under `.hermit/reviews/*.json`.
+7. For each marker, read `source_path` and `document_type`, render the source document from the PR head SHA, and build a `review_session_pr` entry for the referenced document.
+8. Build `pr_rfc` entries for valid RFC files.
+9. Merge with `main_rfc` catalog into one response model.
 
 Hermit still validates file path and format even when labels exist. Labels are workflow-state signals, not sole truth.
+
+## Review Session PRs
+
+When a reviewer needs to add new comments to a document whose original PR is already closed, Hermit opens a new PR with a conventional title and commit message:
+
+- `docs(review): new review for <doc-name>`
+
+The PR contains a marker file, not a source document rewrite. Marker files live under `.hermit/reviews/` and include:
+
+- `source_path`: docs-cms document path to review
+- `document_type`: normalized Docuchango type such as `adr`, `memo`, `prd`, or `rfc`
+- `base_branch` and `base_sha`: source branch context used to open the session
+- `previous_pr_number`: optional prior PR history
+
+Hermit applies `<doc-type>:review` to the new PR. RFC review-session PRs may also carry the legacy `hermit:rfc-ready` label for compatibility.
 
 ## API Changes
 
@@ -91,6 +112,17 @@ Add unified list semantics to RFC catalog APIs (exact path naming may follow RFC
 - include `commentable` boolean
 - include `status_mutable` boolean
 - include optional `pr_number`, `pr_url`, and label snapshot for `pr_rfc`
+
+Add an API to start a review-session PR for an existing docs-cms document:
+
+- `POST /api/v1/repositories/{repositoryId}/review-sessions`
+- request: `file_path`, optional `previous_pr_number`
+- response: PR number, branch, marker path, source file path, document type, and PR URL
+
+The CLI must expose this flow for validation:
+
+- `hermitctl review start <repository-id> --file <docs-cms-path> [--previous-pr N]`
+- expectation flags for console tests: `--expect-pr`, `--expect-file`, and `--expect-doc-type`
 
 No direct GitHub API calls from clients (per ADR-007).
 
