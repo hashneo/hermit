@@ -115,6 +115,16 @@ func (s *Store) migrate(ctx context.Context) error {
 			updated_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_repository_rfc_lists_last_success ON repository_rfc_lists(last_successful_refresh_at)`,
+		`CREATE TABLE IF NOT EXISTS rendered_review_documents (
+			repository_id TEXT NOT NULL,
+			commit_sha TEXT NOT NULL,
+			file_path TEXT NOT NULL,
+			payload_json TEXT NOT NULL,
+			rendered_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY(repository_id, commit_sha, file_path)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_rendered_review_documents_repository ON rendered_review_documents(repository_id, updated_at)`,
 		`CREATE TABLE IF NOT EXISTS provider_operations (
 			id TEXT PRIMARY KEY,
 			kind TEXT NOT NULL,

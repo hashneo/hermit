@@ -101,6 +101,7 @@ type DocumentView struct {
 	ID             string `json:"id"`
 	Title          string `json:"title"`
 	Path           string `json:"path"`
+	HeadSHA        string `json:"head_sha,omitempty"`
 	MarkdownSource string `json:"markdown_source"`
 	PRAuthorLogin  string `json:"pr_author_login,omitempty"`
 }
@@ -1097,15 +1098,21 @@ func (s *Service) RenderPRRFC(ctx context.Context, repositoryID string, prNumber
 		return DocumentView{}, fmt.Errorf("list PR RFCs: %w", err)
 	}
 
-	var filePath string
+	var filePath, headSHA string
 	for _, item := range prResult.Items {
 		if item.PRNumber == prNumber {
 			filePath = item.Path
+			headSHA = item.HeadSHA
 			break
 		}
 	}
 	if filePath == "" {
 		return DocumentView{}, fmt.Errorf("no RFC file found in pull request %d", prNumber)
+	}
+	if cached, ok := s.getCachedRenderedReviewDocument(ctx, repositoryID, headSHA, filePath); ok {
+		cached.ID = makePRCatalogID(prNumber, filePath)
+		cached.HeadSHA = headSHA
+		return cached, nil
 	}
 
 	view, err := client.GetRFCFromPullRequest(ctx, baseURL, owner, name, prNumber, filePath, token)
@@ -1113,6 +1120,8 @@ func (s *Service) RenderPRRFC(ctx context.Context, repositoryID string, prNumber
 		return DocumentView{}, err
 	}
 	view.ID = makePRCatalogID(prNumber, filePath)
+	view.HeadSHA = headSHA
+	s.putCachedRenderedReviewDocument(ctx, repositoryID, headSHA, filePath, view)
 	return view, nil
 }
 
@@ -1136,15 +1145,65 @@ func (s *Service) RenderRFCByRepository(ctx context.Context, repositoryID, rfcID
 
 	baseURL := s.registryBaseURL(registry, repoBaseURL)
 	if prNumber, filePath, ok := parsePRCatalogID(rfcID); ok {
+		_, headSHA, headErr := client.GetPRHead(ctx, baseURL, owner, name, prNumber, token)
+		if headErr == nil {
+			if cached, ok := s.getCachedRenderedReviewDocument(ctx, repositoryID, headSHA, filePath); ok {
+				cached.ID = rfcID
+				cached.HeadSHA = headSHA
+				return cached, nil
+			}
+		} else {
+			slog.Warn("get PR head for rendered document cache failed", "repository_id", repositoryID, "pr", prNumber, "error", headErr)
+		}
 		view, err := client.GetRFCFromPullRequest(ctx, baseURL, owner, name, prNumber, filePath, token)
 		if err != nil {
 			return DocumentView{}, err
 		}
 		view.ID = rfcID
+		view.HeadSHA = headSHA
+		s.putCachedRenderedReviewDocument(ctx, repositoryID, headSHA, filePath, view)
 		return view, nil
 	}
 
 	return client.GetRFC(ctx, baseURL, owner, name, branch, rfcID, token)
+}
+
+func (s *Service) getCachedRenderedReviewDocument(ctx context.Context, repositoryID, commitSHA, filePath string) (DocumentView, bool) {
+	if s.workset == nil || strings.TrimSpace(commitSHA) == "" {
+		return DocumentView{}, false
+	}
+	payload, ok, err := s.workset.GetRenderedReviewDocument(ctx, repositoryID, commitSHA, filePath)
+	if err != nil {
+		slog.Warn("get rendered review document cache failed", "repository_id", repositoryID, "commit_sha", commitSHA, "file_path", filePath, "error", err)
+		return DocumentView{}, false
+	}
+	if !ok {
+		return DocumentView{}, false
+	}
+	var view DocumentView
+	if err := json.Unmarshal(payload, &view); err != nil {
+		slog.Warn("decode rendered review document cache failed", "repository_id", repositoryID, "commit_sha", commitSHA, "file_path", filePath, "error", err)
+		return DocumentView{}, false
+	}
+	return view, true
+}
+
+func (s *Service) putCachedRenderedReviewDocument(ctx context.Context, repositoryID, commitSHA, filePath string, view DocumentView) {
+	if s.workset == nil || strings.TrimSpace(commitSHA) == "" {
+		return
+	}
+	view.HeadSHA = commitSHA
+	if view.Path == "" {
+		view.Path = strings.Trim(strings.TrimSpace(filePath), "/")
+	}
+	payload, err := json.Marshal(view)
+	if err != nil {
+		slog.Warn("encode rendered review document cache failed", "repository_id", repositoryID, "commit_sha", commitSHA, "file_path", filePath, "error", err)
+		return
+	}
+	if err := s.workset.PutRenderedReviewDocument(ctx, repositoryID, commitSHA, filePath, payload); err != nil {
+		slog.Warn("put rendered review document cache failed", "repository_id", repositoryID, "commit_sha", commitSHA, "file_path", filePath, "error", err)
+	}
 }
 
 func (s *Service) registryBaseURL(registry, repoBaseURL string) string {

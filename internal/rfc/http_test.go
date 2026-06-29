@@ -117,6 +117,86 @@ func TestRenderPRRFC(t *testing.T) {
 	}
 }
 
+func TestRenderRFCByRepository_CachesReviewDocumentByHeadSHA(t *testing.T) {
+	rfcMarkdown := "---\ntitle: Cached Review Doc\n---\n# Cached Review Doc\n\nContent here.\n"
+	rfcContent := base64.StdEncoding.EncodeToString([]byte(rfcMarkdown))
+	var prGets atomic.Int64
+	var fileGets atomic.Int64
+	var contentGets atomic.Int64
+
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/owner/repo/pulls/7":
+			prGets.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"head": map[string]any{"sha": "abc123", "ref": "feature/review-doc"},
+				"user": map[string]any{"login": "alice"},
+			})
+		case r.URL.Path == "/repos/owner/repo/pulls/7/files":
+			fileGets.Add(1)
+			_ = json.NewEncoder(w).Encode([]map[string]string{
+				{"filename": "docs-cms/rfcs/rfc-007-cache.md", "status": "modified"},
+			})
+		case r.URL.Path == "/repos/owner/repo/contents/docs-cms/rfcs/rfc-007-cache.md":
+			contentGets.Add(1)
+			if r.URL.Query().Get("ref") != "abc123" {
+				t.Fatalf("content ref = %q, want abc123", r.URL.Query().Get("ref"))
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"name":    "rfc-007-cache.md",
+				"path":    "docs-cms/rfcs/rfc-007-cache.md",
+				"content": rfcContent,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gitea.Close()
+
+	store, err := workset.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open sqlite workset: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	resolver := &fakeResolver{
+		owner:    "owner",
+		name:     "repo",
+		registry: "gitea-local",
+		branch:   "main",
+		docsPath: "docs-cms/rfcs",
+		token:    "test-token",
+	}
+	service := NewServiceWithRepositoryResolver(resolver, map[string]string{"gitea-local": gitea.URL})
+	service.WithWorkset(store)
+
+	rfcID := makePRCatalogID(7, "docs-cms/rfcs/rfc-007-cache.md")
+	first, err := service.RenderRFCByRepository(t.Context(), "repo-1", rfcID)
+	if err != nil {
+		t.Fatalf("first render: %v", err)
+	}
+	if first.Title != "Cached Review Doc" || first.HeadSHA != "abc123" || first.PRAuthorLogin != "alice" {
+		t.Fatalf("unexpected first render: %+v", first)
+	}
+	if prGets.Load() != 2 || fileGets.Load() != 1 || contentGets.Load() != 1 {
+		t.Fatalf("first render calls: pr=%d files=%d content=%d, want 2/1/1", prGets.Load(), fileGets.Load(), contentGets.Load())
+	}
+
+	second, err := service.RenderRFCByRepository(t.Context(), "repo-1", rfcID)
+	if err != nil {
+		t.Fatalf("second render: %v", err)
+	}
+	if second.Title != first.Title || second.MarkdownSource != first.MarkdownSource || second.HeadSHA != "abc123" {
+		t.Fatalf("unexpected cached render: %+v", second)
+	}
+	if prGets.Load() != 3 {
+		t.Fatalf("second render should only re-check PR head: pr=%d", prGets.Load())
+	}
+	if fileGets.Load() != 1 || contentGets.Load() != 1 {
+		t.Fatalf("second render re-read PR document: files=%d content=%d, want 1/1", fileGets.Load(), contentGets.Load())
+	}
+}
+
 func TestListRepositoryRFCs_IncludesSummary(t *testing.T) {
 	rfcMarkdown := "---\ntitle: Test RFC\nstatus: draft\n---\n# Test RFC\n\nContent here.\n"
 	rfcContent := base64.StdEncoding.EncodeToString([]byte(rfcMarkdown))
