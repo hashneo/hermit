@@ -58,13 +58,18 @@ func (h *Handler) ListRepositoryRFCs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response, err := h.service.ListRFCsByRepository(r.Context(), repositoryID)
+	response, err := h.service.ListRFCsByRepository(r.Context(), repositoryID, parseBoolQuery(r, "refresh"))
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "rfc_catalog_unavailable", err.Error())
 		return
 	}
 
 	writeJSON(w, http.StatusOK, response)
+}
+
+func parseBoolQuery(r *http.Request, key string) bool {
+	value := strings.ToLower(strings.TrimSpace(r.URL.Query().Get(key)))
+	return value == "1" || value == "true" || value == "yes"
 }
 
 func (h *Handler) RenderRepositoryRFCByID(w http.ResponseWriter, r *http.Request) {

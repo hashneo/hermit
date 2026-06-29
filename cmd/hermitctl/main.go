@@ -111,6 +111,7 @@ type reviewDocsPR struct {
 	Title       string           `json:"title"`
 	State       string           `json:"state"`
 	Merged      bool             `json:"merged"`
+	Labels      []string         `json:"labels,omitempty"`
 	HeadRef     string           `json:"head_ref,omitempty"`
 	HTMLURL     string           `json:"html_url,omitempty"`
 	MergeState  string           `json:"mergeable_state,omitempty"`
@@ -1166,6 +1167,9 @@ func (c cli) repoReviewDocs(args []string, stdout, stderr io.Writer) error {
 	expectPRDocs := fs.Int("expect-pr-docs", -1, "expected review document count for --expect-pr")
 	expectPRState := fs.String("expect-pr-state", "", "expected top-level PR state for --expect-pr")
 	expectMerged := fs.String("expect-merged", "", "expected merged state for --expect-pr: true or false")
+	expectLabels := fs.String("expect-pr-labels", "", "comma-separated labels that must be present on --expect-pr")
+	rejectLabels := fs.String("reject-pr-labels", "", "comma-separated labels that must be absent on --expect-pr")
+	refresh := fs.Bool("refresh", false, "force a fresh provider read instead of using the repository review-docs cache")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -1174,7 +1178,7 @@ func (c cli) repoReviewDocs(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 
-	state, err := c.fetchReviewDocsState(id)
+	state, err := c.fetchReviewDocsState(id, *refresh)
 	if err != nil {
 		return err
 	}
@@ -1184,6 +1188,8 @@ func (c cli) repoReviewDocs(args []string, stdout, stderr io.Writer) error {
 		expectPRDocs:  *expectPRDocs,
 		expectPRState: strings.TrimSpace(*expectPRState),
 		expectMerged:  strings.TrimSpace(*expectMerged),
+		expectLabels:  splitCommaList(*expectLabels),
+		rejectLabels:  splitCommaList(*rejectLabels),
 	}); err != nil {
 		return err
 	}
@@ -1195,9 +1201,13 @@ func (c cli) repoReviewDocs(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-func (c cli) fetchReviewDocsState(id string) (reviewDocsState, error) {
+func (c cli) fetchReviewDocsState(id string, refresh bool) (reviewDocsState, error) {
 	var page repositoryRFCListResponse
-	if err := c.do(http.MethodGet, "/api/v1/repositories/"+url.PathEscape(id)+"/rfcs", nil, &page); err != nil {
+	apiPath := "/api/v1/repositories/" + url.PathEscape(id) + "/rfcs"
+	if refresh {
+		apiPath += "?refresh=true"
+	}
+	if err := c.do(http.MethodGet, apiPath, nil, &page); err != nil {
 		return reviewDocsState{}, err
 	}
 
@@ -1221,6 +1231,7 @@ func (c cli) fetchReviewDocsState(id string) (reviewDocsState, error) {
 				Title:       firstNonEmpty(item.PRTitle, item.Title),
 				State:       firstNonEmpty(item.PRState, "open"),
 				Merged:      item.PRMerged,
+				Labels:      []string{},
 				HeadRef:     item.HeadRef,
 				HTMLURL:     item.HTMLURL,
 				MergeState:  item.MergeableState,
@@ -1231,6 +1242,7 @@ func (c cli) fetchReviewDocsState(id string) (reviewDocsState, error) {
 			}
 			byPR[item.PRNumber] = group
 		}
+		group.Labels = appendUniqueStrings(group.Labels, item.Labels...)
 		docType := strings.TrimSpace(item.DocumentType)
 		if docType == "" {
 			docType = "document"
@@ -1239,6 +1251,7 @@ func (c cli) fetchReviewDocsState(id string) (reviewDocsState, error) {
 		group.Documents = append(group.Documents, item)
 	}
 	for _, group := range byPR {
+		sort.Strings(group.Labels)
 		sortReviewDocuments(group.Documents)
 		state.PullRequests = append(state.PullRequests, *group)
 	}
@@ -1255,6 +1268,8 @@ type reviewDocsExpectations struct {
 	expectPRDocs  int
 	expectPRState string
 	expectMerged  string
+	expectLabels  []string
+	rejectLabels  []string
 }
 
 func validateReviewDocsExpectations(state reviewDocsState, expected reviewDocsExpectations) error {
@@ -1262,7 +1277,7 @@ func validateReviewDocsExpectations(state reviewDocsState, expected reviewDocsEx
 		return fmt.Errorf("review docs count = %d, want %d", len(state.Documents), expected.expectDocs)
 	}
 	if expected.expectPR == 0 {
-		if expected.expectPRDocs >= 0 || expected.expectPRState != "" || expected.expectMerged != "" {
+		if expected.expectPRDocs >= 0 || expected.expectPRState != "" || expected.expectMerged != "" || len(expected.expectLabels) > 0 || len(expected.rejectLabels) > 0 {
 			return errors.New("--expect-pr is required when asserting PR-specific review state")
 		}
 		return nil
@@ -1292,6 +1307,16 @@ func validateReviewDocsExpectations(state reviewDocsState, expected reviewDocsEx
 			return fmt.Errorf("PR #%d merged = %t, want %t", expected.expectPR, pr.Merged, wantMerged)
 		}
 	}
+	for _, label := range expected.expectLabels {
+		if !containsStringFold(pr.Labels, label) {
+			return fmt.Errorf("PR #%d labels %v do not include %q", expected.expectPR, pr.Labels, label)
+		}
+	}
+	for _, label := range expected.rejectLabels {
+		if containsStringFold(pr.Labels, label) {
+			return fmt.Errorf("PR #%d labels %v unexpectedly include %q", expected.expectPR, pr.Labels, label)
+		}
+	}
 	return nil
 }
 
@@ -1305,6 +1330,9 @@ func printReviewDocsState(w io.Writer, state reviewDocsState) {
 			merged = " merged"
 		}
 		fmt.Fprintf(w, "PR #%d\t%s%s\t%d docs\t%d files\t+%d -%d\t%s\n", pr.Number, pr.State, merged, len(pr.Documents), pr.Changed, pr.Additions, pr.Deletions, pr.Title)
+		if len(pr.Labels) > 0 {
+			fmt.Fprintf(w, "  labels: %s\n", strings.Join(pr.Labels, ", "))
+		}
 		for _, doc := range pr.Documents {
 			fmt.Fprintf(w, "  - %s\t%s\t%s\n", firstNonEmpty(doc.DocumentType, "document"), doc.Title, doc.Path)
 		}
@@ -1356,6 +1384,39 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func containsStringFold(values []string, want string) bool {
+	want = strings.TrimSpace(want)
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), want) {
+			return true
+		}
+	}
+	return false
+}
+
+func appendUniqueStrings(values []string, additions ...string) []string {
+	for _, addition := range additions {
+		addition = strings.TrimSpace(addition)
+		if addition == "" || containsStringFold(values, addition) {
+			continue
+		}
+		values = append(values, addition)
+	}
+	return values
+}
+
+func splitCommaList(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func reviewListHasState(items []reviewItem, state string) bool {
@@ -2241,6 +2302,7 @@ func usage(w io.Writer) {
 func repoUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: hermitctl repo <command>")
 	fmt.Fprintln(w, "commands: add, add-local, export-local, import-local, bind-credential, list, get, remove, validate, review-docs, rotate-token, debug")
+	fmt.Fprintln(w, "review-docs flags: --refresh --expect-docs N --expect-pr N --expect-pr-docs N --expect-pr-labels a,b --reject-pr-labels a,b")
 }
 
 func reviewUsage(w io.Writer) {

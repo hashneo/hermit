@@ -293,13 +293,18 @@ func (s *Service) RenderRFC(id string) (DocumentView, error) {
 	}, nil
 }
 
-func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string) (RepositoryRFCListResponse, error) {
+func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string, refresh bool) (RepositoryRFCListResponse, error) {
 	if s.repoResolver == nil {
 		return RepositoryRFCListResponse{}, fmt.Errorf("repository resolver is not configured")
 	}
 
 	cacheTTL := s.repositoryRFCListCacheTTL(repositoryID)
-	if s.workset != nil {
+	if s.workset != nil && refresh {
+		if err := s.workset.InvalidateRepositoryRFCList(ctx, repositoryID); err != nil {
+			slog.Warn("invalidate repository RFC list cache failed", "repository_id", repositoryID, "error", err)
+		}
+	}
+	if s.workset != nil && !refresh {
 		if projection, ok, err := s.workset.GetFreshRepositoryRFCList(ctx, repositoryID, cacheTTL); err == nil && ok {
 			var cached RepositoryRFCListResponse
 			if decodeErr := json.Unmarshal(projection.Payload, &cached); decodeErr == nil {

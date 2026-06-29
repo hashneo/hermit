@@ -329,7 +329,7 @@ func TestListRepositoryRFCs_UsesSQLiteCache(t *testing.T) {
 	service := NewServiceWithRepositoryResolver(resolver, map[string]string{"gitea-local": gitea.URL})
 	service.WithWorkset(store)
 
-	first, err := service.ListRFCsByRepository(t.Context(), "repo-1")
+	first, err := service.ListRFCsByRepository(t.Context(), "repo-1", false)
 	if err != nil {
 		t.Fatalf("first list repository rfcs: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestListRepositoryRFCs_UsesSQLiteCache(t *testing.T) {
 		t.Fatalf("first response cache metadata = %+v, want fresh non-cached metadata", first.Cache)
 	}
 
-	second, err := service.ListRFCsByRepository(t.Context(), "repo-1")
+	second, err := service.ListRFCsByRepository(t.Context(), "repo-1", false)
 	if err != nil {
 		t.Fatalf("second list repository rfcs: %v", err)
 	}
