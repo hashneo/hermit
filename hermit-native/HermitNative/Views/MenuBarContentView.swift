@@ -227,38 +227,11 @@ struct MenuBarContentView: View {
                         serverStatusColor: serverStatusColor
                     )
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Repositories")
-                                .font(.headline)
-                            Spacer()
-                            Menu {
-                                Picker("Sort", selection: $repoSort) {
-                                    ForEach(RepoSortOption.allCases) { option in
-                                        Text(option.rawValue).tag(option)
-                                    }
-                                }
-                            } label: {
-                                Label(repoSort.rawValue, systemImage: "arrow.up.arrow.down")
-                                    .font(.caption)
-                            }
-                            .menuStyle(.borderlessButton)
-                        }
-
-                        ForEach(filteredOrderedRepos.prefix(4)) { repo in
-                            RepoFilterRow(
-                                repo: repo,
-                                state: dashboardStore.state(for: repo.id),
-                                isSelected: false,
-                                isActive: repo.id == repoStore.repositories.first?.id,
-                                onSelect: { selectedRepoID = repo.id }
-                            )
-                        }
-                    }
-
-                    CompactReviewQueue(
-                        groups: Array(pendingPRGroups.prefix(3)),
-                        totalCount: pendingPRGroups.count,
+                    CompactRepositoryReviewBuckets(
+                        buckets: Array(repositoryReviewBuckets.prefix(5)),
+                        totalRepositoryCount: repositoryReviewBuckets.count,
+                        totalPRCount: pendingPRGroups.count,
+                        onSelectRepo: { repo in selectedRepoID = repo.id },
                         onOpen: { group in open(group.primaryRFC, in: group.repo) }
                     )
                 }
@@ -337,19 +310,13 @@ struct MenuBarContentView: View {
                         prStatsFreshness: aggregatePRStatsFreshness,
                         onRefresh: { Task { await refreshDashboard(force: true) } }
                     )
-                    PRReviewSection(
-                        title: "Pull requests needing review",
-                        groups: pendingPRGroups,
-                        emptyText: "No pull requests currently contain reviewable docs-cms documents.",
-                        showsRepository: true,
+                    RepositoryReviewBucketsSection(
+                        buckets: repositoryReviewBuckets,
+                        totalPRCount: pendingPRGroups.count,
+                        totalDocumentCount: aggregatePendingReviewCount,
+                        emptyText: "No repositories currently contain reviewable docs-cms documents.",
+                        onSelectRepo: { repo in selectedRepoID = repo.id },
                         onOpen: { group in open(group.primaryRFC, in: group.repo) }
-                    )
-                    PRSummarySection(
-                        title: "Documents needing review",
-                        items: pendingRFCItems,
-                        emptyText: "No docs-cms documents are currently waiting for review.",
-                        showsRepository: true,
-                        onOpen: { item in open(item.rfc, in: item.repo) }
                     )
                     PRStateSummarySection(
                         title: "PR states",
@@ -477,6 +444,12 @@ struct MenuBarContentView: View {
         .sorted { lhs, rhs in
             if lhs.pr.number != rhs.pr.number { return lhs.pr.number > rhs.pr.number }
             return lhs.repo.fullName < rhs.repo.fullName
+        }
+    }
+
+    private var repositoryReviewBuckets: [RepositoryReviewBucket] {
+        orderedRepos.map { repo in
+            RepositoryReviewBucket(repo: repo, state: dashboardStore.state(for: repo.id))
         }
     }
 
@@ -1227,6 +1200,244 @@ private struct PendingPRGroup: Identifiable {
     }
 }
 
+private struct RepositoryReviewBucket: Identifiable {
+    let repo: Repository
+    let state: MenuBarDashboardStore.RepoState?
+
+    var id: UUID { repo.id }
+    var groups: [PendingPRGroup] {
+        PendingPRGroup.groups(for: repo, rfcs: state?.pullRequests ?? [])
+    }
+    var documentCount: Int { state?.pendingReviewCount ?? groups.reduce(0) { $0 + $1.documentCount } }
+    var prCount: Int { state?.openPRCount ?? groups.count }
+    var isLoading: Bool { state?.isLoading ?? true }
+    var issue: MenuBarIssue? { state?.issue }
+}
+
+private struct CompactRepositoryReviewBuckets: View {
+    let buckets: [RepositoryReviewBucket]
+    let totalRepositoryCount: Int
+    let totalPRCount: Int
+    let onSelectRepo: (Repository) -> Void
+    let onOpen: (PendingPRGroup) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Repository review buckets")
+                    .font(.headline)
+                Spacer()
+                Text("\(totalPRCount) PRs")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+
+            if buckets.isEmpty {
+                Text("No repositories are configured.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.secondary.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(buckets) { bucket in
+                        CompactRepositoryReviewBucketRow(
+                            bucket: bucket,
+                            onSelectRepo: onSelectRepo,
+                            onOpen: onOpen
+                        )
+                    }
+                }
+
+                if totalRepositoryCount > buckets.count {
+                    Text("\(totalRepositoryCount - buckets.count) more repositories")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+}
+
+private struct CompactRepositoryReviewBucketRow: View {
+    let bucket: RepositoryReviewBucket
+    let onSelectRepo: (Repository) -> Void
+    let onOpen: (PendingPRGroup) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                onSelectRepo(bucket.repo)
+            } label: {
+                RepositoryBucketHeader(bucket: bucket, compact: true)
+            }
+            .buttonStyle(.plain)
+
+            if let issue = bucket.issue {
+                Text(issue.shortTitle)
+                    .font(.caption)
+                    .foregroundStyle(issue.tint)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 2)
+            } else if bucket.groups.isEmpty {
+                Text(bucket.isLoading ? "Calculating from cached basis..." : "No review documents waiting.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 2)
+            } else {
+                ForEach(bucket.groups.prefix(2)) { group in
+                    Button {
+                        onOpen(group)
+                    } label: {
+                        PRReviewSummaryRow(group: group)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct RepositoryReviewBucketsSection: View {
+    let buckets: [RepositoryReviewBucket]
+    let totalPRCount: Int
+    let totalDocumentCount: Int
+    let emptyText: String
+    let onSelectRepo: (Repository) -> Void
+    let onOpen: (PendingPRGroup) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Repository breakdown")
+                        .font(.headline)
+                    Text("\(totalDocumentCount) documents across \(totalPRCount) pull requests")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if buckets.contains(where: \.isLoading) {
+                    StatusCapsule(title: "Calculating", systemImage: "arrow.triangle.2.circlepath", tint: .secondary)
+                }
+            }
+
+            if buckets.isEmpty {
+                Text(emptyText)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.secondary.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            } else {
+                VStack(spacing: 12) {
+                    ForEach(buckets) { bucket in
+                        RepositoryReviewBucketCard(
+                            bucket: bucket,
+                            onSelectRepo: onSelectRepo,
+                            onOpen: onOpen
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct RepositoryReviewBucketCard: View {
+    let bucket: RepositoryReviewBucket
+    let onSelectRepo: (Repository) -> Void
+    let onOpen: (PendingPRGroup) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                onSelectRepo(bucket.repo)
+            } label: {
+                RepositoryBucketHeader(bucket: bucket, compact: false)
+            }
+            .buttonStyle(.plain)
+
+            if let issue = bucket.issue {
+                Label(issue.title, systemImage: issue.systemImage)
+                    .font(.subheadline)
+                    .foregroundStyle(issue.tint)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(issue.tint.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else if bucket.groups.isEmpty {
+                Text(bucket.isLoading ? "Calculating this repository from the cached basis..." : "No review documents waiting in this repository.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.secondary.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(bucket.groups) { group in
+                        Button {
+                            onOpen(group)
+                        } label: {
+                            PRReviewSummaryRow(group: group)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.secondary.opacity(0.10), lineWidth: 1)
+        )
+    }
+}
+
+private struct RepositoryBucketHeader: View {
+    let bucket: RepositoryReviewBucket
+    var compact = false
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(bucket.repo.fullName)
+                    .font(compact ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(bucket.repo.fullName)
+                Text(bucket.repo.docsPath)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            .layoutPriority(1)
+
+            Spacer(minLength: 8)
+
+            if bucket.isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .help("Refreshing from source of truth")
+            }
+            CountBadge(value: bucket.prCount, label: "PRs", tint: .blue)
+            CountBadge(value: bucket.documentCount, label: "docs", tint: .secondary)
+        }
+    }
+}
+
 private struct PRReviewSection: View {
     let title: String
     let groups: [PendingPRGroup]
@@ -1606,7 +1817,10 @@ private struct PRStatsFreshness {
 
     var label: String {
         if loadedRepositoryCount == 0 {
-            return isLoading ? "PR stats loading" : "PR stats not loaded"
+            return isLoading ? "Calculating from source of truth" : "PR stats not loaded"
+        }
+        if isLoading {
+            return "Refreshing from source of truth • \(loadedRepositoryCount)/\(totalRepositoryCount) repos"
         }
         if loadedRepositoryCount < totalRepositoryCount {
             return "Partial PR stats • \(loadedRepositoryCount)/\(totalRepositoryCount) repos"
@@ -2793,6 +3007,7 @@ private final class MenuBarDashboardStore: ObservableObject {
             stats.recordCacheHit()
             setState(
                 RepoState(
+                    isLoading: true,
                     mainBranch: cached.mainBranch,
                     pullRequests: cached.pullRequests,
                     pendingReviewCount: cached.summary.pendingReviewCount,
@@ -2803,7 +3018,6 @@ private final class MenuBarDashboardStore: ObservableObject {
                 for: repo,
                 reason: "cache-hit"
             )
-            return
         }
 
         let generation = nextGeneration(for: repo.id)
@@ -3025,12 +3239,224 @@ private func menuIssue(forHTTPStatus statusCode: Int?, message: String) -> MenuB
 @MainActor
 final class RepoRFCCache {
     static let shared = RepoRFCCache()
+    private let defaultsKey = "hermit.menuBar.rfcProjectionCache.v1"
     private var cache: [UUID: RepoRFCLoader.RFCSections] = [:]
 
+    private init() {
+        cache = loadPersistedCache()
+    }
+
     fileprivate func sections(for id: UUID) -> RepoRFCLoader.RFCSections? { cache[id] }
-    fileprivate func store(_ s: RepoRFCLoader.RFCSections, for id: UUID) { cache[id] = s }
-    func invalidate(_ id: UUID) { cache.removeValue(forKey: id) }
-    func invalidateAll() { cache.removeAll() }
+    fileprivate func store(_ s: RepoRFCLoader.RFCSections, for id: UUID) {
+        cache[id] = s
+        persist()
+    }
+    func invalidate(_ id: UUID) {
+        cache.removeValue(forKey: id)
+        persist()
+    }
+    func invalidateAll() {
+        cache.removeAll()
+        persist()
+    }
+
+    private func loadPersistedCache() -> [UUID: RepoRFCLoader.RFCSections] {
+        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+              let payload = try? JSONDecoder().decode([String: CachedSections].self, from: data) else {
+            return [:]
+        }
+
+        var next: [UUID: RepoRFCLoader.RFCSections] = [:]
+        for (rawID, cached) in payload {
+            guard let id = UUID(uuidString: rawID) else { continue }
+            next[id] = cached.sections
+        }
+        return next
+    }
+
+    private func persist() {
+        let payload = Dictionary(uniqueKeysWithValues: cache.map { id, sections in
+            (id.uuidString, CachedSections(sections))
+        })
+        if let data = try? JSONEncoder().encode(payload) {
+            UserDefaults.standard.set(data, forKey: defaultsKey)
+        }
+    }
+
+    private struct CachedSections: Codable {
+        let mainBranch: [CachedRFC]
+        let pullRequests: [CachedRFC]
+        let summary: CachedSummary
+        let loadedAt: Date
+
+        init(_ sections: RepoRFCLoader.RFCSections) {
+            mainBranch = sections.mainBranch.map(CachedRFC.init)
+            pullRequests = sections.pullRequests.map(CachedRFC.init)
+            summary = CachedSummary(sections.summary)
+            loadedAt = sections.loadedAt
+        }
+
+        var sections: RepoRFCLoader.RFCSections {
+            RepoRFCLoader.RFCSections(
+                mainBranch: mainBranch.compactMap(\.rfc),
+                pullRequests: pullRequests.compactMap(\.rfc),
+                summary: summary.repositorySummary,
+                loadedAt: loadedAt
+            )
+        }
+    }
+
+    private struct CachedSummary: Codable {
+        let pendingReviewCount: Int
+        let openPRCount: Int
+        let ready: Int
+        let conflicted: Int
+        let failed: Int
+        let needsReview: Int
+
+        init(_ summary: RepositoryRFCSummary) {
+            pendingReviewCount = summary.pendingReviewCount
+            openPRCount = summary.openPRCount
+            ready = summary.prStateCounts.ready
+            conflicted = summary.prStateCounts.conflicted
+            failed = summary.prStateCounts.failed
+            needsReview = summary.prStateCounts.needsReview
+        }
+
+        var repositorySummary: RepositoryRFCSummary {
+            RepositoryRFCSummary(
+                pendingReviewCount: pendingReviewCount,
+                openPRCount: openPRCount,
+                prStateCounts: PRStateCounts(
+                    ready: ready,
+                    conflicted: conflicted,
+                    failed: failed,
+                    needsReview: needsReview
+                )
+            )
+        }
+    }
+
+    private struct CachedRFC: Codable {
+        let id: String
+        let title: String
+        let path: String
+        let sha: String
+        let lifecycleStatus: String?
+        let htmlURL: String
+        let pullRequest: CachedPullRequest?
+
+        init(_ rfc: RFC) {
+            id = rfc.id
+            title = rfc.title
+            path = rfc.path
+            sha = rfc.sha
+            lifecycleStatus = rfc.lifecycleStatus
+            htmlURL = rfc.htmlURL
+            if case .pullRequest(let pr) = rfc.source {
+                pullRequest = CachedPullRequest(pr)
+            } else {
+                pullRequest = nil
+            }
+        }
+
+        var rfc: RFC? {
+            if let pullRequest {
+                return RFC(
+                    id: id,
+                    title: title,
+                    path: path,
+                    sha: sha,
+                    source: .pullRequest(pullRequest.pullRequest),
+                    lifecycleStatus: lifecycleStatus,
+                    htmlURL: htmlURL
+                )
+            }
+            return RFC(
+                id: id,
+                title: title,
+                path: path,
+                sha: sha,
+                source: .mainBranch,
+                lifecycleStatus: lifecycleStatus,
+                htmlURL: htmlURL
+            )
+        }
+    }
+
+    private struct CachedPullRequest: Codable {
+        let id: Int
+        let number: Int
+        let title: String
+        let prTitle: String
+        let prState: String
+        let prMerged: Bool
+        let body: String
+        let headSHA: String
+        let headRef: String
+        let htmlURL: String
+        let state: String
+        let draft: Bool
+        let mergeable: Bool?
+        let mergeableState: String?
+        let documentType: String
+        let documentPath: String
+        let catalogID: String
+        let labels: [String]
+        let changedFiles: Int
+        let additions: Int
+        let deletions: Int
+
+        init(_ pr: RFCPullRequest) {
+            id = pr.id
+            number = pr.number
+            title = pr.title
+            prTitle = pr.prTitle
+            prState = pr.prState
+            prMerged = pr.prMerged
+            body = ""
+            headSHA = pr.headSHA
+            headRef = pr.headRef
+            htmlURL = pr.htmlURL
+            state = pr.state
+            draft = pr.draft
+            mergeable = pr.mergeable
+            mergeableState = pr.mergeableState
+            documentType = pr.documentType
+            documentPath = pr.documentPath
+            catalogID = pr.catalogID
+            labels = pr.labels
+            changedFiles = pr.changedFiles
+            additions = pr.additions
+            deletions = pr.deletions
+        }
+
+        var pullRequest: RFCPullRequest {
+            RFCPullRequest(
+                id: id,
+                number: number,
+                title: title,
+                prTitle: prTitle,
+                prState: prState,
+                prMerged: prMerged,
+                body: body,
+                headSHA: headSHA,
+                headRef: headRef,
+                htmlURL: htmlURL,
+                state: state,
+                draft: draft,
+                mergeable: mergeable,
+                mergeableState: mergeableState,
+                documentType: documentType,
+                documentPath: documentPath,
+                catalogID: catalogID,
+                labels: labels,
+                changedFiles: changedFiles,
+                additions: additions,
+                deletions: deletions
+            )
+        }
+    }
 }
 
 @MainActor
