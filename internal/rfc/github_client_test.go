@@ -221,11 +221,16 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *t
 			_ = json.NewEncoder(w).Encode([]map[string]any{
 				{"number": 10, "draft": false, "head": map[string]any{"sha": "sha-ready"}, "labels": []map[string]any{{"name": "hermit:rfc-ready"}}},
 				{"number": 11, "draft": true, "head": map[string]any{"sha": "sha-draft"}, "labels": []map[string]any{{"name": "hermit:rfc-ready"}}},
+				{"number": 12, "draft": false, "mergeable": true, "mergeable_state": "clean", "head": map[string]any{"sha": "sha-code"}, "labels": []map[string]any{}},
 			})
 		case r.URL.Path == "/repos/owner/repo/pulls/10/files":
 			_ = json.NewEncoder(w).Encode([]map[string]string{
 				{"filename": "docs-cms/rfcs/rfc-001-main-list.md", "status": "modified"},
 				{"filename": "docs-cms/notes.md", "status": "modified"},
+			})
+		case r.URL.Path == "/repos/owner/repo/pulls/12/files":
+			_ = json.NewEncoder(w).Encode([]map[string]string{
+				{"filename": "cmd/service/main.go", "status": "modified"},
 			})
 		case r.URL.Path == "/repos/owner/repo/pulls/10":
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -265,11 +270,11 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *t
 	if len(items) != 1 {
 		t.Fatalf("expected one review-ready RFC item, got %d", len(items))
 	}
-	if result.OpenPRCount != 2 {
-		t.Fatalf("expected open PR count 2, got %d", result.OpenPRCount)
+	if result.OpenPRCount != 1 {
+		t.Fatalf("expected reviewable open PR count 1, got %d", result.OpenPRCount)
 	}
-	if result.PRStates.Ready != 1 || result.PRStates.NeedsReview != 1 {
-		t.Fatalf("expected PR state counts ready=1 needs_review=1, got %+v", result.PRStates)
+	if result.PRStates.Ready != 1 || result.PRStates.NeedsReview != 0 {
+		t.Fatalf("expected reviewable PR state counts ready=1 needs_review=0, got %+v", result.PRStates)
 	}
 	if items[0].PRNumber != 10 {
 		t.Fatalf("expected PR number 10, got %d", items[0].PRNumber)

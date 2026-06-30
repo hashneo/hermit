@@ -296,16 +296,11 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 		if prState == "" {
 			prState = "open"
 		}
-		if prState == "open" {
-			openPRCount++
-		} else if !prHasReviewWorkflowLabel(pr.Labels, rfcLabel) {
+		if prState != "open" && !prHasReviewWorkflowLabel(pr.Labels, rfcLabel) {
 			continue
 		}
 
 		if pr.Draft {
-			if prState == "open" {
-				prStates.add(classifyPRState(pr.Draft, pr.Mergeable, pr.MergeableState))
-			}
 			continue
 		}
 
@@ -319,10 +314,6 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 				merged = detailMerged
 			}
 		}
-		if prState == "open" {
-			prStates.add(classifyPRState(pr.Draft, mergeable, mergeableState))
-		}
-
 		labelNames := make([]string, 0, len(pr.Labels))
 		for _, l := range pr.Labels {
 			labelNames = append(labelNames, l.Name)
@@ -411,6 +402,10 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 		}
 		if len(documents) == 0 {
 			continue // no Docuchango document file in this PR
+		}
+		if prState == "open" {
+			openPRCount++
+			prStates.add(classifyPRState(pr.Draft, mergeable, mergeableState))
 		}
 
 		sort.SliceStable(documents, func(i, j int) bool {
