@@ -57,7 +57,7 @@ func TestStorePersistsRepositoryRFCLists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	if _, err := store.PutRepositoryRFCListSuccess(context.Background(), "repo-1", payloadJSON); err != nil {
+	if _, err := store.PutRepositoryRFCListSuccess(context.Background(), "repo-1", "source-a", payloadJSON); err != nil {
 		t.Fatalf("put repository rfc list: %v", err)
 	}
 	if err := store.Close(); err != nil {
@@ -70,7 +70,7 @@ func TestStorePersistsRepositoryRFCLists(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = reopened.Close() })
 
-	projection, ok, err := reopened.GetFreshRepositoryRFCList(context.Background(), "repo-1", time.Hour)
+	projection, ok, err := reopened.GetFreshRepositoryRFCList(context.Background(), "repo-1", "source-a", time.Hour)
 	if err != nil {
 		t.Fatalf("get repository rfc list: %v", err)
 	}
@@ -92,10 +92,16 @@ func TestStorePersistsRepositoryRFCLists(t *testing.T) {
 		t.Fatalf("cached title = %q, want Cached RFC", got)
 	}
 
-	if err := reopened.PutRepositoryRFCListError(context.Background(), "repo-1", "provider_error", "rate limited"); err != nil {
+	if _, ok, err := reopened.GetFreshRepositoryRFCList(context.Background(), "repo-1", "source-b", time.Hour); err != nil {
+		t.Fatalf("get source-mismatched repository rfc list: %v", err)
+	} else if ok {
+		t.Fatalf("expected source-mismatched repository rfc list cache miss")
+	}
+
+	if err := reopened.PutRepositoryRFCListError(context.Background(), "repo-1", "source-a", "provider_error", "rate limited"); err != nil {
 		t.Fatalf("put repository rfc list error: %v", err)
 	}
-	projection, ok, err = reopened.GetAnyRepositoryRFCList(context.Background(), "repo-1", time.Hour)
+	projection, ok, err = reopened.GetAnyRepositoryRFCList(context.Background(), "repo-1", "source-a", time.Hour)
 	if err != nil {
 		t.Fatalf("get any repository rfc list: %v", err)
 	}
@@ -106,10 +112,24 @@ func TestStorePersistsRepositoryRFCLists(t *testing.T) {
 		t.Fatalf("error metadata = %q/%q, want provider_error/rate limited", projection.Cache.LastErrorCode, projection.Cache.LastErrorMessage)
 	}
 
+	if err := reopened.PutRepositoryRFCListError(context.Background(), "repo-1", "source-b", "provider_error", "bad credentials"); err != nil {
+		t.Fatalf("put source-changed repository rfc list error: %v", err)
+	}
+	if _, ok, err := reopened.GetAnyRepositoryRFCList(context.Background(), "repo-1", "source-a", time.Hour); err != nil {
+		t.Fatalf("get old-source repository rfc list: %v", err)
+	} else if ok {
+		t.Fatalf("expected old source cache miss after source changed")
+	}
+	if _, ok, err := reopened.GetAnyRepositoryRFCList(context.Background(), "repo-1", "source-b", time.Hour); err != nil {
+		t.Fatalf("get error-only source repository rfc list: %v", err)
+	} else if ok {
+		t.Fatalf("expected source with no successful refresh to miss")
+	}
+
 	if err := reopened.InvalidateRepositoryRFCList(context.Background(), "repo-1"); err != nil {
 		t.Fatalf("invalidate repository rfc list: %v", err)
 	}
-	if _, ok, err := reopened.GetFreshRepositoryRFCList(context.Background(), "repo-1", time.Hour); err != nil {
+	if _, ok, err := reopened.GetFreshRepositoryRFCList(context.Background(), "repo-1", "source-b", time.Hour); err != nil {
 		t.Fatalf("get invalidated repository rfc list: %v", err)
 	} else if ok {
 		t.Fatalf("expected invalidated repository rfc list cache miss")

@@ -36,6 +36,7 @@ type CacheMetadata struct {
 
 type cacheRecord struct {
 	Payload                 []byte
+	SourceKey               string
 	LastSuccessfulRefreshAt time.Time
 	LastAttemptedRefreshAt  time.Time
 	LastErrorCode           string
@@ -105,6 +106,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS repository_rfc_lists (
 			repository_id TEXT PRIMARY KEY,
+			source_key TEXT NOT NULL DEFAULT '',
 			payload_json TEXT NOT NULL,
 			last_successful_refresh_at TEXT,
 			last_attempted_refresh_at TEXT,
@@ -147,7 +149,35 @@ func (s *Store) migrate(ctx context.Context) error {
 			return fmt.Errorf("migrate workset sqlite: %w", err)
 		}
 	}
+	if err := s.ensureColumn(ctx, "repository_rfc_lists", "source_key", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("migrate workset sqlite: %w", err)
+	}
 	return nil
+}
+
+func (s *Store) ensureColumn(ctx context.Context, table, column, definition string) error {
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%s)`, table))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, dataType string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, definition))
+	return err
 }
 
 func metadataFromRecord(record cacheRecord, cached bool, next time.Time) CacheMetadata {

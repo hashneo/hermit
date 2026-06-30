@@ -298,14 +298,18 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string,
 		return RepositoryRFCListResponse{}, fmt.Errorf("repository resolver is not configured")
 	}
 
-	cacheTTL := s.repositoryRFCListCacheTTL(repositoryID)
-	if s.workset != nil && refresh {
-		if err := s.workset.InvalidateRepositoryRFCList(ctx, repositoryID); err != nil {
-			slog.Warn("invalidate repository RFC list cache failed", "repository_id", repositoryID, "error", err)
-		}
+	owner, name, registry, repoBaseURL, branch, docsPath, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	if !ok {
+		return RepositoryRFCListResponse{}, fmt.Errorf("repository not found")
 	}
+	if token == "" {
+		return RepositoryRFCListResponse{}, fmt.Errorf("repository token unavailable")
+	}
+	baseURL := s.registryBaseURL(registry, repoBaseURL)
+	sourceKey := repositoryRFCListSourceKey(registry, baseURL, owner, name, branch, docsPath, rfcLabel)
+	cacheTTL := s.repositoryRFCListCacheTTL(repositoryID)
 	if s.workset != nil && !refresh {
-		if projection, ok, err := s.workset.GetFreshRepositoryRFCList(ctx, repositoryID, cacheTTL); err == nil && ok {
+		if projection, ok, err := s.workset.GetFreshRepositoryRFCList(ctx, repositoryID, sourceKey, cacheTTL); err == nil && ok {
 			var cached RepositoryRFCListResponse
 			if decodeErr := json.Unmarshal(projection.Payload, &cached); decodeErr == nil {
 				cached.Cache = &projection.Cache
@@ -314,23 +318,14 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string,
 		}
 	}
 
-	owner, name, registry, repoBaseURL, branch, docsPath, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
-	if !ok {
-		return RepositoryRFCListResponse{}, fmt.Errorf("repository not found")
-	}
-	if token == "" {
-		return RepositoryRFCListResponse{}, fmt.Errorf("repository token unavailable")
-	}
-
 	client, ok := s.githubClients[registry]
 	if !ok {
 		client = NewHTTPGitHubRFCClient()
 	}
 
-	baseURL := s.registryBaseURL(registry, repoBaseURL)
 	mainItems, err := client.ListRFCs(ctx, baseURL, owner, name, branch, docsPath, token)
 	if err != nil {
-		if cached, ok := s.cachedRepositoryRFCListAfterError(ctx, repositoryID, cacheTTL, err); ok {
+		if cached, ok := s.cachedRepositoryRFCListAfterError(ctx, repositoryID, sourceKey, cacheTTL, err); ok {
 			return cached, nil
 		}
 		return RepositoryRFCListResponse{}, err
@@ -378,7 +373,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string,
 
 	prResult, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, rfcLabel, token)
 	if err != nil {
-		if cached, ok := s.cachedRepositoryRFCListAfterError(ctx, repositoryID, cacheTTL, err); ok {
+		if cached, ok := s.cachedRepositoryRFCListAfterError(ctx, repositoryID, sourceKey, cacheTTL, err); ok {
 			return cached, nil
 		}
 		return RepositoryRFCListResponse{}, err
@@ -437,7 +432,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string,
 	}
 	if s.workset != nil {
 		if payload, err := json.Marshal(response); err == nil {
-			if meta, err := s.workset.PutRepositoryRFCListSuccess(ctx, repositoryID, payload); err == nil {
+			if meta, err := s.workset.PutRepositoryRFCListSuccess(ctx, repositoryID, sourceKey, payload); err == nil {
 				response.Cache = &meta
 			}
 		}
@@ -445,12 +440,12 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string,
 	return response, nil
 }
 
-func (s *Service) cachedRepositoryRFCListAfterError(ctx context.Context, repositoryID string, ttl time.Duration, err error) (RepositoryRFCListResponse, bool) {
+func (s *Service) cachedRepositoryRFCListAfterError(ctx context.Context, repositoryID, sourceKey string, ttl time.Duration, err error) (RepositoryRFCListResponse, bool) {
 	if s.workset == nil {
 		return RepositoryRFCListResponse{}, false
 	}
-	_ = s.workset.PutRepositoryRFCListError(ctx, repositoryID, "provider_error", err.Error())
-	projection, ok, getErr := s.workset.GetAnyRepositoryRFCList(ctx, repositoryID, ttl)
+	_ = s.workset.PutRepositoryRFCListError(ctx, repositoryID, sourceKey, "provider_error", err.Error())
+	projection, ok, getErr := s.workset.GetAnyRepositoryRFCList(ctx, repositoryID, sourceKey, ttl)
 	if getErr != nil || !ok {
 		return RepositoryRFCListResponse{}, false
 	}
@@ -481,6 +476,20 @@ func (s *Service) repositoryRFCListCacheTTL(repositoryID string) time.Duration {
 	sum := sha256.Sum256([]byte(repositoryID))
 	offset := binary.BigEndian.Uint64(sum[:8]) % uint64(jitter)
 	return readTTL + time.Duration(offset)
+}
+
+func repositoryRFCListSourceKey(registry, baseURL, owner, name, branch, docsPath, rfcLabel string) string {
+	parts := []string{
+		strings.TrimSpace(registry),
+		strings.TrimRight(strings.TrimSpace(baseURL), "/"),
+		strings.TrimSpace(owner),
+		strings.TrimSpace(name),
+		strings.TrimSpace(branch),
+		strings.Trim(strings.TrimSpace(docsPath), "/"),
+		strings.TrimSpace(rfcLabel),
+	}
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return fmt.Sprintf("%x", sum)
 }
 
 // SubmitForReviewResult is returned by SubmitForReview on success.
