@@ -488,7 +488,7 @@ components:
           schema:
             $ref: '#/components/schemas/ApiError'
 
-   schemas:
+  schemas:
     SubmitForReviewResult:
       type: object
       required: [pr_number, html_url, branch]
