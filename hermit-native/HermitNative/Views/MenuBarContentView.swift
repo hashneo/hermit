@@ -10,6 +10,7 @@ struct MenuBarContentView: View {
 #if os(macOS)
     private let initialAnchorScreenX: CGFloat?
     private let managesWindowPresentation: Bool
+    private let onOpenReview: () -> Void
     @ObservedObject private var serverMgr = EmbeddedServerManager.shared
     @ObservedObject private var repoStore = RepositoryStore.shared
     @ObservedObject private var accountStore = AccountStore.shared
@@ -23,9 +24,10 @@ struct MenuBarContentView: View {
     @State private var menuAnchor = MenuBarBubbleAnchor.capture()
     @State private var pointerX = MenuBarBubbleWindowController.fallbackPointerX
 
-    init(anchorScreenX: CGFloat? = nil, managesWindowPresentation: Bool = true) {
+    init(anchorScreenX: CGFloat? = nil, managesWindowPresentation: Bool = true, onOpenReview: @escaping () -> Void = {}) {
         self.initialAnchorScreenX = anchorScreenX
         self.managesWindowPresentation = managesWindowPresentation
+        self.onOpenReview = onOpenReview
         _menuAnchor = State(initialValue: MenuBarBubbleAnchor.capture(anchorScreenX))
         _pointerX = State(initialValue: managesWindowPresentation ? MenuBarBubbleWindowController.fallbackPointerX : 280)
     }
@@ -534,6 +536,7 @@ struct MenuBarContentView: View {
     private func open(_ rfc: RFC, in repo: Repository) {
         RecentRFCStore.shared.record(rfc, repoID: repo.id)
         RFCViewerWindowManager.shared.open(rfc: rfc, repo: repo, appState: appState)
+        onOpenReview()
     }
 
 #else

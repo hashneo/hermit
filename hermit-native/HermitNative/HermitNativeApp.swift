@@ -349,7 +349,9 @@ final class MenuBarStatusItemController: NSObject {
 
         let buttonRect = button.convert(button.bounds, to: nil)
         let screenRect = buttonWindow.convertToScreen(buttonRect)
-        let content = MenuBarContentView(anchorScreenX: screenRect.midX)
+        let content = MenuBarContentView(anchorScreenX: screenRect.midX) { [weak self] in
+            self?.closePanel()
+        }
             .environmentObject(AppState.shared)
         let hosting = NSHostingController(rootView: content)
         hosting.view.wantsLayer = true
