@@ -78,6 +78,7 @@ const RFCReadyLabel = "hermit:rfc-ready"
 type ReviewReadyRFCItem struct {
 	PRNumber       int
 	PRTitle        string
+	PRBody         string
 	PRState        string
 	PRMerged       bool
 	HeadSHA        string
@@ -92,6 +93,8 @@ type ReviewReadyRFCItem struct {
 	ChangedFiles   int
 	Additions      int
 	Deletions      int
+	IssueComments  int
+	ReviewComments int
 }
 
 type ReviewReadyRFCResult struct {
@@ -270,12 +273,15 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 	var pulls []struct {
 		Number         int    `json:"number"`
 		Title          string `json:"title"`
+		Body           string `json:"body"`
 		HTMLURL        string `json:"html_url"`
 		State          string `json:"state"`
 		Draft          bool   `json:"draft"`
 		Merged         bool   `json:"merged"`
 		Mergeable      *bool  `json:"mergeable"`
 		MergeableState string `json:"mergeable_state"`
+		Comments       int    `json:"comments"`
+		ReviewComments int    `json:"review_comments"`
 		Head           struct {
 			SHA string `json:"sha"`
 			Ref string `json:"ref"`
@@ -428,6 +434,7 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 			items = append(items, ReviewReadyRFCItem{
 				PRNumber:       pr.Number,
 				PRTitle:        pr.Title,
+				PRBody:         pr.Body,
 				PRState:        prState,
 				PRMerged:       merged,
 				HeadSHA:        pr.Head.SHA,
@@ -442,6 +449,8 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 				ChangedFiles:   len(prFiles),
 				Additions:      prAdditions,
 				Deletions:      prDeletions,
+				IssueComments:  pr.Comments,
+				ReviewComments: pr.ReviewComments,
 			})
 		}
 	}

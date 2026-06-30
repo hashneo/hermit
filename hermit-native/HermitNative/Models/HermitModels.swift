@@ -33,6 +33,8 @@ struct RFCPullRequest: Identifiable {
     let changedFiles: Int
     let additions: Int
     let deletions: Int
+    let issueCommentCount: Int
+    let reviewCommentCount: Int
 }
 
 struct ThreadMessage: Identifiable, Hashable {

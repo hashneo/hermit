@@ -867,12 +867,7 @@ private struct CompactReviewQueue: View {
             } else {
                 VStack(spacing: 8) {
                     ForEach(groups) { group in
-                        Button {
-                            onOpen(group)
-                        } label: {
-                            PRReviewSummaryRow(group: group, showsRepository: true)
-                        }
-                        .buttonStyle(.plain)
+                        PRReviewSummaryRow(group: group, showsRepository: true, onOpen: onOpen)
                     }
                 }
             }
@@ -1186,7 +1181,8 @@ private struct PendingPRGroup: Identifiable {
             draft: false, mergeable: nil, mergeableState: nil,
             documentType: "rfc", documentPath: "", catalogID: "",
             labels: [], changedFiles: 0,
-            additions: 0, deletions: 0
+            additions: 0, deletions: 0,
+            issueCommentCount: 0, reviewCommentCount: 0
         )
     }
 
@@ -1306,12 +1302,7 @@ private struct CompactRepositoryReviewBucketRow: View {
                     .padding(.bottom, 2)
             } else {
                 ForEach(bucket.groups.prefix(2)) { group in
-                    Button {
-                        onOpen(group)
-                    } label: {
-                        PRReviewSummaryRow(group: group)
-                    }
-                    .buttonStyle(.plain)
+                    PRReviewSummaryRow(group: group, onOpen: onOpen)
                 }
             }
         }
@@ -1401,12 +1392,7 @@ private struct RepositoryReviewBucketCard: View {
             } else {
                 VStack(spacing: 10) {
                     ForEach(bucket.groups) { group in
-                        Button {
-                            onOpen(group)
-                        } label: {
-                            PRReviewSummaryRow(group: group)
-                        }
-                        .buttonStyle(.plain)
+                        PRReviewSummaryRow(group: group, onOpen: onOpen)
                     }
                 }
             }
@@ -1592,12 +1578,7 @@ private struct PRReviewSection: View {
             } else {
                 VStack(spacing: 10) {
                     ForEach(groups) { group in
-                        Button {
-                            onOpen(group)
-                        } label: {
-                            PRReviewSummaryRow(group: group, showsRepository: showsRepository)
-                        }
-                        .buttonStyle(.plain)
+                        PRReviewSummaryRow(group: group, showsRepository: showsRepository, onOpen: onOpen)
                     }
                 }
             }
@@ -1608,10 +1589,12 @@ private struct PRReviewSection: View {
 private struct PRReviewSummaryRow: View {
     let group: PendingPRGroup
     var showsRepository = false
+    let onOpen: (PendingPRGroup) -> Void
+    @State private var isShowingDescription = false
 
     var body: some View {
         let pr = group.pr
-        HStack(alignment: .center, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     ProminentPRBadge(pr: pr)
@@ -1633,21 +1616,50 @@ private struct PRReviewSummaryRow: View {
                     PRMetricItem(label: "Added", value: "+\(pr.additions)", tint: .secondary),
                     PRMetricItem(label: "Removed", value: "-\(pr.deletions)", tint: .secondary)
                 ])
+            }
 
+            if hasPRDescription(pr) {
+                PRMarkdownSummaryPreview(markdown: pr.body)
+            }
+
+            HStack(alignment: .center, spacing: 8) {
                 Text(contextText(pr))
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
-            }
-            .layoutPriority(1)
+                    .layoutPriority(1)
 
-            ReviewDocumentsCallToAction(documentCount: group.documentCount)
+                PRCommentStatusBadge(issueCount: pr.issueCommentCount, reviewCount: pr.reviewCommentCount)
+
+                if hasPRDescription(pr) {
+                    Button {
+                        isShowingDescription = true
+                    } label: {
+                        Label("Description", systemImage: "doc.text.magnifyingglass")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help("View full PR description")
+                }
+
+                Button {
+                    onOpen(group)
+                } label: {
+                    ReviewDocumentsCallToAction(documentCount: group.documentCount)
+                }
+                .buttonStyle(.plain)
+                .help("Open review documents")
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondary.opacity(0.05))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .help("Open pull request")
+        .popover(isPresented: $isShowingDescription, arrowEdge: .trailing) {
+            PRDescriptionPopover(pr: pr)
+        }
     }
 
     private func prTitle(_ pr: RFCPullRequest) -> String {
@@ -1664,6 +1676,283 @@ private struct PRReviewSummaryRow: View {
         let prefix = showsRepository ? "\(group.repo.fullName) • " : ""
         let branch = pr.headRef.isEmpty ? "unknown branch" : pr.headRef
         return "\(prefix)\(branch)"
+    }
+
+    private func hasPRDescription(_ pr: RFCPullRequest) -> Bool {
+        !cleanPRMarkdown(pr.body).isEmpty
+    }
+}
+
+private struct PRMarkdownSummaryPreview: View {
+    let markdown: String
+
+    private var blocks: [MarkdownBlock] {
+        Array(MarkdownParser.parse(cleanPRMarkdown(markdown)).prefix(4))
+    }
+
+    var body: some View {
+        if !blocks.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                    CompactMarkdownBlockView(block: block)
+                }
+            }
+            .padding(9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.secondary.opacity(0.045))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+    }
+}
+
+private struct PRDescriptionPopover: View {
+    let pr: RFCPullRequest
+
+    private var blocks: [MarkdownBlock] {
+        MarkdownParser.parse(cleanPRMarkdown(pr.body))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(pr.prTitle.isEmpty ? "Pull request #\(pr.number)" : pr.prTitle)
+                        .font(.headline)
+                        .lineLimit(2)
+                    Text("PR #\(pr.number)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                PRCommentStatusBadge(issueCount: pr.issueCommentCount, reviewCount: pr.reviewCommentCount)
+            }
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if blocks.isEmpty {
+                        Text("No pull request description.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                            MarkdownBlockView(block: block)
+                        }
+                    }
+                }
+                .padding(.trailing, 4)
+            }
+            .frame(width: 520, height: 420)
+        }
+        .padding(16)
+    }
+}
+
+private struct CompactMarkdownBlockView: View {
+    let block: MarkdownBlock
+
+    var body: some View {
+        switch block {
+        case .heading(_, let inlines, _, _):
+            Text(compactAttributedString(inlines))
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+        case .paragraph(let inlines, _, _):
+            Text(compactAttributedString(inlines))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        case .bulletList(let items, _, _):
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(Array(items.prefix(3).enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text("•")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                        Text(compactAttributedString(item.inlines))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+        case .orderedList(let items, _, _):
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(Array(items.prefix(3).enumerated()), id: \.offset) { idx, item in
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text("\(idx + 1).")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                        Text(compactAttributedString(item.inlines))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+        case .blockquote(let inlines, _, _):
+            HStack(alignment: .top, spacing: 7) {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Color.accentColor.opacity(0.55))
+                    .frame(width: 3)
+                Text(compactAttributedString(inlines))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .italic()
+                    .lineLimit(2)
+            }
+        case .codeBlock(let language, let code, _, _):
+            Text(codePreview(language: language, code: code))
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        case .table(let headers, _, _, _):
+            Label(tablePreview(headers), systemImage: "tablecells")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        case .mermaidBlock:
+            Label("Mermaid diagram", systemImage: "point.3.connected.trianglepath.dotted")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .horizontalRule:
+            Divider()
+        }
+    }
+
+    private func codePreview(language: String, code: String) -> String {
+        let firstLines = code.split(separator: "\n", omittingEmptySubsequences: false).prefix(2).joined(separator: " ")
+        guard !language.isEmpty else { return firstLines }
+        return "\(language): \(firstLines)"
+    }
+
+    private func tablePreview(_ headers: [[MarkdownInline]]) -> String {
+        let labels = headers.map { compactPlainText($0) }.filter { !$0.isEmpty }
+        return labels.isEmpty ? "Table" : labels.joined(separator: " | ")
+    }
+}
+
+private struct PRCommentStatusBadge: View {
+    let issueCount: Int
+    let reviewCount: Int
+
+    private var total: Int { issueCount + reviewCount }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: total == 0 ? "text.bubble" : "text.bubble.fill")
+            Text(statusText)
+                .monospacedDigit()
+        }
+        .font(.caption2.weight(.semibold))
+        .padding(.horizontal, 7)
+        .frame(height: 20)
+        .background(tint.opacity(0.10))
+        .foregroundStyle(tint)
+        .clipShape(Capsule())
+        .fixedSize(horizontal: true, vertical: false)
+        .help(helpText)
+    }
+
+    private var statusText: String {
+        if total == 0 { return "No comments" }
+        if issueCount > 0 && reviewCount > 0 { return "\(issueCount) + \(reviewCount)" }
+        if reviewCount > 0 { return "\(reviewCount) review\(reviewCount == 1 ? "" : "s")" }
+        return "\(issueCount) comment\(issueCount == 1 ? "" : "s")"
+    }
+
+    private var helpText: String {
+        "\(issueCount) PR comments, \(reviewCount) review comments"
+    }
+
+    private var tint: Color {
+        total == 0 ? .secondary : .accentColor
+    }
+}
+
+private func cleanPRMarkdown(_ markdown: String) -> String {
+    var output: [String] = []
+    var insideHTMLComment = false
+    for rawLine in markdown.components(separatedBy: .newlines) {
+        var line = rawLine
+        if insideHTMLComment {
+            if let end = line.range(of: "-->") {
+                line = String(line[end.upperBound...])
+                insideHTMLComment = false
+            } else {
+                continue
+            }
+        }
+        while let start = line.range(of: "<!--") {
+            if let end = line.range(of: "-->", range: start.upperBound..<line.endIndex) {
+                line.removeSubrange(start.lowerBound..<end.upperBound)
+            } else {
+                line = String(line[..<start.lowerBound])
+                insideHTMLComment = true
+                break
+            }
+        }
+        output.append(line)
+    }
+    return output.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+private func compactAttributedString(_ inlines: [MarkdownInline]) -> AttributedString {
+    inlines.reduce(AttributedString()) { result, inline in
+        var next = result
+        next.append(compactAttributedString(inline))
+        return next
+    }
+}
+
+private func compactAttributedString(_ inline: MarkdownInline) -> AttributedString {
+    switch inline {
+    case .text(let string):
+        return AttributedString(string)
+    case .bold(let children):
+        var value = compactAttributedString(children)
+        value.font = .caption.bold()
+        return value
+    case .italic(let children):
+        var value = compactAttributedString(children)
+        value.font = .caption.italic()
+        return value
+    case .code(let string):
+        var value = AttributedString(string)
+        value.font = .system(.caption, design: .monospaced)
+        return value
+    case .link(let text, _):
+        var value = AttributedString(text)
+        value.foregroundColor = .accentColor
+        value.underlineStyle = .single
+        return value
+    case .image(let alt, _):
+        var value = AttributedString(alt.isEmpty ? "[image]" : "[\(alt)]")
+        value.foregroundColor = .secondary
+        return value
+    }
+}
+
+private func compactPlainText(_ inlines: [MarkdownInline]) -> String {
+    inlines.map(compactPlainText).joined()
+}
+
+private func compactPlainText(_ inline: MarkdownInline) -> String {
+    switch inline {
+    case .text(let string), .code(let string):
+        return string
+    case .bold(let children), .italic(let children):
+        return compactPlainText(children)
+    case .link(let text, _):
+        return text
+    case .image(let alt, _):
+        return alt
     }
 }
 
@@ -2244,7 +2533,8 @@ private struct PRSummaryRow: View {
             draft: false, mergeable: nil, mergeableState: nil,
             documentType: "rfc", documentPath: "", catalogID: "",
             labels: [], changedFiles: 0,
-            additions: 0, deletions: 0
+            additions: 0, deletions: 0,
+            issueCommentCount: 0, reviewCommentCount: 0
         )
     }
 
@@ -3552,6 +3842,34 @@ final class RepoRFCCache {
         let changedFiles: Int
         let additions: Int
         let deletions: Int
+        let issueCommentCount: Int
+        let reviewCommentCount: Int
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case number
+            case title
+            case prTitle
+            case prState
+            case prMerged
+            case body
+            case headSHA
+            case headRef
+            case htmlURL
+            case state
+            case draft
+            case mergeable
+            case mergeableState
+            case documentType
+            case documentPath
+            case catalogID
+            case labels
+            case changedFiles
+            case additions
+            case deletions
+            case issueCommentCount
+            case reviewCommentCount
+        }
 
         init(_ pr: RFCPullRequest) {
             id = pr.id
@@ -3560,7 +3878,7 @@ final class RepoRFCCache {
             prTitle = pr.prTitle
             prState = pr.prState
             prMerged = pr.prMerged
-            body = ""
+            body = pr.body
             headSHA = pr.headSHA
             headRef = pr.headRef
             htmlURL = pr.htmlURL
@@ -3575,6 +3893,35 @@ final class RepoRFCCache {
             changedFiles = pr.changedFiles
             additions = pr.additions
             deletions = pr.deletions
+            issueCommentCount = pr.issueCommentCount
+            reviewCommentCount = pr.reviewCommentCount
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(Int.self, forKey: .id)
+            number = try container.decode(Int.self, forKey: .number)
+            title = try container.decode(String.self, forKey: .title)
+            prTitle = try container.decode(String.self, forKey: .prTitle)
+            prState = try container.decode(String.self, forKey: .prState)
+            prMerged = try container.decode(Bool.self, forKey: .prMerged)
+            body = try container.decodeIfPresent(String.self, forKey: .body) ?? ""
+            headSHA = try container.decode(String.self, forKey: .headSHA)
+            headRef = try container.decode(String.self, forKey: .headRef)
+            htmlURL = try container.decode(String.self, forKey: .htmlURL)
+            state = try container.decode(String.self, forKey: .state)
+            draft = try container.decode(Bool.self, forKey: .draft)
+            mergeable = try container.decodeIfPresent(Bool.self, forKey: .mergeable)
+            mergeableState = try container.decodeIfPresent(String.self, forKey: .mergeableState)
+            documentType = try container.decode(String.self, forKey: .documentType)
+            documentPath = try container.decode(String.self, forKey: .documentPath)
+            catalogID = try container.decode(String.self, forKey: .catalogID)
+            labels = try container.decode([String].self, forKey: .labels)
+            changedFiles = try container.decode(Int.self, forKey: .changedFiles)
+            additions = try container.decode(Int.self, forKey: .additions)
+            deletions = try container.decode(Int.self, forKey: .deletions)
+            issueCommentCount = try container.decodeIfPresent(Int.self, forKey: .issueCommentCount) ?? 0
+            reviewCommentCount = try container.decodeIfPresent(Int.self, forKey: .reviewCommentCount) ?? 0
         }
 
         var pullRequest: RFCPullRequest {
@@ -3599,7 +3946,9 @@ final class RepoRFCCache {
                 labels: labels,
                 changedFiles: changedFiles,
                 additions: additions,
-                deletions: deletions
+                deletions: deletions,
+                issueCommentCount: issueCommentCount,
+                reviewCommentCount: reviewCommentCount
             )
         }
     }

@@ -65,6 +65,7 @@ type CatalogItem struct {
 	LifecycleStatus string   `json:"lifecycle_status,omitempty"`
 	PRNumber        int      `json:"pr_number,omitempty"`
 	PRTitle         string   `json:"pr_title,omitempty"`
+	PRBody          string   `json:"pr_body,omitempty"`
 	PRState         string   `json:"pr_state,omitempty"`
 	PRMerged        bool     `json:"pr_merged,omitempty"`
 	HeadSHA         string   `json:"head_sha,omitempty"`
@@ -76,6 +77,8 @@ type CatalogItem struct {
 	ChangedFiles    int      `json:"changed_files,omitempty"`
 	Additions       int      `json:"additions,omitempty"`
 	Deletions       int      `json:"deletions,omitempty"`
+	IssueComments   int      `json:"issue_comment_count,omitempty"`
+	ReviewComments  int      `json:"review_comment_count,omitempty"`
 	Commentable     bool     `json:"commentable"`
 	StatusMutable   bool     `json:"status_mutable"`
 	// hermit-ixk: full web URL for the RFC file, used by the native client Share button.
@@ -388,6 +391,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string,
 			AllowedActions: []string{"view", "comment"},
 			PRNumber:       prItem.PRNumber,
 			PRTitle:        prItem.PRTitle,
+			PRBody:         prItem.PRBody,
 			PRState:        prItem.PRState,
 			PRMerged:       prItem.PRMerged,
 			HeadSHA:        prItem.HeadSHA,
@@ -399,6 +403,8 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string,
 			ChangedFiles:   prItem.ChangedFiles,
 			Additions:      prItem.Additions,
 			Deletions:      prItem.Deletions,
+			IssueComments:  prItem.IssueComments,
+			ReviewComments: prItem.ReviewComments,
 			Commentable:    true,
 			StatusMutable:  false,
 			HTMLURL:        prItem.HTMLURL,

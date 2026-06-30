@@ -209,10 +209,13 @@ func TestListRepositoryRFCs_IncludesSummary(t *testing.T) {
 			}})
 		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "all":
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
-				"number": 1,
-				"draft":  false,
-				"head":   map[string]any{"sha": "abc123", "ref": "feature/rfc"},
-				"labels": []map[string]any{{"name": "hermit:rfc-ready"}},
+				"number":          1,
+				"draft":           false,
+				"body":            "## PR Summary\n\nPlease review this RFC.",
+				"comments":        1,
+				"review_comments": 4,
+				"head":            map[string]any{"sha": "abc123", "ref": "feature/rfc"},
+				"labels":          []map[string]any{{"name": "hermit:rfc-ready"}},
 			}})
 		case r.URL.Path == "/repos/owner/repo/pulls/1/files":
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
@@ -283,6 +286,19 @@ func TestListRepositoryRFCs_IncludesSummary(t *testing.T) {
 	}
 	if payload.Total != len(payload.Items) {
 		t.Fatalf("total = %d, want %d", payload.Total, len(payload.Items))
+	}
+	var prItem *CatalogItem
+	for i := range payload.Items {
+		if payload.Items[i].PRNumber == 1 {
+			prItem = &payload.Items[i]
+			break
+		}
+	}
+	if prItem == nil {
+		t.Fatalf("expected PR catalog item in response")
+	}
+	if prItem.PRBody != "## PR Summary\n\nPlease review this RFC." || prItem.IssueComments != 1 || prItem.ReviewComments != 4 {
+		t.Fatalf("PR metadata = body %q issue %d review %d, want PR body and comment counts", prItem.PRBody, prItem.IssueComments, prItem.ReviewComments)
 	}
 }
 

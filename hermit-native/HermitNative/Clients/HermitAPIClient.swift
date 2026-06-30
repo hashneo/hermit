@@ -156,6 +156,7 @@ actor HermitAPIClient: HermitClientProtocol {
             let id: String
             let title: String
             let pr_title: String?
+            let pr_body: String?
             let path: String
             let source_type: String
             let lifecycle_status: String?
@@ -171,6 +172,8 @@ actor HermitAPIClient: HermitClientProtocol {
             let changed_files: Int?
             let additions: Int?
             let deletions: Int?
+            let issue_comment_count: Int?
+            let review_comment_count: Int?
             let commentable: Bool?
             // hermit-ixk: populated by server for both main-branch and PR items.
             let html_url: String?
@@ -205,7 +208,7 @@ actor HermitAPIClient: HermitClientProtocol {
                     prTitle: item.pr_title ?? item.title,
                     prState: item.pr_state ?? "open",
                     prMerged: item.pr_merged ?? false,
-                    body: "",
+                    body: item.pr_body ?? "",
                     headSHA: item.head_sha ?? "",
                     headRef: item.head_ref ?? "",
                     htmlURL: item.html_url ?? "",
@@ -219,7 +222,9 @@ actor HermitAPIClient: HermitClientProtocol {
                     labels: item.labels ?? [],
                     changedFiles: item.changed_files ?? 0,
                     additions: item.additions ?? 0,
-                    deletions: item.deletions ?? 0
+                    deletions: item.deletions ?? 0,
+                    issueCommentCount: item.issue_comment_count ?? 0,
+                    reviewCommentCount: item.review_comment_count ?? 0
                 ))
             } else {
                 files.append(RFCFile(id: item.id, name: item.title,
@@ -631,7 +636,8 @@ actor HermitAPIClient: HermitClientProtocol {
                               mergeableState: nil, documentType: "rfc",
                               documentPath: "", catalogID: "pr-\(pr.number)",
                               labels: pr.labels, changedFiles: 0,
-                              additions: 0, deletions: 0)
+                              additions: 0, deletions: 0,
+                              issueCommentCount: 0, reviewCommentCount: 0)
     }
 
     // MARK: - HTTP helpers

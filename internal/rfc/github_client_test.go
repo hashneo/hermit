@@ -219,7 +219,7 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *t
 				t.Fatalf("expected no labels query parameter, got %q", got)
 			}
 			_ = json.NewEncoder(w).Encode([]map[string]any{
-				{"number": 10, "draft": false, "head": map[string]any{"sha": "sha-ready"}, "labels": []map[string]any{{"name": "hermit:rfc-ready"}}},
+				{"number": 10, "draft": false, "body": "## Summary\n\nReview the RFC.", "comments": 2, "review_comments": 3, "head": map[string]any{"sha": "sha-ready"}, "labels": []map[string]any{{"name": "hermit:rfc-ready"}}},
 				{"number": 11, "draft": true, "head": map[string]any{"sha": "sha-draft"}, "labels": []map[string]any{{"name": "hermit:rfc-ready"}}},
 				{"number": 12, "draft": false, "mergeable": true, "mergeable_state": "clean", "head": map[string]any{"sha": "sha-code"}, "labels": []map[string]any{}},
 			})
@@ -278,6 +278,9 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *t
 	}
 	if items[0].PRNumber != 10 {
 		t.Fatalf("expected PR number 10, got %d", items[0].PRNumber)
+	}
+	if items[0].PRBody != "## Summary\n\nReview the RFC." || items[0].IssueComments != 2 || items[0].ReviewComments != 3 {
+		t.Fatalf("expected PR body/comment metadata, got body=%q issue=%d review=%d", items[0].PRBody, items[0].IssueComments, items[0].ReviewComments)
 	}
 	if items[0].Mergeable == nil || *items[0].Mergeable != true {
 		t.Fatalf("expected PR mergeable true, got %#v", items[0].Mergeable)
