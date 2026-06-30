@@ -454,11 +454,14 @@ struct MenuBarContentView: View {
             RepositoryReviewBucket(repo: repo, state: dashboardStore.state(for: repo.id))
         }
         .sorted { lhs, rhs in
+            let lhsHasDocs = lhs.documentCount > 0
+            let rhsHasDocs = rhs.documentCount > 0
+            if lhsHasDocs != rhsHasDocs { return lhsHasDocs }
+            if lhs.documentCount != rhs.documentCount { return lhs.documentCount > rhs.documentCount }
             let lhsHasPRs = lhs.prCount > 0
             let rhsHasPRs = rhs.prCount > 0
             if lhsHasPRs != rhsHasPRs { return lhsHasPRs }
             if lhs.prCount != rhs.prCount { return lhs.prCount > rhs.prCount }
-            if lhs.documentCount != rhs.documentCount { return lhs.documentCount > rhs.documentCount }
             if lhs.isLoading != rhs.isLoading { return rhs.isLoading }
             return lhs.repo.fullName.localizedCaseInsensitiveCompare(rhs.repo.fullName) == .orderedAscending
         }
@@ -1421,6 +1424,7 @@ private struct RepositoryReviewBucketCard: View {
 private struct RepositoryBucketHeader: View {
     let bucket: RepositoryReviewBucket
     var compact = false
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
@@ -1444,10 +1448,114 @@ private struct RepositoryBucketHeader: View {
                     .controlSize(.small)
                     .help("Refreshing from source of truth")
             }
-            CountBadge(value: bucket.prCount, label: "PRs", tint: .blue)
-            CountBadge(value: bucket.documentCount, label: "docs", tint: .secondary)
+            HStack(spacing: 8) {
+                RepositoryBucketMetric(
+                    value: bucket.documentCount,
+                    label: compact ? "docs" : "docs waiting",
+                    systemImage: "doc.text",
+                    tint: .orange,
+                    compact: compact
+                )
+                RepositoryBucketMetric(
+                    value: bucket.prCount,
+                    label: compact ? "PRs" : "open PRs",
+                    systemImage: "arrow.triangle.pull",
+                    tint: .blue,
+                    compact: compact,
+                    trailingSystemImage: prURL == nil ? nil : "arrow.up.right.square",
+                    action: prURL.map { url in
+                        { openURL(url) }
+                    }
+                )
+            }
+            .fixedSize(horizontal: true, vertical: false)
         }
     }
+
+    private var prURL: URL? {
+        repositoryPullRequestsURL(for: bucket.repo)
+    }
+}
+
+private struct RepositoryBucketMetric: View {
+    let value: Int
+    let label: String
+    let systemImage: String
+    let tint: Color
+    var compact = false
+    var trailingSystemImage: String? = nil
+    var action: (() -> Void)? = nil
+
+    var body: some View {
+        Group {
+            if let action {
+                Button(action: action) {
+                    content
+                }
+                .buttonStyle(.plain)
+                .help("Open \(label)")
+            } else {
+                content
+            }
+        }
+    }
+
+    private var content: some View {
+        HStack(spacing: compact ? 4 : 6) {
+            Image(systemName: systemImage)
+                .font(compact ? .caption2.weight(.semibold) : .caption.weight(.bold))
+            Text("\(value)")
+                .font(compact ? .caption.weight(.bold) : .title3.weight(.bold))
+                .monospacedDigit()
+            Text(label)
+                .font(compact ? .caption2.weight(.semibold) : .caption.weight(.semibold))
+            if let trailingSystemImage {
+                Image(systemName: trailingSystemImage)
+                    .font(.caption2.weight(.semibold))
+                    .opacity(0.85)
+            }
+        }
+        .padding(.horizontal, compact ? 7 : 10)
+        .frame(height: compact ? 24 : 34)
+        .background(tint.opacity(0.12))
+        .foregroundStyle(tint)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(tint.opacity(0.20), lineWidth: 1)
+        )
+        .accessibilityLabel("\(value) \(label)")
+    }
+}
+
+@MainActor
+private func repositoryPullRequestsURL(for repo: Repository) -> URL? {
+    guard let connection = AccountStore.shared.connections.first(where: { $0.id == repo.accountID }) else {
+        return nil
+    }
+    guard var components = URLComponents(string: connection.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)),
+          components.scheme != nil,
+          components.host != nil else {
+        return nil
+    }
+
+    if components.host?.lowercased() == "api.github.com" {
+        components.host = "github.com"
+        components.path = ""
+    } else {
+        let apiSuffixes = ["/api/v3", "/api/v1"]
+        for suffix in apiSuffixes where components.path.lowercased().hasSuffix(suffix) {
+            components.path = String(components.path.dropLast(suffix.count))
+            break
+        }
+    }
+
+    components.path = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    let basePath = components.path.isEmpty ? "" : "/" + components.path
+    components.path = "\(basePath)/\(repo.owner)/\(repo.name)/pulls"
+    components.query = nil
+    components.fragment = nil
+    return components.url
 }
 
 private struct PRReviewSection: View {
