@@ -143,14 +143,23 @@ final class CommentStore: ObservableObject {
         }
         let end = lineEnd ?? line
         let fingerprint = Self.makeFingerprint(lineText)
-        _ = try await client.createReviewComment(
-            prNumber: prNumber,
-            body: body,
-            filePath: filePath,
-            lineStart: line,
-            lineEnd: end,
-            textFingerprint: fingerprint
-        )
+        do {
+            _ = try await client.createReviewComment(
+                prNumber: prNumber,
+                body: body,
+                filePath: filePath,
+                lineStart: line,
+                lineEnd: end,
+                textFingerprint: fingerprint
+            )
+        } catch {
+            guard error.isHermitLineResolutionFailure else { throw error }
+            let result = try await client.startReviewSession(
+                filePath: filePath,
+                previousPRNumber: prNumber
+            )
+            throw ReviewSessionRedirectError(result: result)
+        }
         await load()
     }
 

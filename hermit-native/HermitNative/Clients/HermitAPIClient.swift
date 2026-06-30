@@ -92,6 +92,8 @@ protocol HermitClientProtocol: Actor {
 
     // Promote draft RFC to in-review: rewrites frontmatter, ensures label, opens PR.
     func submitForReview(rfcID: String) async throws -> SubmitForReviewResult
+    // Open a marker PR for a fresh review session on an already-merged/closed PR document.
+    func startReviewSession(filePath: String, previousPRNumber: Int) async throws -> ReviewSessionResult
 
     // Accept RFC: rewrites frontmatter to "accepted" on the PR branch and squash-merges.
     func acceptRFC(prNumber: Int, filePath: String) async throws -> AcceptRFCResult
@@ -443,6 +445,18 @@ actor HermitAPIClient: HermitClientProtocol {
         return try JSONDecoder().decode(SubmitForReviewResult.self, from: data)
     }
 
+    // MARK: - startReviewSession
+
+    func startReviewSession(filePath: String, previousPRNumber: Int) async throws -> ReviewSessionResult {
+        let repoID = try await repoID()
+        let u = url("/api/v1/repositories/\(repoID)/review-sessions")
+        let data = try await post(u, body: [
+            "file_path": filePath,
+            "previous_pr_number": previousPRNumber,
+        ] as [String: Any])
+        return try JSONDecoder().decode(ReviewSessionResult.self, from: data)
+    }
+
     // MARK: - acceptRFC
 
     func acceptRFC(prNumber: Int, filePath: String) async throws -> AcceptRFCResult {
@@ -761,6 +775,17 @@ enum HermitAPIError: LocalizedError {
         switch self {
         case .httpError(let code, let msg): return "HTTP \(code): \(msg)"
         }
+    }
+}
+
+extension Error {
+    var isHermitLineResolutionFailure: Bool {
+        guard let apiError = self as? HermitAPIError else { return false }
+        if case .httpError(let statusCode, let message) = apiError {
+            return statusCode == 502
+                && message.localizedCaseInsensitiveContains("line could not be resolved")
+        }
+        return false
     }
 }
 

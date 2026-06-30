@@ -450,8 +450,17 @@ struct MenuBarContentView: View {
     }
 
     private var repositoryReviewBuckets: [RepositoryReviewBucket] {
-        orderedRepos.map { repo in
+        displayedRepos.map { repo in
             RepositoryReviewBucket(repo: repo, state: dashboardStore.state(for: repo.id))
+        }
+        .sorted { lhs, rhs in
+            let lhsHasPRs = lhs.prCount > 0
+            let rhsHasPRs = rhs.prCount > 0
+            if lhsHasPRs != rhsHasPRs { return lhsHasPRs }
+            if lhs.prCount != rhs.prCount { return lhs.prCount > rhs.prCount }
+            if lhs.documentCount != rhs.documentCount { return lhs.documentCount > rhs.documentCount }
+            if lhs.isLoading != rhs.isLoading { return rhs.isLoading }
+            return lhs.repo.fullName.localizedCaseInsensitiveCompare(rhs.repo.fullName) == .orderedAscending
         }
     }
 
@@ -1497,6 +1506,7 @@ private struct PRReviewSummaryRow: View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    ProminentPRBadge(pr: pr)
                     Text(prTitle(pr))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
@@ -1506,7 +1516,6 @@ private struct PRReviewSummaryRow: View {
                 }
 
                 HStack(spacing: 6) {
-                    StatusBadge(title: "PR #\(pr.number)", systemImage: "arrow.triangle.pull", tint: .secondary)
                     DocumentMixStrip(counts: group.documentTypeCounts)
                 }
 
@@ -1547,6 +1556,32 @@ private struct PRReviewSummaryRow: View {
         let prefix = showsRepository ? "\(group.repo.fullName) • " : ""
         let branch = pr.headRef.isEmpty ? "unknown branch" : pr.headRef
         return "\(prefix)\(branch)"
+    }
+}
+
+private struct ProminentPRBadge: View {
+    let pr: RFCPullRequest
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "arrow.triangle.pull")
+                .font(.caption.weight(.bold))
+            Text("#\(pr.number)")
+                .font(.subheadline.weight(.bold))
+                .monospacedDigit()
+            if !pr.htmlURL.isEmpty {
+                Image(systemName: "arrow.up.right.square")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.accentColor.opacity(0.75))
+            }
+        }
+        .padding(.horizontal, 9)
+        .frame(height: 26)
+        .background(Color.accentColor.opacity(0.13))
+        .foregroundStyle(Color.accentColor)
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .fixedSize(horizontal: true, vertical: false)
+        .help(pr.htmlURL.isEmpty ? "Pull request #\(pr.number)" : "Pull request #\(pr.number): \(pr.htmlURL)")
     }
 }
 
@@ -2060,6 +2095,7 @@ private struct PRSummaryRow: View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    ProminentPRBadge(pr: pr)
                     Text(title)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
@@ -2070,7 +2106,6 @@ private struct PRSummaryRow: View {
 
                 HStack(spacing: 6) {
                     StatusBadge(title: displayName(forDocumentType: pr.documentType), systemImage: "doc.text", tint: .secondary)
-                    StatusBadge(title: "PR #\(pr.number)", systemImage: "arrow.triangle.pull", tint: .secondary)
                     if let labelTitle {
                         StatusBadge(title: labelTitle, tint: .secondary)
                     }

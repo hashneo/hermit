@@ -113,6 +113,34 @@ struct SubmitForReviewResult: Decodable {
     }
 }
 
+struct ReviewSessionResult: Decodable, Equatable {
+    let prNumber: Int
+    let htmlURL: String
+    let branch: String
+    let filePath: String
+    let markerPath: String
+    let documentType: String
+    let previousPRNumber: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case prNumber = "pr_number"
+        case htmlURL = "html_url"
+        case branch
+        case filePath = "file_path"
+        case markerPath = "marker_path"
+        case documentType = "document_type"
+        case previousPRNumber = "previous_pr_number"
+    }
+}
+
+struct ReviewSessionRedirectError: LocalizedError {
+    let result: ReviewSessionResult
+
+    var errorDescription: String? {
+        "Opened review-session PR #\(result.prNumber) for this merged PR."
+    }
+}
+
 struct AcceptRFCResult: Decodable {
     let merged: Bool
     let blockedByCI: Bool

@@ -1,4 +1,9 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
 
 // MARK: - GutterMarkdownView
 // Two-column layout: a narrow left gutter showing comment count badges
@@ -31,6 +36,7 @@ struct GutterMarkdownView: View {
     @State private var composeText: String = ""
     @State private var isSubmitting: Bool = false
     @State private var submitError: String? = nil
+    @State private var reviewSessionRedirect: ReviewSessionResult? = nil
 
     // Hover-popover state — which line's thread popover is currently showing (hover-driven)
     @State private var popoverLine: Int? = nil
@@ -302,6 +308,24 @@ struct GutterMarkdownView: View {
                     .foregroundStyle(.red)
                     .padding(.horizontal, gutterWidth + 12)
             }
+            if let redirect = reviewSessionRedirect {
+                HStack(spacing: 10) {
+                    Label("Opened review-session PR #\(redirect.prNumber)", systemImage: "arrow.triangle.pull")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Button {
+                        openReviewSession(redirect)
+                    } label: {
+                        Label("Open PR #\(redirect.prNumber)", systemImage: "arrow.up.right.square")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                .padding(10)
+                .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .padding(.horizontal, gutterWidth + 8)
+            }
 
             HStack(alignment: .bottom, spacing: 8) {
                 // Indent to align with content column
@@ -336,7 +360,7 @@ struct GutterMarkdownView: View {
                     .frame(width: 38, height: 38)
 
                     Button {
-                        withAnimation { selectedLine = nil; composeText = ""; submitError = nil }
+                        withAnimation { selectedLine = nil; composeText = ""; submitError = nil; reviewSessionRedirect = nil }
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 12))
@@ -358,6 +382,7 @@ struct GutterMarkdownView: View {
         guard !body.isEmpty else { return }
         isSubmitting = true
         submitError = nil
+        reviewSessionRedirect = nil
         let block = blocks.first(where: { $0.sourceLine == line })
         let lineText = block.map { Self.plainText(from: $0) } ?? ""
         let lineEnd = block?.sourceLineEnd ?? line
@@ -365,9 +390,24 @@ struct GutterMarkdownView: View {
             try await commentStore.postComment(body: body, line: line, lineEnd: lineEnd, lineText: lineText)
             withAnimation { selectedLine = nil; composeText = "" }
         } catch {
-            submitError = error.localizedDescription
+            if let redirect = error as? ReviewSessionRedirectError {
+                composeText = ""
+                reviewSessionRedirect = redirect.result
+                openReviewSession(redirect.result)
+            } else {
+                submitError = error.localizedDescription
+            }
         }
         isSubmitting = false
+    }
+
+    private func openReviewSession(_ result: ReviewSessionResult) {
+        guard let url = URL(string: result.htmlURL) else { return }
+#if os(macOS)
+        NSWorkspace.shared.open(url)
+#else
+        UIApplication.shared.open(url)
+#endif
     }
 
     /// Extract plain text from a MarkdownBlock for use as a comment anchor fingerprint.

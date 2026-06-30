@@ -234,14 +234,23 @@ struct RFCDetailView: View {
                 submitMode: ctx.submitMode,
                 onSubmit: { body in
                     if ctx.submitMode == .lineComment {
-                        _ = try await ctx.client.createReviewComment(
-                            prNumber: ctx.prNumber,
-                            body: body,
-                            filePath: ctx.filePath,
-                            lineStart: 1,
-                            lineEnd: 1,
-                            textFingerprint: ctx.firstLineFingerprint
-                        )
+                        do {
+                            _ = try await ctx.client.createReviewComment(
+                                prNumber: ctx.prNumber,
+                                body: body,
+                                filePath: ctx.filePath,
+                                lineStart: 1,
+                                lineEnd: 1,
+                                textFingerprint: ctx.firstLineFingerprint
+                            )
+                        } catch {
+                            guard error.isHermitLineResolutionFailure else { throw error }
+                            let result = try await ctx.client.startReviewSession(
+                                filePath: ctx.filePath,
+                                previousPRNumber: ctx.prNumber
+                            )
+                            throw ReviewSessionRedirectError(result: result)
+                        }
                     } else {
                         try await ctx.client.requestChanges(prNumber: ctx.prNumber, body: body)
                         await refreshPendingReviewCount(client: ctx.client, prNumber: ctx.prNumber)
@@ -359,25 +368,31 @@ struct RFCDetailView: View {
     // MARK: - Content loading
 
     private func loadContent() async {
+        let loadStartedAt = Date()
+        Self.logReviewOpen("start rfc_id=\(rfc.id) title=\"\(rfc.title)\" source=\(sourceDescription)")
         isLoading = true
         errorMessage = nil
 
         guard let client = repo.flatMap({ appState.makeAPIClient(for: $0) }) ?? appState.makeAPIClient() else {
             errorMessage = "Not configured."
             isLoading = false
+            Self.logReviewOpen("failed no-client elapsed_ms=\(Self.elapsedMS(since: loadStartedAt))")
             return
         }
         // Main branch RFCs need a path; PR RFCs use prNumber via fetchPRRFCContent
         if case .mainBranch = rfc.source, rfc.path.isEmpty {
             errorMessage = "No RFC file found on this branch."
             isLoading = false
+            Self.logReviewOpen("failed missing-path elapsed_ms=\(Self.elapsedMS(since: loadStartedAt))")
             return
         }
 
         do {
+            let contentStartedAt = Date()
             switch rfc.source {
             case .mainBranch:
                 markdown = try await client.fetchRFCContent(path: rfc.path, ref: "main")
+                Self.logReviewOpen("content main path=\(rfc.path) ms=\(Self.elapsedMS(since: contentStartedAt))")
             case .pullRequest(let pr):
                 let requestedPath = rfc.path.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !requestedPath.isEmpty && requestedPath != pr.headRef {
@@ -385,13 +400,17 @@ struct RFCDetailView: View {
                 } else {
                     markdown = try await client.fetchPRRFCContent(prNumber: pr.number)
                 }
+                Self.logReviewOpen("content pr=#\(pr.number) path=\(requestedPath.isEmpty ? "<default>" : requestedPath) ms=\(Self.elapsedMS(since: contentStartedAt))")
+                let authorStartedAt = Date()
                 if let login = try? await client.fetchPRAuthorLogin(prNumber: pr.number), !login.isEmpty {
                     prAuthorLogin = login
                 }
+                Self.logReviewOpen("author pr=#\(pr.number) ms=\(Self.elapsedMS(since: authorStartedAt))")
             }
         } catch {
             errorMessage = error.localizedDescription
             isLoading = false
+            Self.logReviewOpen("failed content error=\"\(error.localizedDescription)\" elapsed_ms=\(Self.elapsedMS(since: loadStartedAt))")
             return
         }
 
@@ -404,6 +423,7 @@ struct RFCDetailView: View {
         // For PR RFCs, build the direct blob URL to the file on the PR branch.
         // This is done regardless of whether a commentStore is present.
         if case .pullRequest(let pr) = rfc.source {
+            let pathStartedAt = Date()
             let resolvedPath: String
             let requestedPath = rfc.path.trimmingCharacters(in: .whitespacesAndNewlines)
             if !requestedPath.isEmpty && requestedPath != pr.headRef {
@@ -427,6 +447,7 @@ struct RFCDetailView: View {
                     : pr.headSHA
                 resolvedFileURL = "\(repoBase)/blob/\(blobRef)/\(resolvedPath)"
             }
+            Self.logReviewOpen("resolve-file pr=#\(pr.number) path=\(resolvedPath) ms=\(Self.elapsedMS(since: pathStartedAt))")
 
             // Configure and load comments if a store is present.
             if let store = commentStore {
@@ -435,12 +456,16 @@ struct RFCDetailView: View {
                     prNumber: pr.number,
                     filePath: resolvedPath
                 )
+                let commentsStartedAt = Date()
                 await store.load()
+                Self.logReviewOpen("comments pr=#\(pr.number) count=\(store.comments.count) ms=\(Self.elapsedMS(since: commentsStartedAt))")
 
                 // Check whether this branch is behind the base branch (best-effort; silent on failure).
+                let mergeStartedAt = Date()
                 if let behind = try? await client.getMergeStatus(prNumber: pr.number) {
                     isBehind = behind
                 }
+                Self.logReviewOpen("merge-status pr=#\(pr.number) behind=\(isBehind) ms=\(Self.elapsedMS(since: mergeStartedAt))")
                 // (approval review state no longer tracked here — accept flow handles it)
             }
         } else {
@@ -449,9 +474,11 @@ struct RFCDetailView: View {
         }
 
         isLoading = false
+        Self.logReviewOpen("visible elapsed_ms=\(Self.elapsedMS(since: loadStartedAt))")
 
         // hermit-ec7: fetch caller permission level for toolbar access control
         await fetchCallerPermission(client: client)
+        Self.logReviewOpen("complete elapsed_ms=\(Self.elapsedMS(since: loadStartedAt))")
     }
 
     // MARK: - Permission fetch
@@ -459,32 +486,40 @@ struct RFCDetailView: View {
     private func fetchCallerPermission(client: any HermitClientProtocol) async {
         // hermit-cns: fetch permission for both main-branch and PR RFCs so
         // the Approve PR button can be gated on admin/maintain.
+        let permissionStartedAt = Date()
         do {
             callerPermission = try await client.getCallerPermission()
         } catch {
             callerPermission = "none"
         }
+        Self.logReviewOpen("permission value=\(callerPermission) ms=\(Self.elapsedMS(since: permissionStartedAt))")
 
         // Fetch current user login for review sheet ownership checks.
+        let userStartedAt = Date()
         if let login = try? await client.fetchCurrentUser(), !login.isEmpty {
             currentUserLogin = login
         }
+        Self.logReviewOpen("current-user present=\(!currentUserLogin.isEmpty) ms=\(Self.elapsedMS(since: userStartedAt))")
 
         // For PR RFCs also fetch the current review state, CI status, and pending review count.
         if case .pullRequest(let pr) = rfc.source {
+            let reviewStateStartedAt = Date()
             do {
                 let state = try await client.getReviewState(prNumber: pr.number)
                 prApproved = state.approved
             } catch {
                 prApproved = false
             }
+            Self.logReviewOpen("review-state pr=#\(pr.number) approved=\(prApproved) ms=\(Self.elapsedMS(since: reviewStateStartedAt))")
             // Fetch CI status for the PR head commit
+            let ciStartedAt = Date()
             if !pr.headSHA.isEmpty {
                 let ci = (try? await client.getCIStatus(commitSHA: pr.headSHA)) ?? "pending"
                 isCIPassing = ci == "success"
             } else {
                 isCIPassing = false
             }
+            Self.logReviewOpen("ci pr=#\(pr.number) passing=\(isCIPassing) ms=\(Self.elapsedMS(since: ciStartedAt))")
             await refreshPendingReviewCount(client: client, prNumber: pr.number)
         }
     }
@@ -493,8 +528,10 @@ struct RFCDetailView: View {
 
     @MainActor
     func refreshPendingReviewCount(client: any HermitClientProtocol, prNumber: Int) async {
+        let startedAt = Date()
         let reviews = (try? await client.listPRReviews(prNumber: prNumber)) ?? []
         pendingReviewCount = reviews.filter { $0.isChangesRequested }.count
+        Self.logReviewOpen("pending-review-count pr=#\(prNumber) count=\(pendingReviewCount) ms=\(Self.elapsedMS(since: startedAt))")
     }
 
     // MARK: - Fingerprint helper (mirrors CommentStore.makeFingerprint)
@@ -504,6 +541,32 @@ struct RFCDetailView: View {
         let truncated = trimmed.count > 40 ? String(trimmed.prefix(40)) : trimmed
         let slug = truncated.lowercased().replacingOccurrences(of: " ", with: "-")
         return slug.isEmpty ? "line" : slug
+    }
+
+    private var sourceDescription: String {
+        switch rfc.source {
+        case .mainBranch:
+            return "main"
+        case .pullRequest(let pr):
+            return "pr:#\(pr.number)"
+        }
+    }
+
+    private static func elapsedMS(since startedAt: Date) -> Int {
+        Int(Date().timeIntervalSince(startedAt) * 1000)
+    }
+
+    private static func logReviewOpen(_ message: String) {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("hermit-native-debug.log")
+        let line = "[\(Date())] [RFCDetailView.reviewOpen] \(message)\n"
+        guard let data = line.data(using: .utf8) else { return }
+        if !FileManager.default.fileExists(atPath: url.path) {
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+        }
+        guard let handle = try? FileHandle(forWritingTo: url) else { return }
+        handle.seekToEndOfFile()
+        handle.write(data)
+        try? handle.close()
     }
 
     // MARK: - Lifecycle transition handlers
