@@ -1618,8 +1618,12 @@ private struct PRReviewSummaryRow: View {
                 ])
             }
 
-            if hasPRDescription(pr) {
-                PRMarkdownSummaryPreview(markdown: pr.body)
+            if let summary = prDescriptionSummary(pr.body) {
+                Label(summary, systemImage: "text.alignleft")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 2)
             }
 
             HStack(alignment: .center, spacing: 8) {
@@ -1683,28 +1687,6 @@ private struct PRReviewSummaryRow: View {
     }
 }
 
-private struct PRMarkdownSummaryPreview: View {
-    let markdown: String
-
-    private var blocks: [MarkdownBlock] {
-        Array(MarkdownParser.parse(cleanPRMarkdown(markdown)).prefix(4))
-    }
-
-    var body: some View {
-        if !blocks.isEmpty {
-            VStack(alignment: .leading, spacing: 5) {
-                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                    CompactMarkdownBlockView(block: block)
-                }
-            }
-            .padding(9)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.secondary.opacity(0.045))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        }
-    }
-}
-
 private struct PRDescriptionPopover: View {
     let pr: RFCPullRequest
 
@@ -1746,95 +1728,6 @@ private struct PRDescriptionPopover: View {
             .frame(width: 520, height: 420)
         }
         .padding(16)
-    }
-}
-
-private struct CompactMarkdownBlockView: View {
-    let block: MarkdownBlock
-
-    var body: some View {
-        switch block {
-        case .heading(_, let inlines, _, _):
-            Text(compactAttributedString(inlines))
-                .font(.caption.weight(.semibold))
-                .lineLimit(1)
-        case .paragraph(let inlines, _, _):
-            Text(compactAttributedString(inlines))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-        case .bulletList(let items, _, _):
-            VStack(alignment: .leading, spacing: 3) {
-                ForEach(Array(items.prefix(3).enumerated()), id: \.offset) { _, item in
-                    HStack(alignment: .firstTextBaseline, spacing: 5) {
-                        Text("•")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                        Text(compactAttributedString(item.inlines))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-            }
-        case .orderedList(let items, _, _):
-            VStack(alignment: .leading, spacing: 3) {
-                ForEach(Array(items.prefix(3).enumerated()), id: \.offset) { idx, item in
-                    HStack(alignment: .firstTextBaseline, spacing: 5) {
-                        Text("\(idx + 1).")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                        Text(compactAttributedString(item.inlines))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-            }
-        case .blockquote(let inlines, _, _):
-            HStack(alignment: .top, spacing: 7) {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Color.accentColor.opacity(0.55))
-                    .frame(width: 3)
-                Text(compactAttributedString(inlines))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .italic()
-                    .lineLimit(2)
-            }
-        case .codeBlock(let language, let code, _, _):
-            Text(codePreview(language: language, code: code))
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 5)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.secondary.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        case .table(let headers, _, _, _):
-            Label(tablePreview(headers), systemImage: "tablecells")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        case .mermaidBlock:
-            Label("Mermaid diagram", systemImage: "point.3.connected.trianglepath.dotted")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        case .horizontalRule:
-            Divider()
-        }
-    }
-
-    private func codePreview(language: String, code: String) -> String {
-        let firstLines = code.split(separator: "\n", omittingEmptySubsequences: false).prefix(2).joined(separator: " ")
-        guard !language.isEmpty else { return firstLines }
-        return "\(language): \(firstLines)"
-    }
-
-    private func tablePreview(_ headers: [[MarkdownInline]]) -> String {
-        let labels = headers.map { compactPlainText($0) }.filter { !$0.isEmpty }
-        return labels.isEmpty ? "Table" : labels.joined(separator: " | ")
     }
 }
 
@@ -1903,52 +1796,61 @@ private func cleanPRMarkdown(_ markdown: String) -> String {
     return output.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
-private func compactAttributedString(_ inlines: [MarkdownInline]) -> AttributedString {
-    inlines.reduce(AttributedString()) { result, inline in
-        var next = result
-        next.append(compactAttributedString(inline))
-        return next
+private func prDescriptionSummary(_ markdown: String) -> String? {
+    let cleaned = cleanPRMarkdown(markdown)
+    guard !cleaned.isEmpty else { return nil }
+
+    let rawLines = cleaned.components(separatedBy: .newlines)
+    let filtered = rawLines.filter { line in
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+        let lower = trimmed.lowercased()
+        if lower.hasPrefix("opens a new hermit review session for ") { return false }
+        if lower.hasPrefix("previous pr:") { return false }
+        if lower == "<!-- hermit-review-session -->" { return false }
+        return true
+    }
+    let meaningful = filtered.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !meaningful.isEmpty else { return nil }
+
+    let text = MarkdownParser.parse(meaningful)
+        .map(markdownBlockPlainText)
+        .filter { !$0.isEmpty }
+        .joined(separator: " ")
+        .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !text.isEmpty else { return nil }
+    return text
+}
+
+private func markdownBlockPlainText(_ block: MarkdownBlock) -> String {
+    switch block {
+    case .heading(_, let inlines, _, _), .paragraph(let inlines, _, _), .blockquote(let inlines, _, _):
+        return markdownInlinePlainText(inlines)
+    case .bulletList(let items, _, _), .orderedList(let items, _, _):
+        return items.prefix(2).map { markdownInlinePlainText($0.inlines) }.joined(separator: " ")
+    case .codeBlock(let language, let code, _, _):
+        let prefix = language.isEmpty ? "" : "\(language): "
+        return prefix + code.split(separator: "\n", omittingEmptySubsequences: false).prefix(1).joined()
+    case .table(let headers, _, _, _):
+        return headers.map(markdownInlinePlainText).filter { !$0.isEmpty }.joined(separator: " | ")
+    case .mermaidBlock:
+        return "Mermaid diagram"
+    case .horizontalRule:
+        return ""
     }
 }
 
-private func compactAttributedString(_ inline: MarkdownInline) -> AttributedString {
-    switch inline {
-    case .text(let string):
-        return AttributedString(string)
-    case .bold(let children):
-        var value = compactAttributedString(children)
-        value.font = .caption.bold()
-        return value
-    case .italic(let children):
-        var value = compactAttributedString(children)
-        value.font = .caption.italic()
-        return value
-    case .code(let string):
-        var value = AttributedString(string)
-        value.font = .system(.caption, design: .monospaced)
-        return value
-    case .link(let text, _):
-        var value = AttributedString(text)
-        value.foregroundColor = .accentColor
-        value.underlineStyle = .single
-        return value
-    case .image(let alt, _):
-        var value = AttributedString(alt.isEmpty ? "[image]" : "[\(alt)]")
-        value.foregroundColor = .secondary
-        return value
-    }
+private func markdownInlinePlainText(_ inlines: [MarkdownInline]) -> String {
+    inlines.map(markdownInlinePlainText).joined()
 }
 
-private func compactPlainText(_ inlines: [MarkdownInline]) -> String {
-    inlines.map(compactPlainText).joined()
-}
-
-private func compactPlainText(_ inline: MarkdownInline) -> String {
+private func markdownInlinePlainText(_ inline: MarkdownInline) -> String {
     switch inline {
     case .text(let string), .code(let string):
         return string
     case .bold(let children), .italic(let children):
-        return compactPlainText(children)
+        return markdownInlinePlainText(children)
     case .link(let text, _):
         return text
     case .image(let alt, _):
