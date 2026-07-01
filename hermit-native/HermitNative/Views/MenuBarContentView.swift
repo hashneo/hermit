@@ -1076,11 +1076,12 @@ private struct RepoFilterRow: View {
         }
         .buttonStyle(.plain)
         .frame(height: Self.rowHeight)
+        .help(helpText)
     }
 
     private var summaryText: String {
         if let issue = state?.issue {
-            return issue.shortTitle
+            return issue.repositoryRowSummary
         }
         if state?.isLoading == true && state?.allRFCs.isEmpty != false {
             return "Loading..."
@@ -1093,6 +1094,11 @@ private struct RepoFilterRow: View {
             return Color.secondary.opacity(0.12)
         }
         return Color.secondary.opacity(0.04)
+    }
+
+    private var helpText: String {
+        guard let issue = state?.issue else { return repo.fullName }
+        return issue.helpText
     }
 }
 
@@ -1320,11 +1326,13 @@ private struct CompactRepositoryReviewBucketRow: View {
             .buttonStyle(.plain)
 
             if let issue = bucket.issue {
-                Text(issue.shortTitle)
+                Text(issue.repositoryRowSummary)
                     .font(.caption)
                     .foregroundStyle(issue.tint)
                     .padding(.horizontal, 10)
                     .padding(.bottom, 2)
+                    .lineLimit(2)
+                    .help(issue.helpText)
             } else if bucket.groups.isEmpty {
                 Text(bucket.isLoading ? "Calculating from cached basis..." : "No review documents waiting.")
                     .font(.caption)
@@ -1407,13 +1415,15 @@ private struct RepositoryReviewBucketCard: View {
             .buttonStyle(.plain)
 
             if let issue = bucket.issue {
-                Label(issue.title, systemImage: issue.systemImage)
+                Label(issue.repositoryRowSummary, systemImage: issue.systemImage)
                     .font(.caption)
                     .foregroundStyle(issue.tint)
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(issue.tint.opacity(0.06))
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .lineLimit(2)
+                    .help(issue.helpText)
             } else if bucket.groups.isEmpty {
                 Text(bucket.isLoading ? "Calculating this repository from the cached basis..." : "No review documents waiting in this repository.")
                     .font(.caption)
@@ -2958,12 +2968,7 @@ private struct RepositoryIssueStrip: View {
     }
 
     private var displayTitle: String {
-        switch issue.shortTitle {
-        case "Backend":
-            return "Provider refresh failed"
-        default:
-            return issue.title
-        }
+        issue.title
     }
 
     private var displayMessage: String {
@@ -2977,10 +2982,7 @@ private struct RepositoryIssueStrip: View {
     }
 
     private var helpText: String {
-        if let recovery = issue.recovery {
-            return "\(issue.title): \(issue.message)\n\(recovery)"
-        }
-        return "\(issue.title): \(issue.message)"
+        issue.helpText
     }
 }
 
@@ -3310,7 +3312,10 @@ private final class ServerRepositoryMenuStore: ObservableObject {
             guard let http = response as? HTTPURLResponse,
                   (200..<300).contains(http.statusCode) else {
                 stats.recordFailure()
-                issue = menuIssue(forHTTPStatus: (response as? HTTPURLResponse)?.statusCode, message: "The embedded server could not list repositories.")
+                issue = menuIssue(
+                    forHTTPStatus: (response as? HTTPURLResponse)?.statusCode,
+                    message: httpErrorMessage(from: data, fallback: "The embedded server could not list repositories.")
+                )
                 menuBarDebugLog("[ServerRepositoryMenuStore] refresh error status")
                 return
             }
@@ -3576,6 +3581,43 @@ private func menuErrorMessage(_ error: Error) -> String {
     return error.localizedDescription
 }
 
+private func conciseIssueMessage(_ message: String) -> String {
+    var text = message
+        .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    let prefixes = [
+        #"^HTTP\s+\d{3}:\s*"#,
+        #"^backend error:\s*"#,
+        #"^repository refresh failed:\s*"#,
+        #"^git integration error:\s*"#
+    ]
+    for prefix in prefixes {
+        text = text.replacingOccurrences(of: prefix, with: "", options: [.regularExpression, .caseInsensitive])
+    }
+
+    if let jsonStart = text.firstIndex(of: "{") {
+        text = String(text[..<jsonStart]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    if let statusRange = text.range(of: #":\s*\d{3}$"#, options: .regularExpression) {
+        text = String(text[..<statusRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    return text
+}
+
+private func httpErrorMessage(from data: Data, fallback: String) -> String {
+    if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+       let message = object["message"] as? String,
+       !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        return message
+    }
+    if let raw = String(data: data, encoding: .utf8),
+       !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        return raw
+    }
+    return fallback
+}
+
 private struct MenuBarIssue: Equatable {
     let title: String
     let shortTitle: String
@@ -3593,6 +3635,19 @@ private struct MenuBarIssue: Equatable {
             systemImage: "gearshape.2",
             tint: .orange
         )
+    }
+
+    var repositoryRowSummary: String {
+        let summary = conciseIssueMessage(message)
+        if !summary.isEmpty { return summary }
+        return title
+    }
+
+    var helpText: String {
+        if let recovery, !recovery.isEmpty {
+            return "\(title): \(message)\n\(recovery)"
+        }
+        return "\(title): \(message)"
     }
 }
 
@@ -3623,7 +3678,7 @@ private func menuIssue(for error: Error) -> MenuBarIssue {
 
 private func menuIssue(forHTTPStatus statusCode: Int?, message: String) -> MenuBarIssue {
     if let statusCode, (500...599).contains(statusCode) {
-        return MenuBarIssue(title: "Backend error", shortTitle: "Backend", message: message, recovery: "The Hermit backend failed while talking to the git provider. Retry, then inspect backend logs if needed.", systemImage: "server.rack", tint: .orange)
+        return MenuBarIssue(title: "Repository refresh failed", shortTitle: "Refresh", message: message, recovery: "The local Hermit service failed while refreshing repository data from the git provider. Retry, then inspect backend logs if needed.", systemImage: "server.rack", tint: .orange)
     }
 
     switch statusCode {
