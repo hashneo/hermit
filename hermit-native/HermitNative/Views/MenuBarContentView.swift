@@ -1737,10 +1737,12 @@ private struct PRReviewSummaryRow: View {
                 .help(prURL(pr) == nil ? "Pull request URL is unavailable" : "Open pull request in browser")
 
                 Menu {
-                    Button {
-                        onOpen(group)
-                    } label: {
-                        Label("Review docs", systemImage: "doc.text.magnifyingglass")
+                    if prChangesURL(pr) != nil {
+                        Button {
+                            openPRChanges(pr)
+                        } label: {
+                            Label("Review changes", systemImage: "doc.text.viewfinder")
+                        }
                     }
                     if prURL(pr) != nil {
                         Button {
@@ -1812,8 +1814,19 @@ private struct PRReviewSummaryRow: View {
         URL(string: pr.htmlURL.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
+    private func prChangesURL(_ pr: RFCPullRequest) -> URL? {
+        guard var urlString = prURL(pr)?.absoluteString else { return nil }
+        urlString = urlString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return URL(string: urlString + "/changes")
+    }
+
     private func openPR(_ pr: RFCPullRequest) {
         guard let url = prURL(pr) else { return }
+        openURL(url)
+    }
+
+    private func openPRChanges(_ pr: RFCPullRequest) {
+        guard let url = prChangesURL(pr) else { return }
         openURL(url)
     }
 }
