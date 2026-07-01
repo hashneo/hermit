@@ -11,7 +11,7 @@ doc_uuid: a1b2c3d4-0002-4000-8000-100000000007
 
 # Summary
 
-This RFC defines the GitHub-only client architecture for the Hermit native app. In the absence of a Hermit backend server, the native app communicates directly with the GitHub REST API using a Personal Access Token (PAT) stored in the system Keychain. This RFC covers authentication, the full API surface consumed, error handling, rate limiting, and the path to migrating to a Hermit backend in the future.
+This RFC defines the GitHub-only client architecture for the Hermit native app. In the absence of a Hermit backend server, the native app communicates directly with the GitHub REST API using a Personal Access Token (PAT) stored in the system Keychain. The PAT may be entered directly or imported from the local Git Credential Helper. This RFC covers authentication, the full API surface consumed, error handling, rate limiting, and the path to migrating to a Hermit backend in the future.
 
 # Motivation
 
@@ -29,7 +29,7 @@ When the Hermit server is built, the `GitHubAPIClient` layer defined here become
 
 ### PAT Storage
 
-The PAT is stored in the macOS/iOS system Keychain using `Security.framework`:
+The PAT is stored in the macOS/iOS system Keychain using `Security.framework`. Debug builds may also keep the PAT in development-only user defaults for local iteration, but the release storage contract is Keychain-backed:
 
 ```swift
 // KeychainHelper.swift
@@ -49,6 +49,28 @@ Keys stored:
 | `hermit.github.owner` | Default repo owner |
 | `hermit.github.repo` | Default repo name |
 | `hermit.docs.path` | Path to RFC docs within repo (e.g. `docs-cms/rfcs/`) |
+
+For multi-account configurations, the native app stores each account token under an account-specific key such as `hermit.account.<account-uuid>`.
+
+### Git Credential Helper Import
+
+On macOS, the native app may import a PAT from the local Git Credential Helper instead of requiring manual token entry. This is a local token source for PAT authentication, not a separate auth method.
+
+Import behavior:
+
+- The app derives the credential host from the account endpoint unless the user provides an override.
+- The app calls `/usr/bin/git credential fill` with `protocol=https` and `host=<credential-host>`.
+- The returned `password` value is treated as the PAT and stored in the account-specific Keychain entry.
+- API requests continue to use `Authorization: Bearer {pat}`.
+
+Credential host examples:
+
+| Account Endpoint | Git Credential Helper Host |
+|---|---|
+| `https://api.github.com` | `github.com` |
+| `https://ghe.example.com/api/v3` | `ghe.example.com` |
+
+For GitHub Enterprise access, the configured account endpoint uses the enterprise API URL and Hermit must use the enterprise hostname when reading from Git Credential Helper. `gh auth login -h <enterprise-host>` may populate the same helper entry, but Hermit does not depend on GitHub CLI session state directly.
 
 ### PAT Scopes Required
 
@@ -230,6 +252,8 @@ enum GitHubAPIError: Error, LocalizedError {
 
 The UI layer maps these to user-facing messages. `unauthorized` prompts re-entry of PAT in Settings.
 
+For Git Credential Helper-backed accounts, the remediation path should also offer to re-read the helper entry for the account host. For GitHub Enterprise, that means reading the enterprise hostname, updating the local account token, and retrying the `/api/v3/user` connectivity probe.
+
 ## Pagination
 
 GitHub list endpoints paginate at 100 items per page. The client follows `Link: <url>; rel="next"` headers automatically:
@@ -285,7 +309,7 @@ Persist the RFC catalog and comment state to an on-device SQLite database for of
 # Unresolved Questions
 
 - Should the PAT be shared with the web UI / Go server config, or is it a separate PAT issued for the native app? Recommendation: separate PAT scoped minimally to required permissions.
-- How should the app handle GitHub Enterprise (custom base URL)? The `GitHubAPIClient` should accept a configurable `baseURL` parameter defaulting to `https://api.github.com`.
+- How should the app handle GitHub Enterprise (custom base URL)? The `GitHubAPIClient` should accept a configurable `baseURL` parameter defaulting to `https://api.github.com`; for GitHub Enterprise, the API base URL and credential-helper host are configured separately.
 
 # Future Possibilities
 
