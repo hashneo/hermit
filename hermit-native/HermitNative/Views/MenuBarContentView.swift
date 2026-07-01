@@ -1652,11 +1652,12 @@ private struct PRReviewSummaryRow: View {
     let group: PendingPRGroup
     var showsRepository = false
     let onOpen: (PendingPRGroup) -> Void
-    @State private var isShowingDescription = false
+    @State private var isDescriptionExpanded = false
 
     var body: some View {
         let pr = group.pr
-        HStack(alignment: .center, spacing: 12) {
+        let description = prDescriptionContent(pr.body)
+        HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("#\(pr.number)")
@@ -1683,28 +1684,34 @@ private struct PRReviewSummaryRow: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
 
-                if let summary = prDescriptionSummary(pr.body) {
-                    Text(summary)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                if let description {
+                    PRDescriptionInlineView(
+                        blocks: isDescriptionExpanded ? description.fullBlocks : description.excerptBlocks,
+                        isExpanded: isDescriptionExpanded
+                    )
+                    .padding(.top, 2)
+
+                    if description.canExpand {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.16)) {
+                                isDescriptionExpanded.toggle()
+                            }
+                        } label: {
+                            Label(
+                                isDescriptionExpanded ? "Show less" : "Read full description",
+                                systemImage: isDescriptionExpanded ? "chevron.up" : "chevron.down"
+                            )
+                            .font(.caption.weight(.medium))
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .help(isDescriptionExpanded ? "Collapse PR description" : "Expand full PR description")
+                    }
                 }
             }
             .layoutPriority(1)
 
             HStack(spacing: 6) {
-                if hasPRDescription(pr) {
-                    Button {
-                        isShowingDescription = true
-                    } label: {
-                        Image(systemName: "doc.text.magnifyingglass")
-                    }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .help("View full PR description")
-                }
-
                 Button {
                     onOpen(group)
                 } label: {
@@ -1722,9 +1729,6 @@ private struct PRReviewSummaryRow: View {
         .background(Color.secondary.opacity(0.035))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .help("Open pull request")
-        .popover(isPresented: $isShowingDescription, arrowEdge: .trailing) {
-            PRDescriptionPopover(pr: pr)
-        }
     }
 
     private func prTitle(_ pr: RFCPullRequest) -> String {
@@ -1749,90 +1753,113 @@ private struct PRReviewSummaryRow: View {
         return "\(contextText(pr)) · \(group.documentCount) docs · \(changedFiles(pr)) files · +\(pr.additions)/-\(pr.deletions) · \(commentText)"
     }
 
-    private func hasPRDescription(_ pr: RFCPullRequest) -> Bool {
-        !cleanPRMarkdown(pr.body).isEmpty
+}
+
+private struct PRDescriptionContent {
+    let excerptBlocks: [MarkdownBlock]
+    let fullBlocks: [MarkdownBlock]
+
+    var canExpand: Bool {
+        fullBlocks.count > excerptBlocks.count
     }
 }
 
-private struct PRDescriptionPopover: View {
-    let pr: RFCPullRequest
-
-    private var blocks: [MarkdownBlock] {
-        MarkdownParser.parse(cleanPRMarkdown(pr.body))
-    }
+private struct PRDescriptionInlineView: View {
+    let blocks: [MarkdownBlock]
+    let isExpanded: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(pr.prTitle.isEmpty ? "Pull request #\(pr.number)" : pr.prTitle)
-                        .font(.headline)
-                        .lineLimit(2)
-                    Text("PR #\(pr.number)")
+        VStack(alignment: .leading, spacing: isExpanded ? 8 : 5) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                PRDescriptionInlineBlockView(block: block, isExpanded: isExpanded)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct PRDescriptionInlineBlockView: View {
+    let block: MarkdownBlock
+    let isExpanded: Bool
+
+    var body: some View {
+        switch block {
+        case .heading(_, let inlines, _, _):
+            Text(prMarkdownAttributedString(inlines))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(isExpanded ? nil : 1)
+                .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: true)
+        case .paragraph(let inlines, _, _):
+            Text(prMarkdownAttributedString(inlines))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(isExpanded ? nil : 2)
+                .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: true)
+        case .blockquote(let inlines, _, _):
+            HStack(alignment: .top, spacing: 6) {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Color.secondary.opacity(0.45))
+                    .frame(width: 2)
+                Text(prMarkdownAttributedString(inlines))
+                    .font(.caption)
+                    .italic()
+                    .foregroundStyle(.secondary)
+                    .lineLimit(isExpanded ? nil : 2)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        case .bulletList(let items, _, _):
+            compactList(items: items, ordered: false)
+        case .orderedList(let items, _, _):
+            compactList(items: items, ordered: true)
+        case .codeBlock(let language, let code, _, _):
+            let prefix = language.isEmpty ? "" : "\(language)\n"
+            Text(prefix + code)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(isExpanded ? nil : 3)
+                .truncationMode(.tail)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.secondary.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        case .table(let headers, let rows, _, _):
+            Text(compactTableText(headers: headers, rows: rows))
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(isExpanded ? nil : 2)
+                .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: true)
+        case .mermaidBlock:
+            Text("Mermaid diagram")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .horizontalRule:
+            Divider()
+        }
+    }
+
+    private func compactList(items: [MarkdownBlock.ListItem], ordered: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(items.prefix(isExpanded ? items.count : 2).enumerated()), id: \.offset) { index, item in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(ordered ? "\(index + 1)." : "•")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .frame(width: ordered ? 18 : 10, alignment: .trailing)
+                    Text(prMarkdownAttributedString(item.inlines))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(isExpanded ? nil : 1)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
-                PRCommentStatusBadge(issueCount: pr.issueCommentCount, reviewCount: pr.reviewCommentCount)
+                .padding(.leading, CGFloat(item.depth) * 12)
             }
-
-            Divider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    if blocks.isEmpty {
-                        Text("No pull request description.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                            MarkdownBlockView(block: block)
-                        }
-                    }
-                }
-                .padding(.trailing, 4)
-            }
-            .frame(width: 520, height: 420)
         }
-        .padding(16)
-    }
-}
-
-private struct PRCommentStatusBadge: View {
-    let issueCount: Int
-    let reviewCount: Int
-
-    private var total: Int { issueCount + reviewCount }
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: total == 0 ? "text.bubble" : "text.bubble.fill")
-            Text(statusText)
-                .monospacedDigit()
-        }
-        .font(.caption2.weight(.semibold))
-        .padding(.horizontal, 7)
-        .frame(height: 20)
-        .background(tint.opacity(0.10))
-        .foregroundStyle(tint)
-        .clipShape(Capsule())
-        .fixedSize(horizontal: true, vertical: false)
-        .help(helpText)
-    }
-
-    private var statusText: String {
-        if total == 0 { return "No comments" }
-        if issueCount > 0 && reviewCount > 0 { return "\(issueCount) + \(reviewCount)" }
-        if reviewCount > 0 { return "\(reviewCount) review\(reviewCount == 1 ? "" : "s")" }
-        return "\(issueCount) comment\(issueCount == 1 ? "" : "s")"
-    }
-
-    private var helpText: String {
-        "\(issueCount) PR comments, \(reviewCount) review comments"
-    }
-
-    private var tint: Color {
-        total == 0 ? .secondary : .accentColor
     }
 }
 
@@ -1863,9 +1890,21 @@ private func cleanPRMarkdown(_ markdown: String) -> String {
     return output.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
-private func prDescriptionSummary(_ markdown: String) -> String? {
+private func prDescriptionContent(_ markdown: String) -> PRDescriptionContent? {
+    let meaningful = meaningfulPRMarkdown(markdown)
+    guard !meaningful.isEmpty else { return nil }
+
+    let blocks = MarkdownParser.parse(meaningful).filter { !isEmptyPRDescriptionBlock($0) }
+    guard !blocks.isEmpty else { return nil }
+
+    let excerpt = prDescriptionExcerptBlocks(from: blocks)
+    guard !excerpt.isEmpty else { return nil }
+    return PRDescriptionContent(excerptBlocks: excerpt, fullBlocks: blocks)
+}
+
+private func meaningfulPRMarkdown(_ markdown: String) -> String {
     let cleaned = cleanPRMarkdown(markdown)
-    guard !cleaned.isEmpty else { return nil }
+    guard !cleaned.isEmpty else { return "" }
 
     let rawLines = cleaned.components(separatedBy: .newlines)
     let filtered = rawLines.filter { line in
@@ -1877,17 +1916,85 @@ private func prDescriptionSummary(_ markdown: String) -> String? {
         if lower == "<!-- hermit-review-session -->" { return false }
         return true
     }
-    let meaningful = filtered.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !meaningful.isEmpty else { return nil }
+    return filtered.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+}
 
-    let text = MarkdownParser.parse(meaningful)
-        .map(markdownBlockPlainText)
+private func prDescriptionExcerptBlocks(from blocks: [MarkdownBlock]) -> [MarkdownBlock] {
+    guard let headingIndex = blocks.firstIndex(where: { block in
+        if case .heading = block { return true }
+        return false
+    }) else {
+        return Array(blocks.prefix(1))
+    }
+
+    var excerpt = [blocks[headingIndex]]
+    if let textIndex = blocks[(headingIndex + 1)...].firstIndex(where: isPRDescriptionTextChunk) {
+        excerpt.append(blocks[textIndex])
+    }
+    return excerpt
+}
+
+private func isPRDescriptionTextChunk(_ block: MarkdownBlock) -> Bool {
+    switch block {
+    case .paragraph, .blockquote, .bulletList, .orderedList, .codeBlock, .table:
+        return !markdownBlockPlainText(block).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    case .heading, .horizontalRule, .mermaidBlock:
+        return false
+    }
+}
+
+private func isEmptyPRDescriptionBlock(_ block: MarkdownBlock) -> Bool {
+    markdownBlockPlainText(block).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+}
+
+private func compactTableText(headers: [[MarkdownInline]], rows: [[[MarkdownInline]]]) -> String {
+    let headerText = headers
+        .map(markdownInlinePlainText)
         .filter { !$0.isEmpty }
-        .joined(separator: " ")
-        .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !text.isEmpty else { return nil }
-    return text
+        .joined(separator: " | ")
+    guard !rows.isEmpty else { return headerText }
+    let firstRow = rows[0]
+        .map(markdownInlinePlainText)
+        .filter { !$0.isEmpty }
+        .joined(separator: " | ")
+    return [headerText, firstRow].filter { !$0.isEmpty }.joined(separator: "\n")
+}
+
+private func prMarkdownAttributedString(_ inlines: [MarkdownInline]) -> AttributedString {
+    inlines.reduce(AttributedString()) { partialResult, inline in
+        partialResult + prMarkdownAttributedString(inline)
+    }
+}
+
+private func prMarkdownAttributedString(_ inline: MarkdownInline) -> AttributedString {
+    switch inline {
+    case .text(let string):
+        return AttributedString(string)
+    case .bold(let children):
+        var attributed = prMarkdownAttributedString(children)
+        attributed.font = .caption.bold()
+        return attributed
+    case .italic(let children):
+        var attributed = prMarkdownAttributedString(children)
+        attributed.font = .caption.italic()
+        return attributed
+    case .code(let string):
+        var attributed = AttributedString(string)
+        attributed.font = .caption.monospaced()
+        attributed.backgroundColor = Color.secondary.opacity(0.10)
+        return attributed
+    case .link(let text, let url):
+        var attributed = AttributedString(text)
+        if let linkURL = URL(string: url) {
+            attributed.link = linkURL
+        }
+        attributed.foregroundColor = .accentColor
+        return attributed
+    case .image(let alt, _):
+        var attributed = AttributedString("[\(alt)]")
+        attributed.foregroundColor = .secondary
+        return attributed
+    }
 }
 
 private func markdownBlockPlainText(_ block: MarkdownBlock) -> String {
