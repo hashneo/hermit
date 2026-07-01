@@ -349,9 +349,16 @@ final class MenuBarStatusItemController: NSObject {
 
         let buttonRect = button.convert(button.bounds, to: nil)
         let screenRect = buttonWindow.convertToScreen(buttonRect)
-        let content = MenuBarContentView(anchorScreenX: screenRect.midX) { [weak self] in
-            self?.closePanel()
-        }
+        let content = MenuBarContentView(
+            anchorScreenX: screenRect.midX,
+            onOpenReview: { [weak self] in
+                self?.closePanel()
+            },
+            onDetach: { [weak self] in
+                DashboardFloatingWindowManager.shared.open(appState: AppState.shared)
+                self?.closePanel()
+            }
+        )
             .environmentObject(AppState.shared)
         let hosting = NSHostingController(rootView: content)
         hosting.view.wantsLayer = true
@@ -442,6 +449,65 @@ final class MenuBarStatusItemController: NSObject {
         handle.seekToEndOfFile()
         handle.write(data)
         try? handle.close()
+    }
+}
+
+// MARK: - Dashboard Floating Window Manager (macOS)
+
+@MainActor
+final class DashboardFloatingWindowManager {
+    static let shared = DashboardFloatingWindowManager()
+    private var controller: NSWindowController?
+
+    func open(appState: AppState) {
+        if let existing = controller?.window, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let content = MenuBarContentView(
+            managesWindowPresentation: false,
+            allowsDetach: false,
+            onOpenReview: {}
+        )
+            .environmentObject(appState)
+
+        let hosting = NSHostingController(rootView: content)
+        hosting.sizingOptions = []
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 780, height: 580),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable, .utilityWindow],
+            backing: .buffered,
+            defer: false
+        )
+        panel.contentViewController = hosting
+        panel.title = "Hermit Dashboard"
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
+        panel.minSize = NSSize(width: 780, height: 580)
+        panel.center()
+
+        let controller = NSWindowController(window: panel)
+        self.controller = controller
+
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.controller = nil }
+        }
+
+        controller.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.async {
+            NSApp.setActivationPolicy(.regular)
+        }
     }
 }
 

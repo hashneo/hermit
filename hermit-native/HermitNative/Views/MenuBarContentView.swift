@@ -10,7 +10,9 @@ struct MenuBarContentView: View {
 #if os(macOS)
     private let initialAnchorScreenX: CGFloat?
     private let managesWindowPresentation: Bool
+    private let allowsDetach: Bool
     private let onOpenReview: () -> Void
+    private let onDetach: () -> Void
     @ObservedObject private var serverMgr = EmbeddedServerManager.shared
     @ObservedObject private var repoStore = RepositoryStore.shared
     @ObservedObject private var accountStore = AccountStore.shared
@@ -24,10 +26,18 @@ struct MenuBarContentView: View {
     @State private var menuAnchor = MenuBarBubbleAnchor.capture()
     @State private var pointerX = MenuBarBubbleWindowController.fallbackPointerX
 
-    init(anchorScreenX: CGFloat? = nil, managesWindowPresentation: Bool = true, onOpenReview: @escaping () -> Void = {}) {
+    init(
+        anchorScreenX: CGFloat? = nil,
+        managesWindowPresentation: Bool = true,
+        allowsDetach: Bool = true,
+        onOpenReview: @escaping () -> Void = {},
+        onDetach: @escaping () -> Void = {}
+    ) {
         self.initialAnchorScreenX = anchorScreenX
         self.managesWindowPresentation = managesWindowPresentation
+        self.allowsDetach = allowsDetach
         self.onOpenReview = onOpenReview
+        self.onDetach = onDetach
         _menuAnchor = State(initialValue: MenuBarBubbleAnchor.capture(anchorScreenX))
         _pointerX = State(initialValue: managesWindowPresentation ? MenuBarBubbleWindowController.fallbackPointerX : 280)
     }
@@ -37,29 +47,7 @@ struct MenuBarContentView: View {
 
 #if os(macOS)
     var body: some View {
-        menuContent
-            .frame(width: renderMode.contentSize.width, height: renderMode.contentSize.height)
-            .padding(.top, MenuBarSpeechBubbleShape.pointerHeight)
-            .background {
-                if managesWindowPresentation {
-                    MenuBarBubbleWindowAccessor(
-                        contentSize: renderMode.contentSize,
-                        anchor: menuAnchor,
-                        pointerX: $pointerX
-                    )
-                }
-            }
-            .background {
-                MenuBarSpeechBubbleShape(pointerX: pointerX)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-                    .shadow(color: .black.opacity(0.20), radius: 18, x: 0, y: 8)
-            }
-            .overlay {
-                MenuBarSpeechBubbleShape(pointerX: pointerX)
-                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
-            }
-            .clipShape(MenuBarSpeechBubbleShape(pointerX: pointerX))
-            .animation(.snappy(duration: 0.22), value: renderMode)
+        rootContent
             .onAppear {
                 menuAnchor = MenuBarBubbleAnchor.capture(initialAnchorScreenX)
                 serverRepoStore.start(portProvider: { serverMgr.port }, accountIDProvider: { accountStore.connections.first?.id })
@@ -78,6 +66,37 @@ struct MenuBarContentView: View {
                 }
                 Task { await refreshDashboard(force: false) }
             }
+    }
+
+    @ViewBuilder
+    private var rootContent: some View {
+        if managesWindowPresentation {
+            menuContent
+                .frame(width: renderMode.contentSize.width, height: renderMode.contentSize.height)
+                .padding(.top, MenuBarSpeechBubbleShape.pointerHeight)
+                .background {
+                    MenuBarBubbleWindowAccessor(
+                        contentSize: renderMode.contentSize,
+                        anchor: menuAnchor,
+                        pointerX: $pointerX
+                    )
+                }
+                .background {
+                    MenuBarSpeechBubbleShape(pointerX: pointerX)
+                        .fill(Color(nsColor: .windowBackgroundColor))
+                        .shadow(color: .black.opacity(0.20), radius: 18, x: 0, y: 8)
+                }
+                .overlay {
+                    MenuBarSpeechBubbleShape(pointerX: pointerX)
+                        .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
+                }
+                .clipShape(MenuBarSpeechBubbleShape(pointerX: pointerX))
+                .animation(.snappy(duration: 0.22), value: renderMode)
+        } else {
+            menuContent
+                .frame(minWidth: MenuBarRenderMode.normal.contentSize.width, minHeight: MenuBarRenderMode.normal.contentSize.height)
+                .background(Color(nsColor: .windowBackgroundColor))
+        }
     }
 
     private var menuContent: some View {
@@ -150,6 +169,15 @@ struct MenuBarContentView: View {
                 .buttonStyle(.bordered)
                 .disabled(selectedView != .dashboard)
 
+                if allowsDetach {
+                    Button(action: onDetach) {
+                        Label("Detach", systemImage: "rectangle.on.rectangle")
+                    }
+                    .labelStyle(.iconOnly)
+                    .help("Detach to floating window")
+                    .buttonStyle(.bordered)
+                }
+
                 Button {
                     NewRFCWindowManager.shared.open(appState: appState)
                 } label: {
@@ -170,6 +198,14 @@ struct MenuBarContentView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(selectedView != .dashboard)
+
+                if allowsDetach {
+                    Button(action: onDetach) {
+                        Label("Detach", systemImage: "rectangle.on.rectangle")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Detach to floating window")
+                }
 
                 Button {
                     NewRFCWindowManager.shared.open(appState: appState)
@@ -359,6 +395,7 @@ struct MenuBarContentView: View {
     }
 
     private var renderMode: MenuBarRenderMode {
+        if !managesWindowPresentation { return .normal }
         if selectedView != .dashboard { return .normal }
         if selectedRepoID != nil { return .normal }
         if advertiser.pendingInvitation != nil { return .normal }
