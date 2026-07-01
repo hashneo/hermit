@@ -1,6 +1,8 @@
 import SwiftUI
 #if os(macOS)
 import AppKit
+#elseif os(iOS)
+import UIKit
 #endif
 
 // MARK: - MenuBarContentView
@@ -1724,18 +1726,6 @@ private struct PRReviewSummaryRow: View {
             .layoutPriority(1)
 
             HStack(alignment: .center, spacing: 6) {
-                Button {
-                    openPR(pr)
-                } label: {
-                    Image(systemName: "arrow.up.right.square")
-                        .font(.caption.weight(.semibold))
-                        .frame(width: 18, height: 18)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(prURL(pr) == nil)
-                .help(prURL(pr) == nil ? "Pull request URL is unavailable" : "Open pull request in browser")
-
                 Menu {
                     if prChangesURL(pr) != nil {
                         Button {
@@ -1749,6 +1739,11 @@ private struct PRReviewSummaryRow: View {
                             openPR(pr)
                         } label: {
                             Label("Open pull request", systemImage: "arrow.up.right.square")
+                        }
+                        Button {
+                            copyPRLink(pr)
+                        } label: {
+                            Label("Copy PR link", systemImage: "link")
                         }
                     }
                 } label: {
@@ -1828,6 +1823,16 @@ private struct PRReviewSummaryRow: View {
     private func openPRChanges(_ pr: RFCPullRequest) {
         guard let url = prChangesURL(pr) else { return }
         openURL(url)
+    }
+
+    private func copyPRLink(_ pr: RFCPullRequest) {
+        guard let urlString = prURL(pr)?.absoluteString else { return }
+#if os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(urlString, forType: .string)
+#elseif os(iOS)
+        UIPasteboard.general.string = urlString
+#endif
     }
 }
 
