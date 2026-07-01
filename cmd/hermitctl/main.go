@@ -132,6 +132,57 @@ type reviewDocsState struct {
 	Summary            repositoryRFCSummary `json:"summary"`
 }
 
+type workflowQueues struct {
+	Summary      workflowQueueSummary        `json:"summary"`
+	Documents    []workflowDocumentQueueItem `json:"documents"`
+	PullRequests []workflowPRQueueItem       `json:"pull_requests"`
+	RepoSync     []workflowRepoSyncQueueItem `json:"repo_sync"`
+}
+
+type workflowQueueSummary struct {
+	Repositories       int `json:"repositories"`
+	RepositoriesLoaded int `json:"repositories_loaded"`
+	Documents          int `json:"documents"`
+	PullRequests       int `json:"pull_requests"`
+	RepoSync           int `json:"repo_sync"`
+}
+
+type workflowDocumentQueueItem struct {
+	RepositoryID  string `json:"repository_id"`
+	Repository    string `json:"repository"`
+	PRNumber      int    `json:"pr_number"`
+	DocumentType  string `json:"document_type"`
+	Title         string `json:"title"`
+	Path          string `json:"path"`
+	ReviewCommand string `json:"review_command"`
+}
+
+type workflowPRQueueItem struct {
+	RepositoryID  string `json:"repository_id"`
+	Repository    string `json:"repository"`
+	Number        int    `json:"number"`
+	Title         string `json:"title"`
+	Status        string `json:"status"`
+	State         string `json:"state"`
+	Merged        bool   `json:"merged"`
+	MergeState    string `json:"mergeable_state,omitempty"`
+	Documents     int    `json:"documents"`
+	HTMLURL       string `json:"html_url,omitempty"`
+	ReviewCommand string `json:"review_command"`
+	StatusCommand string `json:"status_command"`
+}
+
+type workflowRepoSyncQueueItem struct {
+	RepositoryID     string `json:"repository_id"`
+	Repository       string `json:"repository"`
+	Status           string `json:"status"`
+	Healthy          bool   `json:"healthy"`
+	LastErrorCode    string `json:"last_error_code,omitempty"`
+	Message          string `json:"message,omitempty"`
+	RemediateCommand string `json:"remediate_command"`
+	ValidateCommand  string `json:"validate_command"`
+}
+
 type reviewStateResponse struct {
 	Approved  bool     `json:"approved"`
 	Reviewers []string `json:"reviewers"`
@@ -320,12 +371,30 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return c.runRepo(remaining[1:], stdin, stdout, stderr)
 	case "review":
 		return c.runReview(remaining[1:], stdout, stderr)
+	case "workflow", "workflows":
+		return c.runWorkflow(remaining[1:], stdout, stderr)
 	case "health":
 		return c.runHealth(stdout)
 	case "logs":
 		return c.runLogs(remaining[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown command %q", remaining[0])
+	}
+}
+
+func (c cli) runWorkflow(args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		workflowUsage(stdout)
+		return nil
+	}
+	switch args[0] {
+	case "queues":
+		return c.workflowQueues(args[1:], stdout, stderr)
+	case "help", "-h", "--help":
+		workflowUsage(stdout)
+		return nil
+	default:
+		return fmt.Errorf("unknown workflow command %q", args[0])
 	}
 }
 
@@ -363,6 +432,293 @@ func (c cli) runReview(args []string, stdout, stderr io.Writer) error {
 	default:
 		return fmt.Errorf("unknown review command %q", args[0])
 	}
+}
+
+func (c cli) workflowQueues(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("workflow queues", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	refresh := fs.Bool("refresh", false, "force fresh provider reads for review document queues")
+	validate := fs.Bool("validate", false, "refresh repository validation before building the repo sync queue")
+	queue := fs.String("queue", "all", "queue to print: all, documents, prs, repo-sync")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	queueName := strings.TrimSpace(strings.ToLower(*queue))
+	if queueName == "" {
+		queueName = "all"
+	}
+	switch queueName {
+	case "all", "documents", "docs", "prs", "pull-requests", "repo-sync", "sync", "repositories":
+	default:
+		return fmt.Errorf("unknown workflow queue %q", *queue)
+	}
+
+	queues, err := c.collectWorkflowQueues(*refresh, *validate)
+	if err != nil {
+		return err
+	}
+	if c.jsonOut {
+		return printJSON(stdout, queues)
+	}
+	printWorkflowQueues(stdout, queues, queueName)
+	return nil
+}
+
+func (c cli) collectWorkflowQueues(refresh, validate bool) (workflowQueues, error) {
+	var repos listRepositoriesResponse
+	if err := c.do(http.MethodGet, "/api/v1/repositories", nil, &repos); err != nil {
+		return workflowQueues{}, err
+	}
+
+	queues := workflowQueues{}
+	queues.Summary.Repositories = len(repos.Items)
+	for _, repo := range repos.Items {
+		repoName := repo.Owner + "/" + repo.Name
+		validation := repo.Validation
+		syncQueued := false
+		if validate {
+			if err := c.do(http.MethodPost, "/api/v1/repositories/"+url.PathEscape(repo.ID)+"/validate", nil, &validation); err != nil {
+				queues.RepoSync = append(queues.RepoSync, workflowRepoSyncQueueItem{
+					RepositoryID:     repo.ID,
+					Repository:       repoName,
+					Status:           repoSyncStatusFromError(err),
+					Healthy:          false,
+					Message:          err.Error(),
+					RemediateCommand: repoRemediationCommand(repo.ID, err.Error()),
+					ValidateCommand:  "hermitctl repo validate " + shellQuote(repo.ID),
+				})
+				continue
+			}
+		}
+		if !validation.Healthy {
+			queues.RepoSync = append(queues.RepoSync, workflowRepoSyncQueueItem{
+				RepositoryID:     repo.ID,
+				Repository:       repoName,
+				Status:           repoSyncStatus(validation),
+				Healthy:          false,
+				LastErrorCode:    validation.LastErrorCode,
+				Message:          validationMessage(validation),
+				RemediateCommand: repoRemediationCommand(repo.ID, validation.LastErrorCode+" "+validationMessage(validation)),
+				ValidateCommand:  "hermitctl repo validate " + shellQuote(repo.ID),
+			})
+			syncQueued = true
+		}
+
+		state, err := c.fetchReviewDocsState(repo.ID, refresh)
+		if err != nil {
+			if !syncQueued {
+				queues.RepoSync = append(queues.RepoSync, workflowRepoSyncQueueItem{
+					RepositoryID:     repo.ID,
+					Repository:       repoName,
+					Status:           repoSyncStatusFromError(err),
+					Healthy:          false,
+					Message:          err.Error(),
+					RemediateCommand: repoRemediationCommand(repo.ID, err.Error()),
+					ValidateCommand:  "hermitctl repo validate " + shellQuote(repo.ID),
+				})
+			}
+			continue
+		}
+		queues.Summary.RepositoriesLoaded++
+		for _, doc := range state.Documents {
+			queues.Documents = append(queues.Documents, workflowDocumentQueueItem{
+				RepositoryID:  repo.ID,
+				Repository:    repoName,
+				PRNumber:      doc.PRNumber,
+				DocumentType:  firstNonEmpty(doc.DocumentType, "document"),
+				Title:         doc.Title,
+				Path:          doc.Path,
+				ReviewCommand: reviewCommand(repo.ID, doc.PRNumber),
+			})
+		}
+		for _, pr := range state.PullRequests {
+			queues.PullRequests = append(queues.PullRequests, workflowPRQueueItem{
+				RepositoryID:  repo.ID,
+				Repository:    repoName,
+				Number:        pr.Number,
+				Title:         pr.Title,
+				Status:        workflowPRStatus(pr),
+				State:         pr.State,
+				Merged:        pr.Merged,
+				MergeState:    pr.MergeState,
+				Documents:     len(pr.Documents),
+				HTMLURL:       pr.HTMLURL,
+				ReviewCommand: reviewCommand(repo.ID, pr.Number),
+				StatusCommand: "hermitctl review merge-status " + shellQuote(repo.ID) + " " + strconv.Itoa(pr.Number),
+			})
+		}
+	}
+
+	sort.Slice(queues.Documents, func(i, j int) bool {
+		if queues.Documents[i].Repository != queues.Documents[j].Repository {
+			return queues.Documents[i].Repository < queues.Documents[j].Repository
+		}
+		if queues.Documents[i].PRNumber != queues.Documents[j].PRNumber {
+			return queues.Documents[i].PRNumber < queues.Documents[j].PRNumber
+		}
+		return queues.Documents[i].Path < queues.Documents[j].Path
+	})
+	sort.Slice(queues.PullRequests, func(i, j int) bool {
+		if queues.PullRequests[i].Status != queues.PullRequests[j].Status {
+			return workflowPRStatusOrder(queues.PullRequests[i].Status) < workflowPRStatusOrder(queues.PullRequests[j].Status)
+		}
+		if queues.PullRequests[i].Repository != queues.PullRequests[j].Repository {
+			return queues.PullRequests[i].Repository < queues.PullRequests[j].Repository
+		}
+		return queues.PullRequests[i].Number < queues.PullRequests[j].Number
+	})
+	sort.Slice(queues.RepoSync, func(i, j int) bool {
+		if queues.RepoSync[i].Status != queues.RepoSync[j].Status {
+			return queues.RepoSync[i].Status < queues.RepoSync[j].Status
+		}
+		return queues.RepoSync[i].Repository < queues.RepoSync[j].Repository
+	})
+
+	queues.Summary.Documents = len(queues.Documents)
+	queues.Summary.PullRequests = len(queues.PullRequests)
+	queues.Summary.RepoSync = len(queues.RepoSync)
+	return queues, nil
+}
+
+func printWorkflowQueues(w io.Writer, queues workflowQueues, queueName string) {
+	fmt.Fprintf(w, "repositories: %d loaded / %d configured\n", queues.Summary.RepositoriesLoaded, queues.Summary.Repositories)
+	fmt.Fprintf(w, "queues: %d documents, %d PRs, %d repo sync\n", queues.Summary.Documents, queues.Summary.PullRequests, queues.Summary.RepoSync)
+	if queueName == "all" || queueName == "documents" || queueName == "docs" {
+		fmt.Fprintln(w, "\nDOCUMENT QUEUE")
+		if len(queues.Documents) == 0 {
+			fmt.Fprintln(w, "none")
+		}
+		for _, item := range queues.Documents {
+			fmt.Fprintf(w, "%s\tPR #%d\t%s\t%s\t%s\n", item.Repository, item.PRNumber, item.DocumentType, item.Path, item.ReviewCommand)
+		}
+	}
+	if queueName == "all" || queueName == "prs" || queueName == "pull-requests" {
+		fmt.Fprintln(w, "\nPR STATUS QUEUE")
+		if len(queues.PullRequests) == 0 {
+			fmt.Fprintln(w, "none")
+		}
+		for _, item := range queues.PullRequests {
+			fmt.Fprintf(w, "%s\tPR #%d\t%s\t%d docs\t%s\t%s\n", item.Repository, item.Number, item.Status, item.Documents, item.Title, item.StatusCommand)
+		}
+	}
+	if queueName == "all" || queueName == "repo-sync" || queueName == "sync" || queueName == "repositories" {
+		fmt.Fprintln(w, "\nREPO SYNC QUEUE")
+		if len(queues.RepoSync) == 0 {
+			fmt.Fprintln(w, "none")
+		}
+		for _, item := range queues.RepoSync {
+			message := item.Message
+			if message == "" {
+				message = item.LastErrorCode
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", item.Repository, item.Status, message, item.RemediateCommand)
+		}
+	}
+}
+
+func workflowPRStatus(pr reviewDocsPR) string {
+	if pr.Merged {
+		return "merged"
+	}
+	if strings.EqualFold(pr.State, "closed") {
+		return "closed"
+	}
+	state := strings.TrimSpace(strings.ToLower(pr.MergeState))
+	if strings.Contains(state, "dirty") || strings.Contains(state, "conflict") {
+		return "conflicted"
+	}
+	switch state {
+	case "unstable":
+		return "ci_failed"
+	case "clean":
+		return "ready_to_land"
+	case "blocked", "behind", "unknown", "has_hooks", "":
+		return "needs_review"
+	default:
+		return "needs_review"
+	}
+}
+
+func workflowPRStatusOrder(status string) int {
+	switch status {
+	case "ci_failed":
+		return 10
+	case "conflicted":
+		return 20
+	case "needs_review":
+		return 30
+	case "ready_to_land":
+		return 40
+	case "closed", "merged":
+		return 50
+	default:
+		return 60
+	}
+}
+
+func repoSyncStatus(validation validationResponse) string {
+	message := validation.LastErrorCode + " " + validationMessage(validation)
+	if isAuthLike(message) {
+		return "authentication_required"
+	}
+	if validation.Healthy {
+		return "healthy"
+	}
+	return "validation_failed"
+}
+
+func repoSyncStatusFromError(err error) string {
+	message := err.Error()
+	if isAuthLike(message) {
+		return "authentication_required"
+	}
+	if strings.Contains(strings.ToLower(message), "403") || strings.Contains(strings.ToLower(message), "denied") {
+		return "access_denied"
+	}
+	return "refresh_failed"
+}
+
+func validationMessage(validation validationResponse) string {
+	for _, check := range validation.Checks {
+		if !strings.EqualFold(check.Status, "ok") && strings.TrimSpace(check.Message) != "" {
+			return check.Message
+		}
+	}
+	return ""
+}
+
+func repoRemediationCommand(repoID, message string) string {
+	if isAuthLike(message) {
+		return "hermitctl repo rotate-token " + shellQuote(repoID)
+	}
+	return "hermitctl repo validate " + shellQuote(repoID)
+}
+
+func reviewCommand(repoID string, prNumber int) string {
+	return "hermitctl repo review-docs --expect-pr " + strconv.Itoa(prNumber) + " " + shellQuote(repoID)
+}
+
+func isAuthLike(message string) bool {
+	normalized := strings.ToLower(message)
+	return strings.Contains(normalized, "auth") ||
+		strings.Contains(normalized, "credential") ||
+		strings.Contains(normalized, "token") ||
+		strings.Contains(normalized, "401")
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	if strings.IndexFunc(value, func(r rune) bool {
+		return !(r == '-' || r == '_' || r == '.' || r == '/' || r == ':' || r == '@' ||
+			(r >= '0' && r <= '9') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= 'a' && r <= 'z'))
+	}) == -1 {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func (c cli) reviewStart(args []string, stdout, stderr io.Writer) error {
@@ -2296,7 +2652,7 @@ func printJSON(w io.Writer, value any) error {
 
 func usage(w io.Writer) {
 	fmt.Fprintln(w, "usage: hermitctl [--addr URL|HOST:PORT] [--config path] [--json] <command>")
-	fmt.Fprintln(w, "commands: health, logs, repo, review, token")
+	fmt.Fprintln(w, "commands: health, logs, repo, review, token, workflow")
 }
 
 func repoUsage(w io.Writer) {
@@ -2308,6 +2664,12 @@ func repoUsage(w io.Writer) {
 func reviewUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: hermitctl review <command>")
 	fmt.Fprintln(w, "commands: start, state, list, merge-status, approve, request-changes, dismiss, update-branch, accept, merge, ci-status")
+}
+
+func workflowUsage(w io.Writer) {
+	fmt.Fprintln(w, "usage: hermitctl workflow <command>")
+	fmt.Fprintln(w, "commands: queues")
+	fmt.Fprintln(w, "queues flags: --queue all|documents|prs|repo-sync --refresh --validate")
 }
 
 func min(a, b int) int {

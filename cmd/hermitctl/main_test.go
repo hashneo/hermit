@@ -67,6 +67,53 @@ func TestRepoReviewDocsExpectationFailure(t *testing.T) {
 	}
 }
 
+func TestWorkflowQueuesExposeCrossRepoRemediation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/repositories":
+			_, _ = w.Write([]byte(`{
+				"items": [
+					{"id":"repo-1","owner":"acme","name":"docs","registry":"github","validation":{"healthy":true,"checks":[]}},
+					{"id":"repo-2","owner":"acme","name":"bad","registry":"github","validation":{"healthy":false,"last_error_code":"bad_credentials","checks":[{"name":"auth","status":"failed","message":"Bad credentials"}]}}
+				],
+				"total": 2
+			}`))
+		case "/api/v1/repositories/repo-1/rfcs":
+			_, _ = w.Write([]byte(`{
+				"items": [
+					{"id":"pr:7:docs-cms/rfcs/rfc-001.md","title":"Plan","path":"docs-cms/rfcs/rfc-001.md","source_type":"pull_request","pr_number":7,"pr_title":"docs: plan","pr_state":"open","mergeable_state":"unstable","document_type":"rfc","changed_files":2,"additions":10,"deletions":1,"html_url":"https://example.test/pr/7"}
+				],
+				"total": 1,
+				"summary": {"pending_review_count":1,"open_pr_count":1,"pr_states":{"ready":0,"conflicted":0,"failed":1,"needs_review":0}}
+			}`))
+		case "/api/v1/repositories/repo-2/rfcs":
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"code":"bad_credentials","message":"Bad credentials"}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"--addr", server.URL, "workflow", "queues"}, strings.NewReader(""), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run returned error: %v; stderr=%s", err, stderr.String())
+	}
+	output := stdout.String()
+	for _, expected := range []string{
+		"repositories: 1 loaded / 2 configured",
+		"acme/docs\tPR #7\trfc\tdocs-cms/rfcs/rfc-001.md\thermitctl repo review-docs --expect-pr 7 repo-1",
+		"acme/docs\tPR #7\tci_failed\t1 docs\tdocs: plan\thermitctl review merge-status repo-1 7",
+		"acme/bad\tauthentication_required\tBad credentials\thermitctl repo rotate-token repo-2",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected %q in output:\n%s", expected, output)
+		}
+	}
+}
+
 func TestLogsPrintsErrorEntries(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/logs" {

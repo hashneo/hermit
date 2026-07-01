@@ -507,11 +507,20 @@ struct MenuBarContentView: View {
     private var aggregatePRStatsFreshness: PRStatsFreshness {
         let states = displayedRepos.compactMap { dashboardStore.state(for: $0.id) }
         let loadedStates = states.filter { $0.prStatsLoadedAt != nil && !$0.isLoading && $0.issue == nil }
+        let failedStates = states.filter { $0.issue != nil }
+        let authFailureCount = failedStates.filter { state in
+            guard let issue = state.issue else { return false }
+            return isRepositoryAuthenticationIssue(issue)
+        }.count
+        let pendingRepositoryCount = max(displayedRepos.count - loadedStates.count - failedStates.count, 0)
         let newestLoadedAt = loadedStates.compactMap(\.prStatsLoadedAt).max()
-        let isLoading = displayedRepos.count != loadedStates.count || states.contains { $0.isLoading }
+        let isLoading = pendingRepositoryCount > 0 || states.contains { $0.isLoading }
         return PRStatsFreshness(
             loadedRepositoryCount: loadedStates.count,
             totalRepositoryCount: displayedRepos.count,
+            failedRepositoryCount: failedStates.count,
+            authFailureCount: authFailureCount,
+            pendingRepositoryCount: pendingRepositoryCount,
             newestLoadedAt: newestLoadedAt,
             isLoading: isLoading
         )
@@ -1649,6 +1658,8 @@ private struct PRReviewSection: View {
 }
 
 private struct PRReviewSummaryRow: View {
+    @Environment(\.openURL) private var openURL
+
     let group: PendingPRGroup
     var showsRepository = false
     let onOpen: (PendingPRGroup) -> Void
@@ -1656,6 +1667,7 @@ private struct PRReviewSummaryRow: View {
 
     var body: some View {
         let pr = group.pr
+        let descriptor = PRStateDescriptor.describe(pr)
         let description = prDescriptionContent(pr.body)
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
@@ -1675,7 +1687,7 @@ private struct PRReviewSummaryRow: View {
 
                     Spacer(minLength: 8)
 
-                    PRMergeStateBadge(pr: pr)
+                    PRMergeStateBadge(descriptor: descriptor)
                 }
 
                 Text(metadataText(pr))
@@ -1711,7 +1723,41 @@ private struct PRReviewSummaryRow: View {
             }
             .layoutPriority(1)
 
-            HStack(spacing: 6) {
+            HStack(alignment: .center, spacing: 6) {
+                Button {
+                    openPR(pr)
+                } label: {
+                    Image(systemName: "arrow.up.right.square")
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(prURL(pr) == nil)
+                .help(prURL(pr) == nil ? "Pull request URL is unavailable" : "Open pull request in browser")
+
+                Menu {
+                    Button {
+                        onOpen(group)
+                    } label: {
+                        Label("Review docs", systemImage: "doc.text.magnifyingglass")
+                    }
+                    if prURL(pr) != nil {
+                        Button {
+                            openPR(pr)
+                        } label: {
+                            Label("Open pull request", systemImage: "arrow.up.right.square")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "chevron.down.circle")
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 18, height: 18)
+                }
+                .menuStyle(.borderlessButton)
+                .controlSize(.small)
+                .help("Jump to review actions")
+
                 Button {
                     onOpen(group)
                 } label: {
@@ -1725,10 +1771,19 @@ private struct PRReviewSummaryRow: View {
             .fixedSize()
         }
         .padding(10)
+        .padding(.leading, descriptor.attentionTint == nil ? 0 : 5)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondary.opacity(0.035))
+        .overlay(alignment: .leading) {
+            if let tint = descriptor.attentionTint {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(tint)
+                    .frame(width: 3)
+                    .padding(.vertical, 8)
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .help("Open pull request")
+        .help(descriptor.help)
     }
 
     private func prTitle(_ pr: RFCPullRequest) -> String {
@@ -1753,6 +1808,14 @@ private struct PRReviewSummaryRow: View {
         return "\(contextText(pr)) · \(group.documentCount) docs · \(changedFiles(pr)) files · +\(pr.additions)/-\(pr.deletions) · \(commentText)"
     }
 
+    private func prURL(_ pr: RFCPullRequest) -> URL? {
+        URL(string: pr.htmlURL.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private func openPR(_ pr: RFCPullRequest) {
+        guard let url = prURL(pr) else { return }
+        openURL(url)
+    }
 }
 
 private struct PRDescriptionContent {
@@ -2323,15 +2386,24 @@ private struct PRStateSummaryStrip: View {
 private struct PRStatsFreshness {
     let loadedRepositoryCount: Int
     let totalRepositoryCount: Int
+    let failedRepositoryCount: Int
+    let authFailureCount: Int
+    let pendingRepositoryCount: Int
     let newestLoadedAt: Date?
     let isLoading: Bool
 
     var label: String {
+        if authFailureCount > 0 {
+            return "\(loadedRepositoryCount)/\(totalRepositoryCount) loaded • \(authFailureCount) need authentication"
+        }
+        if failedRepositoryCount > 0 {
+            return "\(loadedRepositoryCount)/\(totalRepositoryCount) loaded • \(failedRepositoryCount) failed"
+        }
         if loadedRepositoryCount == 0 {
             return isLoading ? "Calculating from source of truth" : "PR stats not loaded"
         }
         if isLoading {
-            return "Refreshing from source of truth • \(loadedRepositoryCount)/\(totalRepositoryCount) repos"
+            return "Refreshing \(pendingRepositoryCount) repos • \(loadedRepositoryCount)/\(totalRepositoryCount) loaded"
         }
         if loadedRepositoryCount < totalRepositoryCount {
             return "Partial PR stats • \(loadedRepositoryCount)/\(totalRepositoryCount) repos"
@@ -2346,6 +2418,9 @@ private struct PRStatsFreshness {
     }
 
     var tint: Color {
+        if authFailureCount > 0 || failedRepositoryCount > 0 {
+            return .orange
+        }
         if loadedRepositoryCount == 0 || loadedRepositoryCount < totalRepositoryCount {
             return .secondary
         }
@@ -2353,6 +2428,8 @@ private struct PRStatsFreshness {
     }
 
     var systemImage: String {
+        if authFailureCount > 0 { return "key.slash" }
+        if failedRepositoryCount > 0 { return "exclamationmark.triangle" }
         if isLoading { return "arrow.triangle.2.circlepath" }
         if loadedRepositoryCount == 0 || loadedRepositoryCount < totalRepositoryCount { return "clock" }
         return "checkmark.circle"
@@ -2392,8 +2469,17 @@ private struct AllRepositoriesSection: View {
 
     private var statusText: String {
         let loaded = "\(loadedCount) of \(repoCount) repositories loaded"
+        if prStatsFreshness.authFailureCount > 0 {
+            let prefix = prStatsFreshness.authFailureCount > max(repoCount / 2, 0)
+                ? "Most repositories need authentication"
+                : "\(prStatsFreshness.authFailureCount) repositories need authentication"
+            return "\(prefix) · \(loaded)"
+        }
+        if prStatsFreshness.failedRepositoryCount > 0 {
+            return "\(loaded) · \(prStatsFreshness.failedRepositoryCount) failed"
+        }
         if prStatsFreshness.isLoading {
-            return "\(loaded) · refreshing"
+            return "\(loaded) · refreshing \(prStatsFreshness.pendingRepositoryCount)"
         }
         if let newestLoadedAt = prStatsFreshness.newestLoadedAt {
             let formatter = RelativeDateTimeFormatter()
@@ -2721,7 +2807,15 @@ private struct ReviewDocumentsCallToAction: View {
 }
 
 private struct PRMergeStateBadge: View {
-    let pr: RFCPullRequest
+    let descriptor: PRStateDescriptor
+
+    init(pr: RFCPullRequest) {
+        descriptor = PRStateDescriptor.describe(pr)
+    }
+
+    init(descriptor: PRStateDescriptor) {
+        self.descriptor = descriptor
+    }
 
     var body: some View {
         StatusBadge(
@@ -2733,8 +2827,6 @@ private struct PRMergeStateBadge: View {
         )
             .fixedSize()
     }
-
-    private var descriptor: PRStateDescriptor { PRStateDescriptor.describe(pr) }
 }
 
 private struct PRStateDescriptor {
@@ -2744,18 +2836,31 @@ private struct PRStateDescriptor {
     let help: String
     let sortOrder: Int
 
+    var attentionTint: Color? {
+        switch title {
+        case "CI failed", "Conflicted":
+            return .red
+        case "Needs review":
+            return .orange
+        case "Ready to land":
+            return .green
+        default:
+            return nil
+        }
+    }
+
     static let conflictedAggregate = aggregate(
         title: "Conflicted",
         help: "Open PRs that are not mergeable or report a conflict state.",
         sortOrder: 10
     )
     static let failedAggregate = aggregate(
-        title: "Failed",
+        title: "CI failed",
         help: "Open PRs with failing or unstable checks.",
         sortOrder: 20
     )
     static let readyAggregate = aggregate(
-        title: "Ready",
+        title: "Ready to land",
         help: "Open PRs that are currently mergeable.",
         sortOrder: 30
     )
@@ -2797,20 +2902,20 @@ private struct PRStateDescriptor {
 
         switch normalizedState {
         case "clean":
-            return descriptor(title: "Ready", rawState: pr.mergeableState, sortOrder: 30)
+            return descriptor(title: "Ready to land", rawState: pr.mergeableState, sortOrder: 30)
         case "blocked":
             return descriptor(title: "Needs review", rawState: pr.mergeableState, sortOrder: 40)
         case "behind":
             return descriptor(title: "Needs review", rawState: pr.mergeableState, sortOrder: 40)
         case "unstable":
-            return descriptor(title: "Failed", rawState: pr.mergeableState, sortOrder: 20)
+            return descriptor(title: "CI failed", rawState: pr.mergeableState, sortOrder: 20)
         case "has_hooks":
             return descriptor(title: "Needs review", rawState: pr.mergeableState, sortOrder: 40)
         case "unknown":
             return descriptor(title: "Needs review", rawState: pr.mergeableState, sortOrder: 40)
         default:
             if pr.mergeable == true {
-                return descriptor(title: "Ready", rawState: pr.mergeableState, sortOrder: 30)
+                return descriptor(title: "Ready to land", rawState: pr.mergeableState, sortOrder: 30)
             }
             if pr.mergeable == false {
                 return descriptor(title: "Conflicted", rawState: pr.mergeableState, sortOrder: 10)
@@ -2822,7 +2927,16 @@ private struct PRStateDescriptor {
     private static func descriptor(title: String, rawState: String?, sortOrder: Int) -> PRStateDescriptor {
         let help: String
         if let rawState, !rawState.isEmpty {
-            help = "Provider merge state: \(rawState)"
+            switch title {
+            case "CI failed":
+                help = "Checks are failing or unstable. Provider merge state: \(rawState)"
+            case "Ready to land":
+                help = "Pull request is mergeable. Provider merge state: \(rawState)"
+            case "Needs review":
+                help = "Pull request needs review or merge-state resolution. Provider merge state: \(rawState)"
+            default:
+                help = "Provider merge state: \(rawState)"
+            }
         } else {
             help = "Provider merge state is not available yet."
         }
@@ -2848,11 +2962,11 @@ private struct PRStateDescriptor {
 
     private static func systemImage(for title: String) -> String {
         switch title {
-        case "Ready":
+        case "Ready to land":
             return "checkmark.circle.fill"
         case "Conflicted":
             return "exclamationmark.triangle.fill"
-        case "Failed":
+        case "CI failed":
             return "xmark.octagon.fill"
         case "Needs review":
             return "clock.fill"
@@ -2863,14 +2977,14 @@ private struct PRStateDescriptor {
 
     private static func tint(for title: String) -> Color {
         switch title {
-        case "Ready":
-            return .secondary
+        case "Ready to land":
+            return .green
         case "Conflicted":
             return .red
-        case "Failed":
-            return .orange
+        case "CI failed":
+            return .red
         case "Needs review":
-            return .secondary
+            return .orange
         default:
             return .secondary
         }
@@ -3734,6 +3848,14 @@ private struct MenuBarIssue: Equatable {
         }
         return "\(title): \(message)"
     }
+}
+
+private func isRepositoryAuthenticationIssue(_ issue: MenuBarIssue) -> Bool {
+    let searchable = "\(issue.title) \(issue.shortTitle) \(issue.message) \(issue.recovery ?? "")".lowercased()
+    return searchable.contains("auth")
+        || searchable.contains("credential")
+        || searchable.contains("token")
+        || searchable.contains("bad credentials")
 }
 
 private func menuIssue(for error: Error) -> MenuBarIssue {
