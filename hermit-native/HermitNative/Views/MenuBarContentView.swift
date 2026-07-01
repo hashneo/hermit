@@ -21,7 +21,7 @@ struct MenuBarContentView: View {
     @StateObject private var dashboardStore = MenuBarDashboardStore()
     @State private var selectedRepoID: UUID? = nil
     @State private var repoSort: RepoSortOption = .reviewCount
-    @State private var repoFilter: RepoFilterOption = .pendingReview
+    @State private var repoFilter: RepoFilterOption = .all
     @State private var selectedView: MenuBarPrimaryView = .dashboard
     @State private var menuAnchor = MenuBarBubbleAnchor.capture()
     @State private var pointerX = MenuBarBubbleWindowController.fallbackPointerX
@@ -299,15 +299,17 @@ struct MenuBarContentView: View {
 
     private var repoColumn: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
                     Text("Repositories")
                         .font(.headline)
-                    Text("Select a repo")
-                        .font(.caption)
+                    Spacer()
+                    Text("\(displayedRepos.count)")
+                        .font(.caption.weight(.semibold))
+                        .monospacedDigit()
                         .foregroundStyle(.secondary)
                 }
-                .padding(.bottom, 2)
+                .padding(.bottom, 1)
 
                 RepositoryTopRail(
                     repoCount: displayedRepos.count,
@@ -355,11 +357,6 @@ struct MenuBarContentView: View {
                         emptyText: "No repositories currently contain reviewable docs-cms documents.",
                         onSelectRepo: { repo in selectedRepoID = repo.id },
                         onOpen: { group in open(group.primaryRFC, in: group.repo) }
-                    )
-                    PRStateSummarySection(
-                        title: "PR states",
-                        items: pendingRFCItems,
-                        emptyText: "No pull request state data is available yet."
                     )
                 } else if let repo = selectedRepo {
                     SelectedRepoSection(
@@ -820,6 +817,17 @@ private enum RepoFilterOption: String, CaseIterable, Identifiable {
     case needsAttention = "Needs attention"
 
     var id: String { rawValue }
+
+    var shortTitle: String {
+        switch self {
+        case .all:
+            return "All"
+        case .pendingReview:
+            return "Pending"
+        case .needsAttention:
+            return "Attention"
+        }
+    }
 }
 
 private struct CompactAllRepositoriesSummary: View {
@@ -938,7 +946,7 @@ private struct PairingInviteBanner: View {
 }
 
 private struct RepositoryTopRail: View {
-    private static let rowHeight: CGFloat = 66
+    private static let rowHeight: CGFloat = 44
 
     let repoCount: Int
     let pendingReviewCount: Int
@@ -950,29 +958,27 @@ private struct RepositoryTopRail: View {
 
     var body: some View {
         Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Label("All repositories", systemImage: "tray.full")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
+            HStack(alignment: .center, spacing: 8) {
+                Label("All", systemImage: "tray.full")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
 
-                    Spacer(minLength: 6)
+                Text("\(pendingReviewCount) docs")
+                    .font(.caption2.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(pendingReviewCount > 0 ? .primary : .secondary)
+                    .fixedSize()
 
-                    ReviewQueueCallToAction(
-                        value: pendingReviewCount,
-                        help: "Open docs-cms documents waiting for review across all repositories"
-                    )
-                    RepoMetricBadge(
-                        systemImage: "arrow.triangle.pull",
-                        title: "PR",
-                        value: openPRCount,
-                        tint: .secondary,
-                        help: "Open pull requests with docs-cms review documents across all repositories"
-                    )
-                }
+                Text("\(openPRCount) PRs")
+                    .font(.caption2.weight(.medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
 
-                HStack(spacing: 6) {
+                Spacer(minLength: 6)
+
+                HStack(spacing: 4) {
                     Menu {
                         Picker("Sort", selection: $sort) {
                             ForEach(RepoSortOption.allCases) { option in
@@ -980,7 +986,7 @@ private struct RepositoryTopRail: View {
                             }
                         }
                     } label: {
-                        Label(sort.rawValue, systemImage: "arrow.up.arrow.down")
+                        Label("Sort", systemImage: "arrow.up.arrow.down")
                             .font(.caption2)
                     }
                     .menuStyle(.borderlessButton)
@@ -992,23 +998,21 @@ private struct RepositoryTopRail: View {
                             }
                         }
                     } label: {
-                        Label(filter.rawValue, systemImage: "line.3.horizontal.decrease.circle")
+                        Label(filter.shortTitle, systemImage: "line.3.horizontal.decrease.circle")
                             .font(.caption2)
                     }
                     .menuStyle(.borderlessButton)
-
-                    StatusBadge(title: "\(repoCount) repos", tint: .secondary, compact: true, help: "Configured repositories")
                 }
+                .fixedSize(horizontal: true, vertical: false)
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
             .frame(height: Self.rowHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.10) : Color.secondary.opacity(0.06))
+            .background(isSelected ? Color.secondary.opacity(0.12) : Color.secondary.opacity(0.05))
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(isSelected ? Color.accentColor : Color.secondary.opacity(0.12), lineWidth: isSelected ? 1.5 : 1)
+                    .strokeBorder(isSelected ? Color.primary.opacity(0.24) : Color.secondary.opacity(0.10), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -1017,7 +1021,7 @@ private struct RepositoryTopRail: View {
 }
 
 private struct RepoFilterRow: View {
-    private static let rowHeight: CGFloat = 72
+    private static let rowHeight: CGFloat = 54
 
     let repo: Repository
     let state: MenuBarDashboardStore.RepoState?
@@ -1027,8 +1031,8 @@ private struct RepoFilterRow: View {
 
     var body: some View {
         Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(repo.fullName)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.primary)
@@ -1037,37 +1041,27 @@ private struct RepoFilterRow: View {
                         .help(repo.fullName)
                         .layoutPriority(1)
 
-                    Spacer(minLength: 6)
-
-                    if isActive {
-                        StatusBadge(title: "Default", tint: .green, compact: true, help: "Default repository for new Hermit actions")
-                    }
-                }
-
-                HStack(alignment: .center, spacing: 6) {
                     Text(summaryText)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                }
+                .layoutPriority(1)
 
-                    Spacer(minLength: 6)
+                Spacer(minLength: 6)
 
-                    HStack(spacing: 5) {
-                        RepoSyncIndicator(isLoading: state?.isLoading == true)
-                        ReviewQueueCallToAction(
-                            value: state?.pendingReviewCount ?? 0,
-                            help: "Open docs-cms documents waiting for review"
-                        )
-                        RepoMetricBadge(
-                            systemImage: "arrow.triangle.pull",
-                            title: "PR",
-                            value: state?.openPRCount ?? 0,
-                            tint: .secondary,
-                            help: "Open pull requests with docs-cms review documents"
-                        )
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
+                if state?.isLoading == true {
+                    ProgressView()
+                        .controlSize(.small)
+                        .help("Refreshing repository RFCs")
+                }
+
+                if isActive {
+                    Text("Default")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
                 }
             }
             .padding(.horizontal, 10)
@@ -1077,7 +1071,7 @@ private struct RepoFilterRow: View {
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(isSelected ? Color.accentColor : Color.secondary.opacity(0.12), lineWidth: isSelected ? 1.5 : 1)
+                    .strokeBorder(isSelected ? Color.primary.opacity(0.24) : Color.secondary.opacity(0.10), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -1091,14 +1085,14 @@ private struct RepoFilterRow: View {
         if state?.isLoading == true && state?.allRFCs.isEmpty != false {
             return "Loading..."
         }
-        return "\(state?.pendingReviewCount ?? 0) waiting, \(state?.openPRCount ?? 0) PRs"
+        return "\(state?.pendingReviewCount ?? 0) docs · \(state?.openPRCount ?? 0) PRs"
     }
 
     private var background: Color {
         if isSelected {
-            return Color.accentColor.opacity(0.10)
+            return Color.secondary.opacity(0.12)
         }
-        return Color.secondary.opacity(0.06)
+        return Color.secondary.opacity(0.04)
     }
 }
 
@@ -1358,32 +1352,28 @@ private struct RepositoryReviewBucketsSection: View {
     let onOpen: (PendingPRGroup) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Repository breakdown")
-                        .font(.headline)
-                    Text("\(totalDocumentCount) documents across \(totalPRCount) pull requests")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
+                Text("Repositories with review work")
+                    .font(.headline)
                 Spacer()
-                if buckets.contains(where: \.isLoading) {
-                    StatusCapsule(title: "Calculating", systemImage: "arrow.triangle.2.circlepath", tint: .secondary)
-                }
+                Text("\(visibleBuckets.count)")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
             }
 
-            if buckets.isEmpty {
+            if visibleBuckets.isEmpty {
                 Text(emptyText)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .padding(14)
+                    .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.secondary.opacity(0.06))
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(Color.secondary.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             } else {
-                VStack(spacing: 12) {
-                    ForEach(buckets) { bucket in
+                VStack(spacing: 8) {
+                    ForEach(visibleBuckets) { bucket in
                         RepositoryReviewBucketCard(
                             bucket: bucket,
                             onSelectRepo: onSelectRepo,
@@ -1394,6 +1384,12 @@ private struct RepositoryReviewBucketsSection: View {
             }
         }
     }
+
+    private var visibleBuckets: [RepositoryReviewBucket] {
+        buckets.filter { bucket in
+            bucket.documentCount > 0 || bucket.issue != nil
+        }
+    }
 }
 
 private struct RepositoryReviewBucketCard: View {
@@ -1402,7 +1398,7 @@ private struct RepositoryReviewBucketCard: View {
     let onOpen: (PendingPRGroup) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Button {
                 onSelectRepo(bucket.repo)
             } label: {
@@ -1412,33 +1408,33 @@ private struct RepositoryReviewBucketCard: View {
 
             if let issue = bucket.issue {
                 Label(issue.title, systemImage: issue.systemImage)
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(issue.tint)
-                    .padding(12)
+                    .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(issue.tint.opacity(0.06))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             } else if bucket.groups.isEmpty {
                 Text(bucket.isLoading ? "Calculating this repository from the cached basis..." : "No review documents waiting in this repository.")
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .padding(12)
+                    .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.secondary.opacity(0.05))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             } else {
-                VStack(spacing: 10) {
+                VStack(spacing: 6) {
                     ForEach(bucket.groups) { group in
                         PRReviewSummaryRow(group: group, onOpen: onOpen)
                     }
                 }
             }
         }
-        .padding(12)
+        .padding(10)
         .background(Color.secondary.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(Color.secondary.opacity(0.10), lineWidth: 1)
         )
     }
@@ -1447,7 +1443,6 @@ private struct RepositoryReviewBucketCard: View {
 private struct RepositoryBucketHeader: View {
     let bucket: RepositoryReviewBucket
     var compact = false
-    @Environment(\.openURL) private var openURL
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
@@ -1471,32 +1466,12 @@ private struct RepositoryBucketHeader: View {
                     .controlSize(.small)
                     .help("Refreshing from source of truth")
             }
-            HStack(spacing: 8) {
-                RepositoryBucketMetric(
-                    value: bucket.documentCount,
-                    label: compact ? "docs" : "docs waiting",
-                    systemImage: "doc.text",
-                    tint: .orange,
-                    compact: compact
-                )
-                RepositoryBucketMetric(
-                    value: bucket.prCount,
-                    label: compact ? "PRs" : "open PRs",
-                    systemImage: "arrow.triangle.pull",
-                    tint: .blue,
-                    compact: compact,
-                    trailingSystemImage: prURL == nil ? nil : "arrow.up.right.square",
-                    action: prURL.map { url in
-                        { openURL(url) }
-                    }
-                )
-            }
-            .fixedSize(horizontal: true, vertical: false)
+            Text("\(bucket.documentCount) docs · \(bucket.prCount) PRs")
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .fixedSize()
         }
-    }
-
-    private var prURL: URL? {
-        repositoryPullRequestsURL(for: bucket.repo)
     }
 }
 
@@ -1631,53 +1606,49 @@ private struct PRReviewSummaryRow: View {
 
     var body: some View {
         let pr = group.pr
-        VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    ProminentPRBadge(pr: pr)
+                    Text("#\(pr.number)")
+                        .font(.caption.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+
                     Text(prTitle(pr))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
+                        .truncationMode(.tail)
+                        .layoutPriority(1)
+
                     Spacer(minLength: 8)
+
                     PRMergeStateBadge(pr: pr)
                 }
 
-                HStack(spacing: 6) {
-                    DocumentMixStrip(counts: group.documentTypeCounts)
-                }
-
-                PRMetricStrip(items: [
-                    PRMetricItem(label: "Docs", value: "\(group.documentCount)", tint: .secondary),
-                    PRMetricItem(label: "Files", value: "\(changedFiles(pr))", tint: .secondary),
-                    PRMetricItem(label: "Added", value: "+\(pr.additions)", tint: .secondary),
-                    PRMetricItem(label: "Removed", value: "-\(pr.deletions)", tint: .secondary)
-                ])
-            }
-
-            if let summary = prDescriptionSummary(pr.body) {
-                Label(summary, systemImage: "text.alignleft")
+                Text(metadataText(pr))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .padding(.horizontal, 2)
+                    .truncationMode(.tail)
+
+                if let summary = prDescriptionSummary(pr.body) {
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
             }
+            .layoutPriority(1)
 
-            HStack(alignment: .center, spacing: 8) {
-                Text(contextText(pr))
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .layoutPriority(1)
-
-                PRCommentStatusBadge(issueCount: pr.issueCommentCount, reviewCount: pr.reviewCommentCount)
-
+            HStack(spacing: 6) {
                 if hasPRDescription(pr) {
                     Button {
                         isShowingDescription = true
                     } label: {
-                        Label("Description", systemImage: "doc.text.magnifyingglass")
-                            .font(.caption2.weight(.semibold))
+                        Image(systemName: "doc.text.magnifyingglass")
                     }
                     .buttonStyle(.borderless)
                     .controlSize(.small)
@@ -1687,16 +1658,19 @@ private struct PRReviewSummaryRow: View {
                 Button {
                     onOpen(group)
                 } label: {
-                    ReviewDocumentsCallToAction(documentCount: group.documentCount)
+                    Label("Review", systemImage: "arrow.right")
+                        .font(.caption.weight(.semibold))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
                 .help("Open review documents")
             }
+            .fixedSize()
         }
-        .padding(12)
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color.secondary.opacity(0.035))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .help("Open pull request")
         .popover(isPresented: $isShowingDescription, arrowEdge: .trailing) {
             PRDescriptionPopover(pr: pr)
@@ -1717,6 +1691,12 @@ private struct PRReviewSummaryRow: View {
         let prefix = showsRepository ? "\(group.repo.fullName) • " : ""
         let branch = pr.headRef.isEmpty ? "unknown branch" : pr.headRef
         return "\(prefix)\(branch)"
+    }
+
+    private func metadataText(_ pr: RFCPullRequest) -> String {
+        let comments = pr.issueCommentCount + pr.reviewCommentCount
+        let commentText = comments == 1 ? "1 comment" : "\(comments) comments"
+        return "\(contextText(pr)) · \(group.documentCount) docs · \(changedFiles(pr)) files · +\(pr.additions)/-\(pr.deletions) · \(commentText)"
     }
 
     private func hasPRDescription(_ pr: RFCPullRequest) -> Bool {
@@ -2244,37 +2224,88 @@ private struct AllRepositoriesSection: View {
     let onRefresh: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Review workflow")
                         .font(.title3.weight(.semibold))
-                    Text("\(loadedCount) of \(repoCount) repositories loaded")
-                        .font(.subheadline)
+                    Text(statusText)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button(action: onRefresh) {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
             }
 
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text("\(pendingReviewCount)")
-                    .font(.largeTitle.weight(.semibold))
-                    .monospacedDigit()
-                Text(pendingReviewCount == 1 ? "document waiting for review" : "documents waiting for review")
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                Spacer(minLength: 8)
-                CountBadge(value: openPRCount, label: "open PRs", tint: .blue)
-                CountBadge(value: publishedCount, label: "published", tint: .secondary)
+            HStack(spacing: 10) {
+                DashboardMetricCard(
+                    title: "Documents",
+                    value: pendingReviewCount,
+                    detail: pendingReviewCount == 1 ? "waiting for review" : "waiting for review",
+                    attention: pendingReviewCount > 0
+                )
+                DashboardMetricCard(
+                    title: "Pull requests",
+                    value: openPRCount,
+                    detail: prSummaryText,
+                    attention: prStateSummaries.contains { $0.descriptor.sortOrder < PRStateDescriptor.readyAggregate.sortOrder }
+                )
             }
+        }
+    }
 
-            PRStateSummaryStrip(summaries: prStateSummaries)
-            PRStatsFreshnessRow(freshness: prStatsFreshness)
+    private var statusText: String {
+        let loaded = "\(loadedCount) of \(repoCount) repositories loaded"
+        if prStatsFreshness.isLoading {
+            return "\(loaded) · refreshing"
+        }
+        if let newestLoadedAt = prStatsFreshness.newestLoadedAt {
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .full
+            return "\(loaded) · updated \(formatter.localizedString(for: newestLoadedAt, relativeTo: Date()))"
+        }
+        return loaded
+    }
+
+    private var prSummaryText: String {
+        let summaries = prStateSummaries.map { "\($0.count) \($0.descriptor.title.lowercased())" }
+        if summaries.isEmpty {
+            return "no active PR state"
+        }
+        return summaries.joined(separator: " · ")
+    }
+}
+
+private struct DashboardMetricCard: View {
+    let title: String
+    let value: Int
+    let detail: String
+    var attention = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text("\(value)")
+                .font(.system(size: 34, weight: .semibold, design: .default))
+                .monospacedDigit()
+                .foregroundStyle(.primary)
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(alignment: .leading) {
+            if attention {
+                Rectangle()
+                    .fill(Color.orange.opacity(0.75))
+                    .frame(width: 3)
+            }
         }
     }
 }
@@ -2738,7 +2769,7 @@ private struct PRStateDescriptor {
     private static func tint(for title: String) -> Color {
         switch title {
         case "Ready":
-            return .green
+            return .secondary
         case "Conflicted":
             return .red
         case "Failed":
