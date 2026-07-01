@@ -265,11 +265,9 @@ struct MenuBarContentView: View {
                         serverStatusColor: serverStatusColor
                     )
 
-                    CompactRepositoryReviewBuckets(
-                        buckets: Array(repositoryReviewBuckets.prefix(5)),
-                        totalRepositoryCount: repositoryReviewBuckets.count,
-                        totalPRCount: pendingPRGroups.count,
-                        onSelectRepo: { repo in selectedRepoID = repo.id },
+                    CompactReviewQueue(
+                        groups: pendingPRGroups,
+                        totalCount: aggregatePendingReviewCount,
                         onOpen: { group in open(group.primaryRFC, in: group.repo) }
                     )
                 }
@@ -312,13 +310,16 @@ struct MenuBarContentView: View {
                 .padding(.bottom, 1)
 
                 RepositoryTopRail(
-                    repoCount: displayedRepos.count,
-                    pendingReviewCount: aggregatePendingReviewCount,
-                    openPRCount: aggregateOpenPRCount,
                     isSelected: selectedRepoID == nil,
                     sort: $repoSort,
                     filter: $repoFilter,
                     onSelect: { selectedRepoID = nil }
+                )
+
+                ExpandedDashboardSidebarStats(
+                    pendingReviewCount: aggregatePendingReviewCount,
+                    openPRCount: aggregateOpenPRCount,
+                    prStateSummaries: aggregatePRStateSummaries
                 )
 
                 ForEach(filteredOrderedRepos) { repo in
@@ -343,19 +344,13 @@ struct MenuBarContentView: View {
                     AllRepositoriesSection(
                         repoCount: displayedRepos.count,
                         loadedCount: loadedRepositoryCount,
-                        pendingReviewCount: aggregatePendingReviewCount,
-                        openPRCount: aggregateOpenPRCount,
-                        publishedCount: aggregatePublishedCount,
-                        prStateSummaries: aggregatePRStateSummaries,
-                        prStatsFreshness: aggregatePRStatsFreshness,
-                        onRefresh: { Task { await refreshDashboard(force: true) } }
+                        prStatsFreshness: aggregatePRStatsFreshness
                     )
-                    RepositoryReviewBucketsSection(
-                        buckets: repositoryReviewBuckets,
-                        totalPRCount: pendingPRGroups.count,
-                        totalDocumentCount: aggregatePendingReviewCount,
-                        emptyText: "No repositories currently contain reviewable docs-cms documents.",
-                        onSelectRepo: { repo in selectedRepoID = repo.id },
+                    PRReviewSection(
+                        title: "Review queue",
+                        groups: pendingPRGroups,
+                        emptyText: "No pull requests currently contain reviewable docs-cms documents.",
+                        showsRepository: true,
                         onOpen: { group in open(group.primaryRFC, in: group.repo) }
                     )
                 } else if let repo = selectedRepo {
@@ -948,9 +943,6 @@ private struct PairingInviteBanner: View {
 private struct RepositoryTopRail: View {
     private static let rowHeight: CGFloat = 44
 
-    let repoCount: Int
-    let pendingReviewCount: Int
-    let openPRCount: Int
     let isSelected: Bool
     @Binding var sort: RepoSortOption
     @Binding var filter: RepoFilterOption
@@ -963,18 +955,6 @@ private struct RepositoryTopRail: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
-
-                Text("\(pendingReviewCount) docs")
-                    .font(.caption2.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(pendingReviewCount > 0 ? .primary : .secondary)
-                    .fixedSize()
-
-                Text("\(openPRCount) PRs")
-                    .font(.caption2.weight(.medium))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
 
                 Spacer(minLength: 6)
 
@@ -1017,6 +997,66 @@ private struct RepositoryTopRail: View {
         }
         .buttonStyle(.plain)
         .frame(height: Self.rowHeight)
+    }
+}
+
+private struct ExpandedDashboardSidebarStats: View {
+    let pendingReviewCount: Int
+    let openPRCount: Int
+    let prStateSummaries: [PRStateSummary]
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                SidebarMetricCard(
+                    title: "Docs",
+                    value: pendingReviewCount,
+                    detail: "waiting",
+                    attention: pendingReviewCount > 0
+                )
+                SidebarMetricCard(
+                    title: "PRs",
+                    value: openPRCount,
+                    detail: "open",
+                    attention: prStateSummaries.contains { $0.descriptor.sortOrder < PRStateDescriptor.readyAggregate.sortOrder }
+                )
+            }
+        }
+    }
+}
+
+private struct SidebarMetricCard: View {
+    let title: String
+    let value: Int
+    let detail: String
+    var attention = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text("\(value)")
+                .font(.title2.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(.primary)
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(alignment: .leading) {
+            if attention {
+                Rectangle()
+                    .fill(Color.orange.opacity(0.75))
+                    .frame(width: 3)
+            }
+        }
     }
 }
 
@@ -2226,15 +2266,10 @@ private struct PRStatsFreshnessRow: View {
 private struct AllRepositoriesSection: View {
     let repoCount: Int
     let loadedCount: Int
-    let pendingReviewCount: Int
-    let openPRCount: Int
-    let publishedCount: Int
-    let prStateSummaries: [PRStateSummary]
     let prStatsFreshness: PRStatsFreshness
-    let onRefresh: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Review workflow")
@@ -2244,21 +2279,6 @@ private struct AllRepositoriesSection: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-            }
-
-            HStack(spacing: 10) {
-                DashboardMetricCard(
-                    title: "Documents",
-                    value: pendingReviewCount,
-                    detail: pendingReviewCount == 1 ? "waiting for review" : "waiting for review",
-                    attention: pendingReviewCount > 0
-                )
-                DashboardMetricCard(
-                    title: "Pull requests",
-                    value: openPRCount,
-                    detail: prSummaryText,
-                    attention: prStateSummaries.contains { $0.descriptor.sortOrder < PRStateDescriptor.readyAggregate.sortOrder }
-                )
             }
         }
     }
@@ -2276,48 +2296,6 @@ private struct AllRepositoriesSection: View {
         return loaded
     }
 
-    private var prSummaryText: String {
-        let summaries = prStateSummaries.map { "\($0.count) \($0.descriptor.title.lowercased())" }
-        if summaries.isEmpty {
-            return "no active PR state"
-        }
-        return summaries.joined(separator: " · ")
-    }
-}
-
-private struct DashboardMetricCard: View {
-    let title: String
-    let value: Int
-    let detail: String
-    var attention = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text("\(value)")
-                .font(.system(size: 34, weight: .semibold, design: .default))
-                .monospacedDigit()
-                .foregroundStyle(.primary)
-            Text(detail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(alignment: .leading) {
-            if attention {
-                Rectangle()
-                    .fill(Color.orange.opacity(0.75))
-                    .frame(width: 3)
-            }
-        }
-    }
 }
 
 private struct SelectedRepoSection: View {
