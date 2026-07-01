@@ -14,7 +14,7 @@ import (
 )
 
 type RepositoryAccessResolver interface {
-	ResolveRepositoryAccess(id string) (owner, name, registry, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool)
+	ResolveRepositoryAccess(id string) (owner, name, registry, baseURL, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool)
 }
 
 type HTTPGitHubClient struct {
@@ -34,13 +34,15 @@ var anchorRE = regexp.MustCompile(`(?s)<!--\s*hermit-anchor\s+lines:(\d+)-(\d+)\
 
 // prComment is the JSON shape returned by GET /repos/{owner}/{repo}/pulls/{pr}/comments.
 type prComment struct {
-	ID               int64     `json:"id"`
-	InReplyToID      int64     `json:"in_reply_to_id"`
-	Body             string    `json:"body"`
-	User             struct{ Login string `json:"login"` } `json:"user"`
+	ID          int64  `json:"id"`
+	InReplyToID int64  `json:"in_reply_to_id"`
+	Body        string `json:"body"`
+	User        struct {
+		Login string `json:"login"`
+	} `json:"user"`
 	Path             string    `json:"path"`
-	Line             *int      `json:"line"`           // file line number (null when outdated)
-	OriginalLine     *int      `json:"original_line"`  // file line at time of comment
+	Line             *int      `json:"line"`          // file line number (null when outdated)
+	OriginalLine     *int      `json:"original_line"` // file line at time of comment
 	Position         int       `json:"position"`
 	OriginalPosition int       `json:"original_position"`
 	CreatedAt        time.Time `json:"created_at"`
@@ -64,9 +66,9 @@ func (c *HTTPGitHubClient) ListThreads(ctx context.Context, repositoryID string,
 	}
 
 	// Separate roots from replies and index both by ID.
-	roots   := make([]prComment, 0)
+	roots := make([]prComment, 0)
 	replies := make(map[int64][]prComment) // keyed by root comment ID
-	byID    := make(map[int64]prComment)
+	byID := make(map[int64]prComment)
 
 	for _, c := range allComments {
 		byID[c.ID] = c
@@ -93,7 +95,7 @@ func (c *HTTPGitHubClient) ListThreads(ctx context.Context, repositoryID string,
 
 	threads := make([]Thread, 0, len(roots))
 	for _, root := range roots {
-		commentID  := strconv.FormatInt(root.ID, 10)
+		commentID := strconv.FormatInt(root.ID, 10)
 		threadHandle := makeThreadHandle(repositoryID, prNumber, commentID)
 
 		visibleBody := strings.TrimSpace(anchorRE.ReplaceAllString(root.Body, ""))
@@ -101,23 +103,27 @@ func (c *HTTPGitHubClient) ListThreads(ctx context.Context, repositoryID string,
 		anchor := Anchor{FilePath: root.Path}
 		outdated := false
 		if m := anchorRE.FindStringSubmatch(root.Body); m != nil {
-			if ls, err2 := strconv.Atoi(m[1]); err2 == nil { anchor.LineStart = ls }
-			if le, err2 := strconv.Atoi(m[2]); err2 == nil { anchor.LineEnd   = le }
+			if ls, err2 := strconv.Atoi(m[1]); err2 == nil {
+				anchor.LineStart = ls
+			}
+			if le, err2 := strconv.Atoi(m[2]); err2 == nil {
+				anchor.LineEnd = le
+			}
 			anchor.TextFingerprint = m[3]
 		} else {
 			// Prefer the current file line number; fall back to original_line for
 			// outdated comments (where line is null because the code was changed).
 			if root.Line != nil && *root.Line > 0 {
 				anchor.LineStart = *root.Line
-				anchor.LineEnd   = *root.Line
+				anchor.LineEnd = *root.Line
 			} else if root.OriginalLine != nil && *root.OriginalLine > 0 {
 				anchor.LineStart = *root.OriginalLine
-				anchor.LineEnd   = *root.OriginalLine
+				anchor.LineEnd = *root.OriginalLine
 				outdated = true
 			} else {
 				// Truly unanchored — pin to line 1 so it always appears.
 				anchor.LineStart = 1
-				anchor.LineEnd   = 1
+				anchor.LineEnd = 1
 				outdated = true
 			}
 		}
@@ -244,7 +250,9 @@ query($owner:String!, $repo:String!, $pr:Int!, $cursor:String) {
 				} `json:"pullRequest"`
 			} `json:"repository"`
 		} `json:"data"`
-		Errors []struct{ Message string `json:"message"` } `json:"errors"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
 	}
 
 	result := make(map[int64]bool)
@@ -399,7 +407,6 @@ func (c *HTTPGitHubClient) postGitHubCommentReply(ctx context.Context, baseURL, 
 
 	return strconv.FormatInt(result.ID, 10), nil
 }
-
 
 func (c *HTTPGitHubClient) ResolveThread(ctx context.Context, githubThreadID string) error {
 	repositoryID, prNumber, commentID, ok := parseThreadHandle(githubThreadID)
@@ -578,7 +585,9 @@ mutation($threadID:ID!) {
 
 	var resp struct {
 		Data   json.RawMessage `json:"data"`
-		Errors []struct{ Message string `json:"message"` } `json:"errors"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
 	}
 	if err := c.graphqlRequest(ctx, baseURL, token, mutation, vars, &resp); err != nil {
 		return err
@@ -777,7 +786,7 @@ func (c *HTTPGitHubClient) resolve(repositoryID string) (owner, repo, baseURL, t
 		return "", "", "", "", fmt.Errorf("repository resolver not configured")
 	}
 
-	resolvedOwner, resolvedRepo, registry, _, _, _, resolvedToken, ok := c.repoResolver.ResolveRepositoryAccess(repositoryID)
+	resolvedOwner, resolvedRepo, registry, repoBaseURL, _, _, _, resolvedToken, ok := c.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return "", "", "", "", fmt.Errorf("repository not found")
 	}
@@ -786,7 +795,9 @@ func (c *HTTPGitHubClient) resolve(repositoryID string) (owner, repo, baseURL, t
 	}
 
 	base := "https://api.github.com"
-	if c.registryBase != nil {
+	if strings.TrimSpace(repoBaseURL) != "" {
+		base = strings.TrimRight(strings.TrimSpace(repoBaseURL), "/")
+	} else if c.registryBase != nil {
 		if configured, found := c.registryBase[registry]; found && strings.TrimSpace(configured) != "" {
 			base = configured
 		}

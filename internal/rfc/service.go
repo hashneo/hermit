@@ -3,6 +3,9 @@ package rfc
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	stdhtml "html"
 	"log/slog"
@@ -15,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"hermit/internal/workset"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
@@ -59,9 +64,21 @@ type CatalogItem struct {
 	AllowedActions  []string `json:"allowed_actions"`
 	LifecycleStatus string   `json:"lifecycle_status,omitempty"`
 	PRNumber        int      `json:"pr_number,omitempty"`
+	PRTitle         string   `json:"pr_title,omitempty"`
+	PRBody          string   `json:"pr_body,omitempty"`
+	PRState         string   `json:"pr_state,omitempty"`
+	PRMerged        bool     `json:"pr_merged,omitempty"`
 	HeadSHA         string   `json:"head_sha,omitempty"`
 	HeadRef         string   `json:"head_ref,omitempty"`
+	Mergeable       *bool    `json:"mergeable,omitempty"`
+	MergeableState  string   `json:"mergeable_state,omitempty"`
+	DocumentType    string   `json:"document_type,omitempty"`
 	Labels          []string `json:"labels,omitempty"`
+	ChangedFiles    int      `json:"changed_files,omitempty"`
+	Additions       int      `json:"additions,omitempty"`
+	Deletions       int      `json:"deletions,omitempty"`
+	IssueComments   int      `json:"issue_comment_count,omitempty"`
+	ReviewComments  int      `json:"review_comment_count,omitempty"`
 	Commentable     bool     `json:"commentable"`
 	StatusMutable   bool     `json:"status_mutable"`
 	// hermit-ixk: full web URL for the RFC file, used by the native client Share button.
@@ -70,10 +87,24 @@ type CatalogItem struct {
 	HTMLURL string `json:"html_url,omitempty"`
 }
 
+type RepositoryRFCSummary struct {
+	PendingReviewCount int           `json:"pending_review_count"`
+	OpenPRCount        int           `json:"open_pr_count"`
+	PRStates           PRStateCounts `json:"pr_states"`
+}
+
+type RepositoryRFCListResponse struct {
+	Items   []CatalogItem          `json:"items"`
+	Total   int                    `json:"total"`
+	Summary RepositoryRFCSummary   `json:"summary"`
+	Cache   *workset.CacheMetadata `json:"cache,omitempty"`
+}
+
 type DocumentView struct {
 	ID             string `json:"id"`
 	Title          string `json:"title"`
 	Path           string `json:"path"`
+	HeadSHA        string `json:"head_sha,omitempty"`
 	MarkdownSource string `json:"markdown_source"`
 	PRAuthorLogin  string `json:"pr_author_login,omitempty"`
 }
@@ -95,6 +126,9 @@ type Service struct {
 	githubClients  map[string]GitHubRFCClient
 	registryBases  map[string]string
 	threadResolver ThreadResolverService // optional; nil disables pre-merge resolution
+	workset        *workset.Store
+	cacheReadTTL   time.Duration
+	cacheJitter    time.Duration
 }
 
 // WithThreadResolver injects a thread resolver used to resolve all open review
@@ -103,10 +137,28 @@ func (s *Service) WithThreadResolver(tr ThreadResolverService) {
 	s.threadResolver = tr
 }
 
+func (s *Service) WithWorkset(store *workset.Store) {
+	s.workset = store
+}
+
+func (s *Service) WithRepositoryRFCListCacheTiming(readTTL, jitter time.Duration) {
+	if readTTL > 0 {
+		s.cacheReadTTL = readTTL
+	}
+	if jitter >= 0 {
+		s.cacheJitter = jitter
+	}
+}
+
 var docuchangoRFCFilenamePattern = regexp.MustCompile(`^rfc-[0-9]{3}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$`)
 
+const (
+	defaultRepositoryRFCListCacheTTL    = 3 * time.Minute
+	defaultRepositoryRFCListCacheJitter = time.Minute
+)
+
 type RepositoryResolver interface {
-	ResolveRepositoryAccess(id string) (owner, name, registry, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool)
+	ResolveRepositoryAccess(id string) (owner, name, registry, baseURL, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool)
 }
 
 func NewServiceWithRepositoryResolver(resolver RepositoryResolver, registries map[string]string) *Service {
@@ -244,17 +296,29 @@ func (s *Service) RenderRFC(id string) (DocumentView, error) {
 	}, nil
 }
 
-func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string) ([]CatalogItem, error) {
+func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string, refresh bool) (RepositoryRFCListResponse, error) {
 	if s.repoResolver == nil {
-		return nil, fmt.Errorf("repository resolver is not configured")
+		return RepositoryRFCListResponse{}, fmt.Errorf("repository resolver is not configured")
 	}
 
-	owner, name, registry, branch, docsPath, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, branch, docsPath, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
-		return nil, fmt.Errorf("repository not found")
+		return RepositoryRFCListResponse{}, fmt.Errorf("repository not found")
 	}
 	if token == "" {
-		return nil, fmt.Errorf("repository token unavailable")
+		return RepositoryRFCListResponse{}, fmt.Errorf("repository token unavailable")
+	}
+	baseURL := s.registryBaseURL(registry, repoBaseURL)
+	sourceKey := repositoryRFCListSourceKey(registry, baseURL, owner, name, branch, docsPath, rfcLabel)
+	cacheTTL := s.repositoryRFCListCacheTTL(repositoryID)
+	if s.workset != nil && !refresh {
+		if projection, ok, err := s.workset.GetFreshRepositoryRFCList(ctx, repositoryID, sourceKey, cacheTTL); err == nil && ok {
+			var cached RepositoryRFCListResponse
+			if decodeErr := json.Unmarshal(projection.Payload, &cached); decodeErr == nil {
+				cached.Cache = &projection.Cache
+				return cached, nil
+			}
+		}
 	}
 
 	client, ok := s.githubClients[registry]
@@ -262,10 +326,12 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 		client = NewHTTPGitHubRFCClient()
 	}
 
-	baseURL := s.registryBaseURL(registry)
 	mainItems, err := client.ListRFCs(ctx, baseURL, owner, name, branch, docsPath, token)
 	if err != nil {
-		return nil, err
+		if cached, ok := s.cachedRepositoryRFCListAfterError(ctx, repositoryID, sourceKey, cacheTTL, err); ok {
+			return cached, nil
+		}
+		return RepositoryRFCListResponse{}, err
 	}
 
 	items := make([]CatalogItem, len(mainItems))
@@ -308,11 +374,14 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 	}
 	items = filled
 
-	prItems, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, rfcLabel, token)
+	prResult, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, rfcLabel, token)
 	if err != nil {
-		return nil, err
+		if cached, ok := s.cachedRepositoryRFCListAfterError(ctx, repositoryID, sourceKey, cacheTTL, err); ok {
+			return cached, nil
+		}
+		return RepositoryRFCListResponse{}, err
 	}
-	for _, prItem := range prItems {
+	for _, prItem := range prResult.Items {
 		items = append(items, CatalogItem{
 			ID:             makePRCatalogID(prItem.PRNumber, prItem.Path),
 			Title:          prItem.Title,
@@ -321,9 +390,21 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 			SourceLabel:    fmt.Sprintf("PR #%d", prItem.PRNumber),
 			AllowedActions: []string{"view", "comment"},
 			PRNumber:       prItem.PRNumber,
+			PRTitle:        prItem.PRTitle,
+			PRBody:         prItem.PRBody,
+			PRState:        prItem.PRState,
+			PRMerged:       prItem.PRMerged,
 			HeadSHA:        prItem.HeadSHA,
 			HeadRef:        prItem.HeadRef,
+			Mergeable:      prItem.Mergeable,
+			MergeableState: prItem.MergeableState,
+			DocumentType:   prItem.DocumentType,
 			Labels:         prItem.Labels,
+			ChangedFiles:   prItem.ChangedFiles,
+			Additions:      prItem.Additions,
+			Deletions:      prItem.Deletions,
+			IssueComments:  prItem.IssueComments,
+			ReviewComments: prItem.ReviewComments,
 			Commentable:    true,
 			StatusMutable:  false,
 			HTMLURL:        prItem.HTMLURL,
@@ -346,7 +427,75 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string)
 		return items[i].Title < items[j].Title
 	})
 
-	return items, nil
+	response := RepositoryRFCListResponse{
+		Items: items,
+		Total: len(items),
+		Summary: RepositoryRFCSummary{
+			PendingReviewCount: len(prResult.Items),
+			OpenPRCount:        prResult.OpenPRCount,
+			PRStates:           prResult.PRStates,
+		},
+	}
+	if s.workset != nil {
+		if payload, err := json.Marshal(response); err == nil {
+			if meta, err := s.workset.PutRepositoryRFCListSuccess(ctx, repositoryID, sourceKey, payload); err == nil {
+				response.Cache = &meta
+			}
+		}
+	}
+	return response, nil
+}
+
+func (s *Service) cachedRepositoryRFCListAfterError(ctx context.Context, repositoryID, sourceKey string, ttl time.Duration, err error) (RepositoryRFCListResponse, bool) {
+	if s.workset == nil {
+		return RepositoryRFCListResponse{}, false
+	}
+	_ = s.workset.PutRepositoryRFCListError(ctx, repositoryID, sourceKey, "provider_error", err.Error())
+	projection, ok, getErr := s.workset.GetAnyRepositoryRFCList(ctx, repositoryID, sourceKey, ttl)
+	if getErr != nil || !ok {
+		return RepositoryRFCListResponse{}, false
+	}
+	meta := projection.Cache
+	meta.Cached = true
+	meta.LastErrorCode = "provider_error"
+	meta.LastErrorMessage = err.Error()
+	var cached RepositoryRFCListResponse
+	if decodeErr := json.Unmarshal(projection.Payload, &cached); decodeErr != nil {
+		return RepositoryRFCListResponse{}, false
+	}
+	cached.Cache = &meta
+	return cached, true
+}
+
+func (s *Service) repositoryRFCListCacheTTL(repositoryID string) time.Duration {
+	readTTL := s.cacheReadTTL
+	if readTTL <= 0 {
+		readTTL = defaultRepositoryRFCListCacheTTL
+	}
+	jitter := s.cacheJitter
+	if jitter < 0 {
+		jitter = 0
+	}
+	if jitter == 0 {
+		return readTTL
+	}
+	sum := sha256.Sum256([]byte(repositoryID))
+	offset := binary.BigEndian.Uint64(sum[:8]) % uint64(jitter)
+	return readTTL + time.Duration(offset)
+}
+
+func repositoryRFCListSourceKey(registry, baseURL, owner, name, branch, docsPath, rfcLabel string) string {
+	parts := []string{
+		strings.TrimSpace(registry),
+		strings.TrimRight(strings.TrimSpace(baseURL), "/"),
+		strings.TrimSpace(owner),
+		strings.TrimSpace(name),
+		strings.TrimSpace(branch),
+		strings.Trim(strings.TrimSpace(docsPath), "/"),
+		strings.TrimSpace(rfcLabel),
+	}
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return fmt.Sprintf("%x", sum)
 }
 
 // SubmitForReviewResult is returned by SubmitForReview on success.
@@ -354,6 +503,25 @@ type SubmitForReviewResult struct {
 	PRNumber int    `json:"pr_number"`
 	HTMLURL  string `json:"html_url"`
 	Branch   string `json:"branch"`
+}
+
+// StartReviewSessionRequest identifies an existing docs-cms document that needs
+// a fresh review PR even when its original PR is already closed.
+type StartReviewSessionRequest struct {
+	FilePath         string `json:"file_path"`
+	PreviousPRNumber int    `json:"previous_pr_number,omitempty"`
+}
+
+// StartReviewSessionResult is returned after Hermit opens a marker PR for a
+// fresh document review session.
+type StartReviewSessionResult struct {
+	PRNumber         int    `json:"pr_number"`
+	HTMLURL          string `json:"html_url"`
+	Branch           string `json:"branch"`
+	FilePath         string `json:"file_path"`
+	MarkerPath       string `json:"marker_path"`
+	DocumentType     string `json:"document_type"`
+	PreviousPRNumber int    `json:"previous_pr_number,omitempty"`
 }
 
 // SubmitForReview promotes a draft RFC on the main branch to "in-review" by:
@@ -367,7 +535,7 @@ func (s *Service) SubmitForReview(ctx context.Context, repositoryID, rfcPath str
 		return SubmitForReviewResult{}, fmt.Errorf("repository resolver is not configured")
 	}
 
-	owner, name, registry, branch, _, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, branch, _, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return SubmitForReviewResult{}, fmt.Errorf("repository not found")
 	}
@@ -379,7 +547,7 @@ func (s *Service) SubmitForReview(ctx context.Context, repositoryID, rfcPath str
 	if !ok {
 		client = NewHTTPGitHubRFCClient()
 	}
-	baseURL := s.registryBaseURL(registry)
+	baseURL := s.registryBaseURL(registry, repoBaseURL)
 
 	// 1. Ensure the rfc-ready label exists.
 	if err := client.EnsureLabel(ctx, baseURL, owner, name, rfcLabel, "0075ca", "RFC ready for review", token); err != nil {
@@ -426,11 +594,123 @@ func (s *Service) SubmitForReview(ctx context.Context, repositoryID, rfcPath str
 	return SubmitForReviewResult{PRNumber: pr.Number, HTMLURL: pr.HTMLURL, Branch: reviewBranch}, nil
 }
 
+// StartReviewSession opens a new marker-only PR for a source document that
+// needs another Hermit review session after the original PR has closed.
+func (s *Service) StartReviewSession(ctx context.Context, repositoryID string, req StartReviewSessionRequest) (StartReviewSessionResult, error) {
+	if s.repoResolver == nil {
+		return StartReviewSessionResult{}, fmt.Errorf("repository resolver is not configured")
+	}
+
+	filePath := strings.Trim(strings.TrimSpace(req.FilePath), "/")
+	if filePath == "" {
+		return StartReviewSessionResult{}, fmt.Errorf("file_path is required")
+	}
+
+	owner, name, registry, repoBaseURL, branch, docsPath, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	if !ok {
+		return StartReviewSessionResult{}, fmt.Errorf("repository not found")
+	}
+	if token == "" {
+		return StartReviewSessionResult{}, fmt.Errorf("repository token unavailable")
+	}
+
+	docTypes := fallbackDocuchangoDocTypes(filePath, docsPath)
+	docType := primaryReviewDocumentType(docTypes)
+	if docType == "" {
+		return StartReviewSessionResult{}, fmt.Errorf("file_path %q is not a reviewable docs-cms document", filePath)
+	}
+
+	client, ok := s.githubClients[registry]
+	if !ok {
+		client = NewHTTPGitHubRFCClient()
+	}
+	baseURL := s.registryBaseURL(registry, repoBaseURL)
+
+	view, err := client.GetRFC(ctx, baseURL, owner, name, branch, filePath, token)
+	if err != nil {
+		return StartReviewSessionResult{}, fmt.Errorf("fetch source document: %w", err)
+	}
+
+	workflowLabel := docuchangoWorkflowLabel(docType, docuchangoWorkflowStateNeedsReview)
+	if err := client.EnsureLabel(ctx, baseURL, owner, name, workflowLabel, "0075ca", docuchangoWorkflowLabelDescription(workflowLabel), token); err != nil {
+		return StartReviewSessionResult{}, fmt.Errorf("ensure label: %w", err)
+	}
+	if docType == "rfc" && rfcLabel != "" && rfcLabel != workflowLabel {
+		if err := client.EnsureLabel(ctx, baseURL, owner, name, rfcLabel, "0075ca", "RFC ready for review", token); err != nil {
+			return StartReviewSessionResult{}, fmt.Errorf("ensure RFC label: %w", err)
+		}
+	}
+
+	headSHA, err := client.GetMainBranchSHA(ctx, baseURL, owner, name, branch, token)
+	if err != nil {
+		return StartReviewSessionResult{}, fmt.Errorf("get branch SHA: %w", err)
+	}
+
+	now := time.Now().UTC()
+	reviewBranch := reviewSessionBranchName(filePath, now)
+	if err := client.CreateBranch(ctx, baseURL, owner, name, reviewBranch, headSHA, token); err != nil {
+		return StartReviewSessionResult{}, fmt.Errorf("create branch: %w", err)
+	}
+
+	markerPath := reviewSessionMarkerPath(filePath, now)
+	marker := reviewSessionMarker{
+		Version:          1,
+		SourcePath:       filePath,
+		SourceTitle:      view.Title,
+		DocumentType:     docType,
+		BaseBranch:       branch,
+		BaseSHA:          headSHA,
+		PreviousPRNumber: req.PreviousPRNumber,
+		CreatedAt:        now.Format(time.RFC3339),
+	}
+	markerJSON, err := json.MarshalIndent(marker, "", "  ")
+	if err != nil {
+		return StartReviewSessionResult{}, err
+	}
+	markerJSON = append(markerJSON, '\n')
+
+	docName := strings.TrimSuffix(path.Base(filePath), path.Ext(filePath))
+	commitMsg := fmt.Sprintf("docs(review): new review for %s", docName)
+	if _, err := client.CommitFile(ctx, baseURL, owner, name, reviewBranch, markerPath, string(markerJSON), commitMsg, token); err != nil {
+		return StartReviewSessionResult{}, fmt.Errorf("commit marker: %w", err)
+	}
+
+	body := fmt.Sprintf("Opens a new Hermit review session for `%s`.", filePath)
+	if req.PreviousPRNumber > 0 {
+		body += fmt.Sprintf("\n\nPrevious PR: #%d.", req.PreviousPRNumber)
+	}
+	body += "\n\n<!-- hermit-review-session -->"
+
+	labels := []string{workflowLabel}
+	if docType == "rfc" && rfcLabel != "" && rfcLabel != workflowLabel {
+		labels = append(labels, rfcLabel)
+	}
+	pr, err := client.CreatePR(ctx, baseURL, owner, name, commitMsg, body, reviewBranch, branch, labels, token)
+	if err != nil {
+		return StartReviewSessionResult{}, fmt.Errorf("create PR: %w", err)
+	}
+	if s.workset != nil {
+		if err := s.workset.InvalidateRepositoryRFCList(ctx, repositoryID); err != nil {
+			slog.Warn("invalidate repository RFC list cache failed", "repository_id", repositoryID, "error", err)
+		}
+	}
+
+	return StartReviewSessionResult{
+		PRNumber:         pr.Number,
+		HTMLURL:          pr.HTMLURL,
+		Branch:           reviewBranch,
+		FilePath:         filePath,
+		MarkerPath:       markerPath,
+		DocumentType:     docType,
+		PreviousPRNumber: req.PreviousPRNumber,
+	}, nil
+}
+
 // AcceptRFCResult is returned by AcceptRFC.
 type AcceptRFCResult struct {
 	Merged           bool   `json:"merged"`
 	BlockedByCI      bool   `json:"blocked_by_ci"`
-	CommitSHA        string `json:"commit_sha,omitempty"`        // SHA of the acceptance commit on the PR branch
+	CommitSHA        string `json:"commit_sha,omitempty"`         // SHA of the acceptance commit on the PR branch
 	HandedToIronhide bool   `json:"handed_to_ironhide,omitempty"` // true when ironhide labels were applied instead of direct merge
 }
 
@@ -441,14 +721,14 @@ type AcceptRFCResult struct {
 //  2. Rewrite frontmatter status to "accepted" and commit (skipped if already accepted).
 //  3. Check whether both ironhide labels exist on the repository.
 //     - If YES: add ironhide-review and ironhide-merge labels to the PR and return
-//       HandedToIronhide=true.  Ironhide will handle merging.
+//     HandedToIronhide=true.  Ironhide will handle merging.
 //     - If NO:  attempt a direct squash-merge.  If CI blocks the merge, return
-//       BlockedByCI=true and CommitSHA so the caller can poll and retry.
+//     BlockedByCI=true and CommitSHA so the caller can poll and retry.
 func (s *Service) AcceptRFC(ctx context.Context, repositoryID string, prNumber int, filePath string) (AcceptRFCResult, error) {
 	if s.repoResolver == nil {
 		return AcceptRFCResult{}, fmt.Errorf("repository resolver is not configured")
 	}
-	owner, name, registry, _, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, _, docsPath, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return AcceptRFCResult{}, fmt.Errorf("repository not found")
 	}
@@ -460,7 +740,7 @@ func (s *Service) AcceptRFC(ctx context.Context, repositoryID string, prNumber i
 	if !ok {
 		client = NewHTTPGitHubRFCClient()
 	}
-	baseURL := s.registryBaseURL(registry)
+	baseURL := s.registryBaseURL(registry, repoBaseURL)
 
 	// 1. Get the PR head branch and current commit SHA.
 	headRef, headSHA, err := client.GetPRHead(ctx, baseURL, owner, name, prNumber, token)
@@ -488,6 +768,12 @@ func (s *Service) AcceptRFC(ctx context.Context, repositoryID string, prNumber i
 	} else {
 		// Already accepted — use the current PR head SHA for CI polling.
 		sha = headSHA
+	}
+
+	if docType := primaryReviewDocumentType(fallbackDocuchangoDocTypes(filePath, docsPath)); docType != "" {
+		if err := setDocuchangoWorkflowState(ctx, client, baseURL, owner, name, prNumber, docType, docuchangoWorkflowStateReviewed, token); err != nil {
+			return AcceptRFCResult{}, fmt.Errorf("mark review workflow state: %w", err)
+		}
 	}
 
 	// 4a. Ironhide path: if both labels exist on the repo, apply them and hand off.
@@ -538,6 +824,35 @@ func (s *Service) AcceptRFC(ctx context.Context, repositoryID string, prNumber i
 	return AcceptRFCResult{Merged: merged, BlockedByCI: blockedByCI, CommitSHA: sha}, nil
 }
 
+func setDocuchangoWorkflowState(ctx context.Context, client GitHubRFCClient, baseURL, owner, name string, prNumber int, docType, state, token string) error {
+	label := docuchangoWorkflowLabel(docType, state)
+	if label == "" {
+		return nil
+	}
+	if err := client.EnsureLabel(ctx, baseURL, owner, name, label, "0075ca", docuchangoWorkflowLabelDescription(label), token); err != nil {
+		return err
+	}
+	if err := client.AddLabels(ctx, baseURL, owner, name, prNumber, []string{label}, token); err != nil {
+		return err
+	}
+	for _, oldState := range []string{
+		docuchangoWorkflowStateNeedsReview,
+		docuchangoWorkflowStateReview,
+		docuchangoWorkflowStateNeedsChanges,
+		docuchangoWorkflowStateReady,
+		docuchangoWorkflowStateReviewed,
+	} {
+		oldLabel := docuchangoWorkflowLabel(docType, oldState)
+		if oldLabel == "" || oldLabel == label {
+			continue
+		}
+		if err := client.RemoveLabel(ctx, baseURL, owner, name, prNumber, oldLabel, token); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // resolveOpenThreads resolves every open review thread on the PR and verifies
 // that none remain. Returns an error if any thread cannot be resolved or if
 // open threads are still present after resolution.  A nil threadResolver is a
@@ -566,7 +881,6 @@ func (s *Service) resolveOpenThreads(ctx context.Context, repositoryID string, p
 	}
 	return nil
 }
-
 
 // mergeWithRetry calls client.MergePR up to maxMergeAttempts times.
 //
@@ -656,7 +970,7 @@ func (s *Service) MergePR(ctx context.Context, repositoryID string, prNumber int
 	if s.repoResolver == nil {
 		return MergePRResult{}, fmt.Errorf("repository resolver is not configured")
 	}
-	owner, name, registry, _, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, _, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return MergePRResult{}, fmt.Errorf("repository not found")
 	}
@@ -668,7 +982,7 @@ func (s *Service) MergePR(ctx context.Context, repositoryID string, prNumber int
 	if !ok {
 		client = NewHTTPGitHubRFCClient()
 	}
-	baseURL := s.registryBaseURL(registry)
+	baseURL := s.registryBaseURL(registry, repoBaseURL)
 
 	// Resolve all open review threads before merging so that branch-protection
 	// rules requiring "all conversations resolved" do not block the merge.
@@ -698,7 +1012,7 @@ func (s *Service) GetCIStatus(ctx context.Context, repositoryID, commitSHA strin
 	if s.repoResolver == nil {
 		return CIStatusResult{Status: "pending"}, fmt.Errorf("repository resolver is not configured")
 	}
-	owner, name, registry, _, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, _, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return CIStatusResult{Status: "pending"}, fmt.Errorf("repository not found")
 	}
@@ -707,7 +1021,7 @@ func (s *Service) GetCIStatus(ctx context.Context, repositoryID, commitSHA strin
 	if !ok {
 		client = NewHTTPGitHubRFCClient()
 	}
-	baseURL := s.registryBaseURL(registry)
+	baseURL := s.registryBaseURL(registry, repoBaseURL)
 
 	status, err := client.GetCIStatus(ctx, baseURL, owner, name, commitSHA, token)
 	if err != nil {
@@ -762,6 +1076,53 @@ func reviewBranchName(rfcPath string) string {
 	return "rfc-review/" + base
 }
 
+func reviewSessionBranchName(filePath string, t time.Time) string {
+	return "hermit/review/" + slugFromPath(filePath) + "-" + reviewSessionTimestamp(t)
+}
+
+func reviewSessionMarkerPath(filePath string, t time.Time) string {
+	return ".hermit/reviews/" + reviewSessionTimestamp(t) + "-" + slugFromPath(filePath) + ".json"
+}
+
+func reviewSessionTimestamp(t time.Time) string {
+	t = t.UTC()
+	return fmt.Sprintf("%s%09dZ", t.Format("20060102T150405"), t.Nanosecond())
+}
+
+func slugFromPath(filePath string) string {
+	base := strings.TrimSuffix(path.Base(filePath), path.Ext(filePath))
+	base = strings.ToLower(strings.TrimSpace(base))
+	var out strings.Builder
+	lastDash := false
+	for _, r := range base {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			out.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			out.WriteByte('-')
+			lastDash = true
+		}
+	}
+	slug := strings.Trim(out.String(), "-")
+	if slug == "" {
+		return "document"
+	}
+	return slug
+}
+
+type reviewSessionMarker struct {
+	Version          int    `json:"version"`
+	SourcePath       string `json:"source_path"`
+	SourceTitle      string `json:"source_title,omitempty"`
+	DocumentType     string `json:"document_type,omitempty"`
+	BaseBranch       string `json:"base_branch"`
+	BaseSHA          string `json:"base_sha"`
+	PreviousPRNumber int    `json:"previous_pr_number,omitempty"`
+	CreatedAt        string `json:"created_at"`
+}
+
 // RenderPRRFC fetches the RFC file from the PR's head branch and renders it.
 // It resolves the repository, finds the RFC file changed in the PR, and returns
 // the rendered content — replacing the old stub-based Render method for the
@@ -771,7 +1132,7 @@ func (s *Service) RenderPRRFC(ctx context.Context, repositoryID string, prNumber
 		return DocumentView{}, fmt.Errorf("repository resolver is not configured")
 	}
 
-	owner, name, registry, _, docsPath, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, _, docsPath, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return DocumentView{}, fmt.Errorf("repository not found")
 	}
@@ -784,23 +1145,29 @@ func (s *Service) RenderPRRFC(ctx context.Context, repositoryID string, prNumber
 		client = NewHTTPGitHubRFCClient()
 	}
 
-	baseURL := s.registryBaseURL(registry)
+	baseURL := s.registryBaseURL(registry, repoBaseURL)
 
 	// List PR files to find the RFC path.
-	prFiles, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, rfcLabel, token)
+	prResult, err := client.ListReviewReadyRFCs(ctx, baseURL, owner, name, docsPath, rfcLabel, token)
 	if err != nil {
 		return DocumentView{}, fmt.Errorf("list PR RFCs: %w", err)
 	}
 
-	var filePath string
-	for _, item := range prFiles {
+	var filePath, headSHA string
+	for _, item := range prResult.Items {
 		if item.PRNumber == prNumber {
 			filePath = item.Path
+			headSHA = item.HeadSHA
 			break
 		}
 	}
 	if filePath == "" {
 		return DocumentView{}, fmt.Errorf("no RFC file found in pull request %d", prNumber)
+	}
+	if cached, ok := s.getCachedRenderedReviewDocument(ctx, repositoryID, headSHA, filePath); ok {
+		cached.ID = makePRCatalogID(prNumber, filePath)
+		cached.HeadSHA = headSHA
+		return cached, nil
 	}
 
 	view, err := client.GetRFCFromPullRequest(ctx, baseURL, owner, name, prNumber, filePath, token)
@@ -808,6 +1175,8 @@ func (s *Service) RenderPRRFC(ctx context.Context, repositoryID string, prNumber
 		return DocumentView{}, err
 	}
 	view.ID = makePRCatalogID(prNumber, filePath)
+	view.HeadSHA = headSHA
+	s.putCachedRenderedReviewDocument(ctx, repositoryID, headSHA, filePath, view)
 	return view, nil
 }
 
@@ -816,7 +1185,7 @@ func (s *Service) RenderRFCByRepository(ctx context.Context, repositoryID, rfcID
 		return DocumentView{}, fmt.Errorf("repository resolver is not configured")
 	}
 
-	owner, name, registry, branch, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, branch, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return DocumentView{}, fmt.Errorf("repository not found")
 	}
@@ -829,20 +1198,73 @@ func (s *Service) RenderRFCByRepository(ctx context.Context, repositoryID, rfcID
 		client = NewHTTPGitHubRFCClient()
 	}
 
-	baseURL := s.registryBaseURL(registry)
+	baseURL := s.registryBaseURL(registry, repoBaseURL)
 	if prNumber, filePath, ok := parsePRCatalogID(rfcID); ok {
+		_, headSHA, headErr := client.GetPRHead(ctx, baseURL, owner, name, prNumber, token)
+		if headErr == nil {
+			if cached, ok := s.getCachedRenderedReviewDocument(ctx, repositoryID, headSHA, filePath); ok {
+				cached.ID = rfcID
+				cached.HeadSHA = headSHA
+				return cached, nil
+			}
+		} else {
+			slog.Warn("get PR head for rendered document cache failed", "repository_id", repositoryID, "pr", prNumber, "error", headErr)
+		}
 		view, err := client.GetRFCFromPullRequest(ctx, baseURL, owner, name, prNumber, filePath, token)
 		if err != nil {
 			return DocumentView{}, err
 		}
 		view.ID = rfcID
+		view.HeadSHA = headSHA
+		s.putCachedRenderedReviewDocument(ctx, repositoryID, headSHA, filePath, view)
 		return view, nil
 	}
 
 	return client.GetRFC(ctx, baseURL, owner, name, branch, rfcID, token)
 }
 
-func (s *Service) registryBaseURL(registry string) string {
+func (s *Service) getCachedRenderedReviewDocument(ctx context.Context, repositoryID, commitSHA, filePath string) (DocumentView, bool) {
+	if s.workset == nil || strings.TrimSpace(commitSHA) == "" {
+		return DocumentView{}, false
+	}
+	payload, ok, err := s.workset.GetRenderedReviewDocument(ctx, repositoryID, commitSHA, filePath)
+	if err != nil {
+		slog.Warn("get rendered review document cache failed", "repository_id", repositoryID, "commit_sha", commitSHA, "file_path", filePath, "error", err)
+		return DocumentView{}, false
+	}
+	if !ok {
+		return DocumentView{}, false
+	}
+	var view DocumentView
+	if err := json.Unmarshal(payload, &view); err != nil {
+		slog.Warn("decode rendered review document cache failed", "repository_id", repositoryID, "commit_sha", commitSHA, "file_path", filePath, "error", err)
+		return DocumentView{}, false
+	}
+	return view, true
+}
+
+func (s *Service) putCachedRenderedReviewDocument(ctx context.Context, repositoryID, commitSHA, filePath string, view DocumentView) {
+	if s.workset == nil || strings.TrimSpace(commitSHA) == "" {
+		return
+	}
+	view.HeadSHA = commitSHA
+	if view.Path == "" {
+		view.Path = strings.Trim(strings.TrimSpace(filePath), "/")
+	}
+	payload, err := json.Marshal(view)
+	if err != nil {
+		slog.Warn("encode rendered review document cache failed", "repository_id", repositoryID, "commit_sha", commitSHA, "file_path", filePath, "error", err)
+		return
+	}
+	if err := s.workset.PutRenderedReviewDocument(ctx, repositoryID, commitSHA, filePath, payload); err != nil {
+		slog.Warn("put rendered review document cache failed", "repository_id", repositoryID, "commit_sha", commitSHA, "file_path", filePath, "error", err)
+	}
+}
+
+func (s *Service) registryBaseURL(registry, repoBaseURL string) string {
+	if strings.TrimSpace(repoBaseURL) != "" {
+		return strings.TrimRight(strings.TrimSpace(repoBaseURL), "/")
+	}
 	if baseURL, ok := s.registryBases[registry]; ok && strings.TrimSpace(baseURL) != "" {
 		return baseURL
 	}
@@ -1229,8 +1651,9 @@ func (s *Service) resolveRepoClient(repositoryID string) (owner, name, registry,
 		err = fmt.Errorf("repository resolver is not configured")
 		return
 	}
+	var repoBaseURL string
 	var ok bool
-	owner, name, registry, branch, docsPath, rfcLabel, token, ok = s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, branch, docsPath, rfcLabel, token, ok = s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		err = fmt.Errorf("repository not found")
 		return
@@ -1244,7 +1667,7 @@ func (s *Service) resolveRepoClient(repositoryID string) (owner, name, registry,
 	if !exists {
 		client = NewHTTPGitHubRFCClient()
 	}
-	baseURL = s.registryBaseURL(registry)
+	baseURL = s.registryBaseURL(registry, repoBaseURL)
 	return
 }
 

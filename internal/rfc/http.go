@@ -58,13 +58,18 @@ func (h *Handler) ListRepositoryRFCs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, err := h.service.ListRFCsByRepository(r.Context(), repositoryID)
+	response, err := h.service.ListRFCsByRepository(r.Context(), repositoryID, parseBoolQuery(r, "refresh"))
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "rfc_catalog_unavailable", err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	writeJSON(w, http.StatusOK, response)
+}
+
+func parseBoolQuery(r *http.Request, key string) bool {
+	value := strings.ToLower(strings.TrimSpace(r.URL.Query().Get(key)))
+	return value == "1" || value == "true" || value == "yes"
 }
 
 func (h *Handler) RenderRepositoryRFCByID(w http.ResponseWriter, r *http.Request) {
@@ -124,6 +129,31 @@ func (h *Handler) SubmitForReview(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusBadGateway, "submit_for_review_failed", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
+}
+
+func (h *Handler) StartReviewSession(w http.ResponseWriter, r *http.Request) {
+	repositoryID := r.PathValue("repositoryId")
+	if repositoryID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_repository_id", "repositoryId path parameter is required")
+		return
+	}
+
+	var body StartReviewSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body must be JSON")
+		return
+	}
+	result, err := h.service.StartReviewSession(r.Context(), repositoryID, body)
+	if err != nil {
+		if strings.Contains(err.Error(), "file_path") {
+			writeError(w, http.StatusBadRequest, "invalid_file_path", err.Error())
+			return
+		}
+		writeError(w, http.StatusBadGateway, "start_review_session_failed", err.Error())
 		return
 	}
 

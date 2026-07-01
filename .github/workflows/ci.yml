@@ -17,6 +17,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Native repository config tests
+        run: make test-native-config
+
       - name: Go test
         run: go test ./...
 

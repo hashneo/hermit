@@ -20,8 +20,8 @@ func Path() string {
 func (h *Handler) GetSyncStatus(w http.ResponseWriter, r *http.Request) {
 	_ = h
 	observability.WriteJSON(w, http.StatusOK, map[string]any{
-		"state":         "synced",
+		"state":          "synced",
 		"last_synced_at": time.Now().UTC().Format(time.RFC3339),
-		"retry_count":   0,
+		"retry_count":    0,
 	})
 }

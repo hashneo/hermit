@@ -23,15 +23,42 @@ private func hLog(_ msg: String, log: OSLog = _apiLog, type: OSLogType = .debug)
     os_log("%{public}@", log: log, type: type, msg)
 }
 
+struct RepositoryRFCSummary {
+    let pendingReviewCount: Int
+    let openPRCount: Int
+    let prStateCounts: PRStateCounts
+}
+
+struct PRStateCounts {
+    var ready = 0
+    var conflicted = 0
+    var failed = 0
+    var needsReview = 0
+
+    static let empty = PRStateCounts()
+
+    var total: Int {
+        ready + conflicted + failed + needsReview
+    }
+
+    mutating func add(_ other: PRStateCounts) {
+        ready += other.ready
+        conflicted += other.conflicted
+        failed += other.failed
+        needsReview += other.needsReview
+    }
+}
+
 // MARK: - Shared API protocol
 
 /// All views and sessions depend on this protocol, not a concrete type.
 protocol HermitClientProtocol: Actor {
     // RFC discovery
-    func discoverRFCs() async throws -> (mainBranch: [RFCFile], pullRequests: [RFCPullRequest])
+    func discoverRFCs() async throws -> (mainBranch: [RFCFile], pullRequests: [RFCPullRequest], summary: RepositoryRFCSummary)
     func listMainBranchRFCs() async throws -> [RFCFile]
     func fetchRFCContent(path: String, ref: String) async throws -> String
     func fetchPRRFCContent(prNumber: Int) async throws -> String
+    func fetchPRRFCContent(prNumber: Int, filePath: String) async throws -> String
     func fetchPRAuthorLogin(prNumber: Int) async throws -> String
     func listFilesOnRef(docsPath: String, ref: String) async throws -> [String]
     func listPRChangedFiles(prNumber: Int, docsPath: String) async throws -> [String]
@@ -65,6 +92,8 @@ protocol HermitClientProtocol: Actor {
 
     // Promote draft RFC to in-review: rewrites frontmatter, ensures label, opens PR.
     func submitForReview(rfcID: String) async throws -> SubmitForReviewResult
+    // Open a marker PR for a fresh review session on an already-merged/closed PR document.
+    func startReviewSession(filePath: String, previousPRNumber: Int) async throws -> ReviewSessionResult
 
     // Accept RFC: rewrites frontmatter to "accepted" on the PR branch and squash-merges.
     func acceptRFC(prNumber: Int, filePath: String) async throws -> AcceptRFCResult
@@ -97,6 +126,7 @@ actor HermitAPIClient: HermitClientProtocol {
 
     struct Config {
         let baseURL: String   // e.g. "http://127.0.0.1:8765"
+        let repositoryID: String?
         let owner:   String
         let repo:    String
         let docsPath: String
@@ -117,7 +147,7 @@ actor HermitAPIClient: HermitClientProtocol {
 
     // MARK: - discoverRFCs
 
-    func discoverRFCs() async throws -> (mainBranch: [RFCFile], pullRequests: [RFCPullRequest]) {
+    func discoverRFCs() async throws -> (mainBranch: [RFCFile], pullRequests: [RFCPullRequest], summary: RepositoryRFCSummary) {
         let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/rfcs")
         let data = try await get(u)
@@ -125,21 +155,48 @@ actor HermitAPIClient: HermitClientProtocol {
         struct RFCItem: Decodable {
             let id: String
             let title: String
+            let pr_title: String?
+            let pr_body: String?
             let path: String
             let source_type: String
             let lifecycle_status: String?
             let pr_number: Int?
             let head_sha: String?
             let head_ref: String?
+            let pr_state: String?
+            let pr_merged: Bool?
+            let mergeable: Bool?
+            let mergeable_state: String?
+            let document_type: String?
             let labels: [String]?
+            let changed_files: Int?
+            let additions: Int?
+            let deletions: Int?
+            let issue_comment_count: Int?
+            let review_comment_count: Int?
             let commentable: Bool?
             // hermit-ixk: populated by server for both main-branch and PR items.
             let html_url: String?
         }
 
-        struct RFCPage: Decodable { let items: [RFCItem] }
+        struct Summary: Decodable {
+            let pending_review_count: Int
+            let open_pr_count: Int
+            let pr_states: PRStateCountsPayload?
+        }
+        struct PRStateCountsPayload: Decodable {
+            let ready: Int?
+            let conflicted: Int?
+            let failed: Int?
+            let needs_review: Int?
+        }
+        struct RFCPage: Decodable {
+            let items: [RFCItem]
+            let summary: Summary?
+        }
         let decoder = JSONDecoder()
-        let items = try decoder.decode(RFCPage.self, from: data).items
+        let page = try decoder.decode(RFCPage.self, from: data)
+        let items = page.items
         var files: [RFCFile] = []
         var prs: [RFCPullRequest] = []
 
@@ -148,13 +205,26 @@ actor HermitAPIClient: HermitClientProtocol {
                 prs.append(RFCPullRequest(
                     id: prNumber, number: prNumber,
                     title: item.title,
-                    body: "",
+                    prTitle: item.pr_title ?? item.title,
+                    prState: item.pr_state ?? "open",
+                    prMerged: item.pr_merged ?? false,
+                    body: item.pr_body ?? "",
                     headSHA: item.head_sha ?? "",
                     headRef: item.head_ref ?? "",
                     htmlURL: item.html_url ?? "",
-                    state: "open",
+                    state: item.pr_state ?? "open",
                     draft: false,
-                    labels: item.labels ?? []
+                    mergeable: item.mergeable,
+                    mergeableState: item.mergeable_state,
+                    documentType: item.document_type ?? "rfc",
+                    documentPath: item.path,
+                    catalogID: item.id,
+                    labels: item.labels ?? [],
+                    changedFiles: item.changed_files ?? 0,
+                    additions: item.additions ?? 0,
+                    deletions: item.deletions ?? 0,
+                    issueCommentCount: item.issue_comment_count ?? 0,
+                    reviewCommentCount: item.review_comment_count ?? 0
                 ))
             } else {
                 files.append(RFCFile(id: item.id, name: item.title,
@@ -163,13 +233,26 @@ actor HermitAPIClient: HermitClientProtocol {
                                      lifecycleStatus: item.lifecycle_status))
             }
         }
-        return (files, prs)
+        return (
+            files,
+            prs,
+            RepositoryRFCSummary(
+                pendingReviewCount: page.summary?.pending_review_count ?? prs.count,
+                openPRCount: page.summary?.open_pr_count ?? prs.count,
+                prStateCounts: PRStateCounts(
+                    ready: page.summary?.pr_states?.ready ?? 0,
+                    conflicted: page.summary?.pr_states?.conflicted ?? 0,
+                    failed: page.summary?.pr_states?.failed ?? 0,
+                    needsReview: page.summary?.pr_states?.needs_review ?? 0
+                )
+            )
+        )
     }
 
     // MARK: - listMainBranchRFCs
 
     func listMainBranchRFCs() async throws -> [RFCFile] {
-        let (files, _) = try await discoverRFCs()
+        let (files, _, _) = try await discoverRFCs()
         return files
     }
 
@@ -200,6 +283,19 @@ actor HermitAPIClient: HermitClientProtocol {
             ?? String(data: data, encoding: .utf8) ?? ""
     }
 
+    func fetchPRRFCContent(prNumber: Int, filePath: String) async throws -> String {
+        let repoID = try await repoID()
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove("/")
+        let catalogID = "pr:\(prNumber):\(filePath)"
+        let encodedID = catalogID.addingPercentEncoding(withAllowedCharacters: allowed) ?? catalogID
+        let u = url("/api/v1/repositories/\(repoID)/rfcs/\(encodedID)")
+        let data = try await get(u)
+        struct RFCDoc: Decodable { let markdown_source: String }
+        return (try? JSONDecoder().decode(RFCDoc.self, from: data))?.markdown_source
+            ?? String(data: data, encoding: .utf8) ?? ""
+    }
+
     func fetchPRAuthorLogin(prNumber: Int) async throws -> String {
         let repoID = try await repoID()
         let u = url("/api/v1/repositories/\(repoID)/pull-requests/\(prNumber)/rfc/render")
@@ -211,7 +307,7 @@ actor HermitAPIClient: HermitClientProtocol {
     // MARK: - listFilesOnRef
 
     func listFilesOnRef(docsPath: String, ref: String) async throws -> [String] {
-        let (files, _) = try await discoverRFCs()
+        let (files, _, _) = try await discoverRFCs()
         return files.map(\.path)
     }
 
@@ -352,6 +448,18 @@ actor HermitAPIClient: HermitClientProtocol {
         let u = url("/api/v1/repositories/\(repoID)/rfcs/\(encoded)/submit-for-review")
         let data = try await post(u, body: [:])
         return try JSONDecoder().decode(SubmitForReviewResult.self, from: data)
+    }
+
+    // MARK: - startReviewSession
+
+    func startReviewSession(filePath: String, previousPRNumber: Int) async throws -> ReviewSessionResult {
+        let repoID = try await repoID()
+        let u = url("/api/v1/repositories/\(repoID)/review-sessions")
+        let data = try await post(u, body: [
+            "file_path": filePath,
+            "previous_pr_number": previousPRNumber,
+        ] as [String: Any])
+        return try JSONDecoder().decode(ReviewSessionResult.self, from: data)
     }
 
     // MARK: - acceptRFC
@@ -520,10 +628,16 @@ actor HermitAPIClient: HermitClientProtocol {
         }
         let pr = try JSONDecoder().decode(PR.self, from: data)
         return RFCPullRequest(id: pr.number, number: pr.number,
-                              title: pr.title, body: pr.body,
+                              title: pr.title, prTitle: pr.title,
+                              prState: "open", prMerged: false, body: pr.body,
                               headSHA: pr.headSHA, headRef: pr.headRef,
                               htmlURL: pr.htmlURL, state: pr.state,
-                              draft: pr.draft, labels: pr.labels)
+                              draft: pr.draft, mergeable: nil,
+                              mergeableState: nil, documentType: "rfc",
+                              documentPath: "", catalogID: "pr-\(pr.number)",
+                              labels: pr.labels, changedFiles: 0,
+                              additions: 0, deletions: 0,
+                              issueCommentCount: 0, reviewCommentCount: 0)
     }
 
     // MARK: - HTTP helpers
@@ -531,6 +645,7 @@ actor HermitAPIClient: HermitClientProtocol {
     /// Returns the server-assigned repo ID (e.g. "repo_2001") by fetching
     /// /api/v1/repositories and matching owner+name. Cached after first call.
     private func repoID() async throws -> String {
+        if let repositoryID = config.repositoryID, !repositoryID.isEmpty { return repositoryID }
         if let cached = resolvedRepoID { return cached }
 
         let u = url("/api/v1/repositories")
@@ -666,6 +781,17 @@ enum HermitAPIError: LocalizedError {
         switch self {
         case .httpError(let code, let msg): return "HTTP \(code): \(msg)"
         }
+    }
+}
+
+extension Error {
+    var isHermitLineResolutionFailure: Bool {
+        guard let apiError = self as? HermitAPIError else { return false }
+        if case .httpError(let statusCode, let message) = apiError {
+            return statusCode == 502
+                && message.localizedCaseInsensitiveContains("line could not be resolved")
+        }
+        return false
     }
 }
 

@@ -26,10 +26,17 @@ type SelectionQuickAction = {
   y: number;
 };
 
+type RepositoryCatalogState = {
+  items: RfcCatalogItem[];
+  error?: string;
+};
+
 export function App() {
   const [activeTab, setActiveTab] = useState<TabKey>("rfcs");
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [catalog, setCatalog] = useState<RfcCatalogItem[]>([]);
+  const [repositoryCatalogs, setRepositoryCatalogs] = useState<Record<string, RepositoryCatalogState>>({});
+  const [dashboardLoading, setDashboardLoading] = useState(false);
   const [repositories, setRepositories] = useState<RepositoryConfig[]>([]);
   const [activeId, setActiveId] = useState<string>("");
   const [activeRfcItem, setActiveRfcItem] = useState<RfcCatalogItem | null>(null);
@@ -47,12 +54,79 @@ export function App() {
   const docBodyRef = useRef<HTMLDivElement | null>(null);
 
   const activePrNumber = activeRfcItem?.pr_number ?? defaultPRNumber;
+  const selectedRepository = useMemo(
+    () => repositories.find((repository) => repository.id === repositoryId) ?? null,
+    [repositories, repositoryId],
+  );
+  const reviewableRfcCount = useMemo(
+    () => catalog.filter((item) => item.commentable).length,
+    [catalog],
+  );
+  const repositoryDashboards = useMemo(
+    () =>
+      repositories.map((repository) => {
+        const catalogState = repositoryCatalogs[repository.id];
+        const items = catalogState?.items ?? [];
+        const outstandingDocs = items.filter((item) => item.commentable && item.pr_number);
+        const outstandingPrs = new Set(outstandingDocs.map((item) => item.pr_number).filter(Boolean));
+        return {
+          repository,
+          items,
+          error: catalogState?.error,
+          outstandingDocCount: outstandingDocs.length,
+          outstandingPrCount: outstandingPrs.size,
+        };
+      }),
+    [repositories, repositoryCatalogs],
+  );
+  const outstandingDocCount = useMemo(
+    () => repositoryDashboards.reduce((total, dashboard) => total + dashboard.outstandingDocCount, 0),
+    [repositoryDashboards],
+  );
+  const outstandingPrCount = useMemo(
+    () => repositoryDashboards.reduce((total, dashboard) => total + dashboard.outstandingPrCount, 0),
+    [repositoryDashboards],
+  );
+  const reposNeedingAttention = useMemo(
+    () =>
+      repositoryDashboards.filter(
+        (dashboard) =>
+          !dashboard.repository.validation.healthy || dashboard.error || dashboard.outstandingDocCount > 0,
+      ).length,
+    [repositoryDashboards],
+  );
+
+  async function loadRepositoryDashboard(repos: RepositoryConfig[]) {
+    if (repos.length === 0) {
+      setRepositoryCatalogs({});
+      setDashboardLoading(false);
+      return;
+    }
+
+    setDashboardLoading(true);
+    const entries = await Promise.all(
+      repos.map(async (repository) => {
+        try {
+          const response = await hermitApiClient.listRepositoryRfcs(repository.id);
+          return [repository.id, { items: response.items }] as const;
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : "Failed to load repository RFCs";
+          return [repository.id, { items: [], error: message }] as const;
+        }
+      }),
+    );
+    setRepositoryCatalogs(Object.fromEntries(entries));
+    setDashboardLoading(false);
+  }
 
   async function loadRfcCatalog() {
     if (!repositoryId) {
       setCatalog([]);
       setActiveId("");
+      setActiveRfcItem(null);
       setDocument(null);
+      setThreads(null);
+      setReview(null);
       setState({ status: "ready" });
       return;
     }
@@ -61,9 +135,16 @@ export function App() {
     try {
       const response = await hermitApiClient.listRepositoryRfcs(repositoryId);
       setCatalog(response.items);
+      setRepositoryCatalogs((current) => ({
+        ...current,
+        [repositoryId]: { items: response.items },
+      }));
       if (response.items.length === 0) {
         setActiveId("");
+        setActiveRfcItem(null);
         setDocument(null);
+        setThreads(null);
+        setReview(null);
         setState({ status: "ready" });
         return;
       }
@@ -81,6 +162,7 @@ export function App() {
       } else {
         setThreads(null);
       }
+      setReview(null);
       setState({ status: "ready" });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Failed to load RFC catalog";
@@ -93,6 +175,7 @@ export function App() {
       try {
         const repos = await hermitApiClient.listRepositories();
         setRepositories(repos.items);
+        void loadRepositoryDashboard(repos.items);
         if (repos.total > 0) {
           const savedRepositoryId = window.localStorage.getItem(repositorySelectionStorageKey);
           const hasSavedRepository =
@@ -137,6 +220,7 @@ export function App() {
       } else {
         setThreads(null);
       }
+      setReview(null);
       setState({ status: "ready" });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Failed to open RFC";
@@ -380,7 +464,7 @@ export function App() {
     }
     setPanelError("");
     try {
-      const response = await hermitApiClient.getReviewState(repositoryId, defaultPRNumber);
+      const response = await hermitApiClient.getReviewState(repositoryId, activePrNumber);
       setReview(response);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Failed to load review state";
@@ -394,7 +478,7 @@ export function App() {
       return;
     }
     try {
-      const response = await hermitApiClient.approvePullRequest(repositoryId, defaultPRNumber, "Approved via Hermit UI");
+      const response = await hermitApiClient.approvePullRequest(repositoryId, activePrNumber, "Approved via Hermit UI");
       setReview(response);
       setPanelError("");
     } catch (error: unknown) {
@@ -414,14 +498,28 @@ export function App() {
     }
   }
 
+  const openThreadCount = rfcThreads.filter((thread) => thread.status !== "resolved").length;
+
   return (
     <div className="layout-shell">
       <header className="topbar">
-        <div className="brand">Hermit</div>
+        <div>
+          <div className="brand">Hermit</div>
+          <div className="brand-subtitle">RFC review dashboard</div>
+        </div>
         <nav className="menu">
-          <button type="button" className={`menu-item ${activeTab === "rfcs" ? "active" : ""}`} onClick={() => onTabChange("rfcs")}>RFCs</button>
-          <button type="button" className={`menu-item ${activeTab === "threads" ? "active" : ""}`} onClick={() => onTabChange("threads")}>Threads</button>
-          <button type="button" className={`menu-item ${activeTab === "approvals" ? "active" : ""}`} onClick={() => onTabChange("approvals")}>Approvals</button>
+          <button type="button" className={`menu-item ${activeTab === "rfcs" ? "active" : ""}`} onClick={() => onTabChange("rfcs")}>
+            <span>RFCs</span>
+            <span className="menu-count">{catalog.length}</span>
+          </button>
+          <button type="button" className={`menu-item ${activeTab === "threads" ? "active" : ""}`} onClick={() => onTabChange("threads")}>
+            <span>Threads</span>
+            <span className="menu-count">{openThreadCount}</span>
+          </button>
+          <button type="button" className={`menu-item ${activeTab === "approvals" ? "active" : ""}`} onClick={() => onTabChange("approvals")}>
+            <span>Approvals</span>
+            <span className="menu-count">{review?.state ?? "pending"}</span>
+          </button>
         </nav>
       </header>
 
@@ -439,15 +537,108 @@ export function App() {
         </label>
         <span className="context-note">
           {repositoriesLoaded
-            ? "Registry and repository selection load RFC, thread, and approval context."
+            ? selectedRepository
+              ? `${selectedRepository.default_branch} default branch - ${selectedRepository.docs_path_policy} docs policy`
+              : "Configure a repository to load RFC, thread, and approval context."
             : "Loading configured repositories..."}
         </span>
       </section>
 
+      <section className="dashboard-summary" aria-label="Review summary">
+        <div className="summary-primary">
+          <span className="summary-kicker">To do</span>
+          <strong>
+            {dashboardLoading
+              ? "Loading repository work..."
+              : `${outstandingDocCount} outstanding docs across ${outstandingPrCount} PRs`}
+          </strong>
+          <span>
+            {reposNeedingAttention > 0
+              ? `${reposNeedingAttention} repos have review work or repository health issues.`
+              : "No outstanding review work across configured repositories."}
+          </span>
+        </div>
+        <div className="summary-metrics">
+          <div className="summary-metric">
+            <span>Outstanding PRs</span>
+            <strong>{outstandingPrCount}</strong>
+          </div>
+          <div className="summary-metric">
+            <span>Outstanding docs</span>
+            <strong>{outstandingDocCount}</strong>
+          </div>
+          <div className="summary-metric">
+            <span>Repos to check</span>
+            <strong>{reposNeedingAttention}</strong>
+          </div>
+          <div className="summary-metric">
+            <span>Selected repo docs</span>
+            <strong>{reviewableRfcCount}/{catalog.length}</strong>
+          </div>
+        </div>
+        <div className="repo-breakdown" aria-label="Repository breakdown">
+          {repositories.length === 0 && (
+            <div className="empty-state">
+              <strong>No repositories configured</strong>
+              <p>Configure a repository to see outstanding PR and document review work.</p>
+            </div>
+          )}
+          {repositoryDashboards.map((dashboard) => {
+            const { repository } = dashboard;
+            const isSelected = repository.id === repositoryId;
+            const healthLabel = repository.validation.healthy ? "healthy" : "needs attention";
+            return (
+              <button
+                key={repository.id}
+                type="button"
+                className={`repo-breakdown-card ${isSelected ? "selected" : ""}`}
+                onClick={() => setRepositoryId(repository.id)}
+              >
+                <span className="repo-breakdown-head">
+                  <strong>{repository.owner}/{repository.name}</strong>
+                  <span className={`repo-health ${repository.validation.healthy ? "healthy" : "attention"}`}>
+                    {healthLabel}
+                  </span>
+                </span>
+                <span className="repo-breakdown-metrics">
+                  <span>
+                    <strong>{dashboard.outstandingPrCount}</strong>
+                    PRs
+                  </span>
+                  <span>
+                    <strong>{dashboard.outstandingDocCount}</strong>
+                    docs
+                  </span>
+                  <span>
+                    <strong>{dashboard.items.length}</strong>
+                    total
+                  </span>
+                </span>
+                <span className="repo-breakdown-foot">
+                  {dashboard.error ?? `${repository.default_branch} - ${repository.docs_path_policy}`}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
       <main className="workspace">
         <aside className="left-panel">
-          <h2>RFC Documents</h2>
-          {catalog.length === 0 && <p className="empty">No RFC files found in docs-cms/rfcs.</p>}
+          <div className="panel-heading">
+            <h2>RFC Documents</h2>
+            <span>{reviewableRfcCount} reviewable</span>
+          </div>
+          {catalog.length === 0 && (
+            <div className="empty-state">
+              <strong>No RFCs loaded</strong>
+              <p>
+                {repositoryId
+                  ? "No RFC files were found in docs-cms/rfcs for this repository."
+                  : "Select or configure a repository before reviewing RFC documents."}
+              </p>
+            </div>
+          )}
           <ul className="rfc-list">
             {catalog.map((item) => (
               <li key={item.id}>
@@ -600,7 +791,10 @@ export function App() {
           {activeTab === "threads" && (
             <article className="doc-card">
               <header className="doc-header inline-header">
-                <h1>Threads</h1>
+                <div>
+                  <h1>Threads</h1>
+                  <p>PR #{activePrNumber} discussion threads for the selected RFC.</p>
+                </div>
                 <button type="button" className="menu-item dark" onClick={() => void loadThreads()}>Refresh</button>
               </header>
               {panelError && <p className="status error">{panelError}</p>}
@@ -641,7 +835,10 @@ export function App() {
           {activeTab === "approvals" && (
             <article className="doc-card">
               <header className="doc-header inline-header">
-                <h1>Approvals</h1>
+                <div>
+                  <h1>Approvals</h1>
+                  <p>Review state and approval action for PR #{activePrNumber}.</p>
+                </div>
                 <button type="button" className="menu-item dark" onClick={() => void loadReview()}>Refresh</button>
               </header>
               {panelError && <p className="status error">{panelError}</p>}

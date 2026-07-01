@@ -130,7 +130,7 @@ on ensureAppRunning()
 	delay 0.5
 end ensureAppRunning
 
--- Close all RFC detail windows (not Hermit popover, not Settings).
+-- Close all RFC detail windows (not Hermit popover).
 on closeAllRFCWindows()
 	global gAppName
 	try
@@ -139,7 +139,7 @@ on closeAllRFCWindows()
 				set allWins to every window
 				repeat with w in allWins
 					set wTitle to title of w
-					if wTitle is not "Hermit" and wTitle is not "Settings" and wTitle is not "" then
+					if wTitle is not "Hermit" and wTitle is not "" then
 						try
 							perform action "AXRaise" of w
 							keystroke "w" using {command down}
@@ -151,6 +151,88 @@ on closeAllRFCWindows()
 		end tell
 	end try
 end closeAllRFCWindows
+
+on clickEmbeddedSettingsTab()
+	global gAppName
+	set clicked to false
+	try
+		tell application "System Events"
+			tell process gAppName
+				click menu bar item 1 of menu bar 2
+				delay 0.8
+				try
+					set hermitWin to window "Hermit"
+					try
+						click button "Settings" of hermitWin
+						set clicked to true
+					end try
+					if not clicked then
+						try
+							click radio button "Settings" of hermitWin
+							set clicked to true
+						end try
+					end if
+					if not clicked then
+						repeat with b in every button of hermitWin
+							set lbl to ""
+							try
+								set lbl to title of b
+							end try
+							if lbl is "" then
+								try
+									set lbl to description of b
+								end try
+							end if
+							if lbl contains "Settings" then
+								click b
+								set clicked to true
+								exit repeat
+							end if
+						end repeat
+					end if
+					if not clicked then
+						repeat with r in every radio button of hermitWin
+							set lbl to ""
+							try
+								set lbl to title of r
+							end try
+							if lbl is "" then
+								try
+									set lbl to description of r
+								end try
+							end if
+							if lbl contains "Settings" then
+								click r
+								set clicked to true
+								exit repeat
+							end if
+						end repeat
+					end if
+				end try
+			end tell
+		end tell
+	end try
+	delay 0.5
+	return clicked
+end clickEmbeddedSettingsTab
+
+on settingsWindowExists()
+	global gAppName
+	set found to false
+	try
+		tell application "System Events"
+			tell process gAppName
+				repeat with w in every window
+					if title of w contains "Settings" then
+						set found to true
+						exit repeat
+					end if
+				end repeat
+			end tell
+		end tell
+	end try
+	return found
+end settingsWindowExists
 
 -- Open an RFC window by partial title. Returns true on success.
 on openRFCWindow(rfcTitle)
@@ -294,7 +376,7 @@ on test_03_repoSubmenuPresent()
 	end if
 end test_03_repoSubmenuPresent
 
-on test_04_settingsMenuItemPresent()
+on test_04_settingsTabPresent()
 	my ensureAppRunning()
 	set shot to ""
 	set found to false
@@ -303,26 +385,45 @@ on test_04_settingsMenuItemPresent()
 			tell process gAppName
 				click menu bar item 1 of menu bar 2
 				delay 0.8
-				set shot to my captureWindow("Hermit", "02_2_settings_item")
-				set topItems to every menu item of menu 1 of menu bar item 1 of menu bar 2
-				repeat with mi in topItems
-					if name of mi contains "Settings" then
-						set found to true
-						exit repeat
-					end if
-				end repeat
+				set shot to my captureWindow("Hermit", "02_2_settings_tab")
+				set hermitWin to window "Hermit"
+				try
+					if exists button "Settings" of hermitWin then set found to true
+				end try
+				if not found then
+					try
+						if exists radio button "Settings" of hermitWin then set found to true
+					end try
+				end if
+				if not found then
+					repeat with b in every button of hermitWin
+						set lbl to ""
+						try
+							set lbl to title of b
+						end try
+						if lbl is "" then
+							try
+								set lbl to description of b
+							end try
+						end if
+						if lbl contains "Settings" then
+							set found to true
+							exit repeat
+						end if
+					end repeat
+				end if
 				key code 53
 				delay 0.3
 			end tell
 		end tell
 	end try
-	if shot is "" then set shot to my captureAppWindow("02_2_settings_item_fallback")
+	if shot is "" then set shot to my captureAppWindow("02_2_settings_tab_fallback")
 	if found then
-		my pass("2.2 Settings… item present in menu bar popover", shot)
+		my pass("2.2 Settings tab present in Hermit menu window", shot)
 	else
-		my fail("2.2 Settings… item present in menu bar popover", "Settings item not found", shot)
+		my fail("2.2 Settings tab present in Hermit menu window", "Settings tab not found", shot)
 	end if
-end test_04_settingsMenuItemPresent
+end test_04_settingsTabPresent
 
 on test_05_refreshAllPresent()
 	my ensureAppRunning()
@@ -689,124 +790,84 @@ on test_12_lifecycleButtons()
 end test_12_lifecycleButtons
 
 -- ---------------------------------------------------------------------------
--- 6. SETTINGS WINDOW
+-- 6. EMBEDDED SETTINGS
 -- ---------------------------------------------------------------------------
 
-on test_13_settingsWindowOpens()
+on test_13_embeddedSettingsOpens()
 	my ensureAppRunning()
-	set found to false
-	try
-		tell application "System Events"
-			tell process gAppName
-				click menu bar item 1 of menu bar 2
-				delay 0.8
-				set topItems to every menu item of menu 1 of menu bar item 1 of menu bar 2
-				repeat with mi in topItems
-					if name of mi contains "Settings" then
-						click mi
-						delay 1.2
-						exit repeat
-					end if
-				end repeat
-			end tell
-		end tell
-	end try
-	set shot to my captureWindow("Settings", "06_1_settings_window")
-	try
-		tell application "System Events"
-			tell process gAppName
-				repeat with w in every window
-					if title of w contains "Settings" then
-						set found to true
-						exit repeat
-					end if
-				end repeat
-			end tell
-		end tell
-	end try
-	if found then
-		my pass("6.1 Settings window opens", shot)
+	set clicked to my clickEmbeddedSettingsTab()
+	set shot to my captureWindow("Hermit", "06_1_embedded_settings")
+	set separateWindowOpen to my settingsWindowExists()
+	if clicked and not separateWindowOpen then
+		my pass("6.1 Settings opens embedded in Hermit menu window", shot)
 	else
-		my fail("6.1 Settings window opens", "no Settings window found", shot)
+		my fail("6.1 Settings opens embedded in Hermit menu window", "clicked=" & (clicked as text) & ", standalone Settings window=" & (separateWindowOpen as text), shot)
 	end if
-end test_13_settingsWindowOpens
+end test_13_embeddedSettingsOpens
 
-on test_14_settingsTabsPresent()
+on test_14_embeddedSettingsTabsPresent()
 	my ensureAppRunning()
-	set shot to my captureWindow("Settings", "06_2_settings_tabs")
-	set tabCount to 0
+	set clicked to my clickEmbeddedSettingsTab()
+	set shot to my captureWindow("Hermit", "06_2_embedded_settings_tabs")
+	set foundAccount to false
+	set foundRepository to false
+	set foundServer to false
+	set foundAI to false
 	try
 		tell application "System Events"
 			tell process gAppName
-				set settingsWin to missing value
-				repeat with w in every window
-					if title of w contains "Settings" then
-						set settingsWin to w
-						exit repeat
-					end if
+				set hermitWin to window "Hermit"
+				set elems to {}
+				repeat with b in every button of hermitWin
+					set end of elems to b
 				end repeat
-				if settingsWin is not missing value then
+				repeat with r in every radio button of hermitWin
+					set end of elems to r
+				end repeat
+				repeat with el in elems
+					set lbl to ""
 					try
-						set tabCount to count of every tab group of settingsWin
+						set lbl to title of el
 					end try
-					if tabCount = 0 then
+					if lbl is "" then
 						try
-							set tabCount to count of every radio button of settingsWin
+							set lbl to description of el
 						end try
 					end if
-					if tabCount = 0 then
-						-- SwiftUI toolbar tabs sometimes appear as buttons
-						try
-							set tabCount to count of every button of toolbar 1 of settingsWin
-						end try
-					end if
-				end if
+					if lbl contains "Account" then set foundAccount to true
+					if lbl contains "Repository" then set foundRepository to true
+					if lbl contains "Server" then set foundServer to true
+					if lbl contains "AI" then set foundAI to true
+				end repeat
 			end tell
 		end tell
 	end try
-	if tabCount >= 2 then
-		my pass("6.2 Settings window has " & tabCount & " tab controls", shot)
+	if clicked and foundAccount and foundRepository and foundServer and foundAI then
+		my pass("6.2 Embedded Settings tabs present", shot)
 	else
-		my fail("6.2 Settings tabs present", "found " & tabCount & ", expected ≥ 2", shot)
+		my fail("6.2 Embedded Settings tabs present", "tabs found account=" & (foundAccount as text) & ", repository=" & (foundRepository as text) & ", server=" & (foundServer as text) & ", ai=" & (foundAI as text), shot)
 	end if
-end test_14_settingsTabsPresent
+end test_14_embeddedSettingsTabsPresent
 
-on test_15_settingsWindowCloses()
+on test_15_noStandaloneSettingsWindow()
 	my ensureAppRunning()
 	try
 		tell application "System Events"
 			tell process gAppName
-				repeat with w in every window
-					if title of w contains "Settings" then
-						perform action "AXRaise" of w
-						keystroke "w" using {command down}
-						delay 0.5
-						exit repeat
-					end if
-				end repeat
+				set frontmost to true
+				keystroke "," using {command down}
+				delay 0.8
 			end tell
 		end tell
 	end try
-	set shot to my captureAppWindow("06_3_settings_closed")
-	set stillOpen to false
-	try
-		tell application "System Events"
-			tell process gAppName
-				repeat with w in every window
-					if title of w contains "Settings" then
-						set stillOpen to true
-						exit repeat
-					end if
-				end repeat
-			end tell
-		end tell
-	end try
-	if not stillOpen then
-		my pass("6.3 Settings window closes with ⌘W", shot)
+	set shot to my captureAppWindow("06_3_no_standalone_settings")
+	set standaloneOpen to my settingsWindowExists()
+	if not standaloneOpen then
+		my pass("6.3 Standalone Settings window is absent", shot)
 	else
-		my fail("6.3 Settings window closes with ⌘W", "Settings window still present", shot)
+		my fail("6.3 Standalone Settings window is absent", "Settings window still present", shot)
 	end if
-end test_15_settingsWindowCloses
+end test_15_noStandaloneSettingsWindow
 
 -- ---------------------------------------------------------------------------
 -- 7. DIAGRAM POPOUT (opportunistic)
@@ -924,7 +985,7 @@ log "========================================"
 my test_01_appRunning()
 my test_02_menuBarPopoverOpens()
 my test_03_repoSubmenuPresent()
-my test_04_settingsMenuItemPresent()
+my test_04_settingsTabPresent()
 my test_05_refreshAllPresent()
 my test_06_rfcWindowOpens()
 my test_07_rfcContentScrollArea()
@@ -934,9 +995,9 @@ my test_09_exportMenuItems()
 my test_10_exportPDFSavePanel()
 my test_11_exportRTFSavePanel()
 my test_12_lifecycleButtons()
-my test_13_settingsWindowOpens()
-my test_14_settingsTabsPresent()
-my test_15_settingsWindowCloses()
+my test_13_embeddedSettingsOpens()
+my test_14_embeddedSettingsTabsPresent()
+my test_15_noStandaloneSettingsWindow()
 my test_16_diagramPopout()
 my test_17_rfcWindowCloses()
 

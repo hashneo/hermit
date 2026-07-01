@@ -31,7 +31,7 @@ type HTTPMergeClient struct {
 // RepositoryAccessResolver is the same interface used by the thread package.
 // Re-declared here so the review package has no import cycle with thread.
 type RepositoryAccessResolver interface {
-	ResolveRepositoryAccess(id string) (owner, name, registry, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool)
+	ResolveRepositoryAccess(id string) (owner, name, registry, baseURL, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool)
 }
 
 func NewHTTPMergeClient(resolver RepositoryAccessResolver, registryBase map[string]string) *HTTPMergeClient {
@@ -142,7 +142,7 @@ func (c *HTTPMergeClient) resolve(repositoryID string) (owner, repo, baseURL, to
 	if c.repoResolver == nil {
 		return "", "", "", "", fmt.Errorf("repository resolver not configured")
 	}
-	resolvedOwner, resolvedRepo, registry, _, _, _, resolvedToken, ok := c.repoResolver.ResolveRepositoryAccess(repositoryID)
+	resolvedOwner, resolvedRepo, registry, repoBaseURL, _, _, _, resolvedToken, ok := c.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return "", "", "", "", fmt.Errorf("repository not found")
 	}
@@ -150,7 +150,9 @@ func (c *HTTPMergeClient) resolve(repositoryID string) (owner, repo, baseURL, to
 		return "", "", "", "", fmt.Errorf("repository token unavailable")
 	}
 	base := "https://api.github.com"
-	if c.registryBase != nil {
+	if strings.TrimSpace(repoBaseURL) != "" {
+		base = strings.TrimRight(strings.TrimSpace(repoBaseURL), "/")
+	} else if c.registryBase != nil {
 		if configured, found := c.registryBase[registry]; found && strings.TrimSpace(configured) != "" {
 			base = configured
 		}

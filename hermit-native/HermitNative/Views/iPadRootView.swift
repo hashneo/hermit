@@ -25,15 +25,15 @@ final class RFCStore: ObservableObject {
         isLoading = true
         errorMessage = nil
         do {
-            let (mainFiles, prs) = try await client.discoverRFCs()
+            let (mainFiles, prs, _) = try await client.discoverRFCs()
             var result: [RFC] = mainFiles.map {
                 RFC(id: $0.id, title: $0.name,
                     path: $0.path, sha: $0.sha, source: .mainBranch,
                     lifecycleStatus: $0.lifecycleStatus, htmlURL: $0.htmlURL)
             }
             for pr in prs {
-                result.append(RFC(id: "pr-\(pr.id)", title: pr.title,
-                                  path: pr.headRef,   // unused for PR RFCs — fetchPRRFCContent uses prNumber
+                result.append(RFC(id: pr.catalogID, title: pr.title,
+                                  path: pr.documentPath,
                                   sha: pr.headSHA,
                                   source: .pullRequest(pr),
                                   lifecycleStatus: nil, htmlURL: pr.htmlURL))

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestLoadFromConfigFileWithMultipleRegistries(t *testing.T) {
@@ -44,6 +45,83 @@ repositories:
 	}
 	if cfg.Repositories[0].Owner != "hashicorp" {
 		t.Fatalf("repository owner = %q, want hashicorp", cfg.Repositories[0].Owner)
+	}
+	if got, want := cfg.Cache.RepositoryRFCList.ReadTTL.Duration, 3*time.Minute; got != want {
+		t.Fatalf("repository RFC read TTL = %s, want %s", got, want)
+	}
+	if got, want := cfg.Cache.RepositoryRFCList.Jitter.Duration, time.Minute; got != want {
+		t.Fatalf("repository RFC jitter = %s, want %s", got, want)
+	}
+}
+
+func TestLoadReadsCacheTimingConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "hermit.yaml")
+	configYAML := `listen_address: ":8080"
+cache:
+  repository_rfc_list:
+    read_ttl: 45s
+    jitter: 15s
+registries:
+  - name: github
+    kind: github
+    base_url: https://api.github.com
+repositories:
+  - owner: hashicorp
+    name: hermit
+    registry: github
+`
+
+	if err := os.WriteFile(configPath, []byte(configYAML), 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	t.Setenv("HERMIT_CONFIG_FILE", configPath)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	if got, want := cfg.Cache.RepositoryRFCList.ReadTTL.Duration, 45*time.Second; got != want {
+		t.Fatalf("repository RFC read TTL = %s, want %s", got, want)
+	}
+	if got, want := cfg.Cache.RepositoryRFCList.Jitter.Duration, 15*time.Second; got != want {
+		t.Fatalf("repository RFC jitter = %s, want %s", got, want)
+	}
+}
+
+func TestLoadAllowsZeroCacheJitter(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "hermit.yaml")
+	configYAML := `listen_address: ":8080"
+cache:
+  repository_rfc_list:
+    read_ttl: 3m
+    jitter: 0s
+registries:
+  - name: github
+    kind: github
+    base_url: https://api.github.com
+repositories:
+  - owner: hashicorp
+    name: hermit
+    registry: github
+`
+
+	if err := os.WriteFile(configPath, []byte(configYAML), 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	t.Setenv("HERMIT_CONFIG_FILE", configPath)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	if got := cfg.Cache.RepositoryRFCList.Jitter.Duration; got != 0 {
+		t.Fatalf("repository RFC jitter = %s, want 0s", got)
 	}
 }
 

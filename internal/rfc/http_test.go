@@ -3,10 +3,13 @@ package rfc
 import (
 	"encoding/base64"
 	"encoding/json"
+	"hermit/internal/workset"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // fakeResolver implements RepositoryResolver for tests.
@@ -14,8 +17,8 @@ type fakeResolver struct {
 	owner, name, registry, branch, docsPath, token string
 }
 
-func (f *fakeResolver) ResolveRepositoryAccess(id string) (owner, name, registry, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool) {
-	return f.owner, f.name, f.registry, f.branch, f.docsPath, "hermit:rfc-ready", f.token, true
+func (f *fakeResolver) ResolveRepositoryAccess(id string) (owner, name, registry, baseURL, defaultBranch, docsPathPolicy, rfcLabel, token string, ok bool) {
+	return f.owner, f.name, f.registry, "", f.branch, f.docsPath, "hermit:rfc-ready", f.token, true
 }
 
 func TestGetDocument(t *testing.T) {
@@ -49,7 +52,7 @@ func TestRenderPRRFC(t *testing.T) {
 	// Fake Gitea/GitHub API server.
 	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "open":
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "all":
 			_ = json.NewEncoder(w).Encode([]map[string]any{
 				{
 					"number": 1,
@@ -66,6 +69,8 @@ func TestRenderPRRFC(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"head": map[string]any{"sha": "abc123"},
 			})
+		case isDocuchangoProjectConfigProbe(r):
+			http.NotFound(w, r)
 		case strings.HasPrefix(r.URL.Path, "/repos/owner/repo/contents/"):
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"name":    "rfc-001-test.md",
@@ -109,6 +114,406 @@ func TestRenderPRRFC(t *testing.T) {
 	}
 	if view.Title != "Test RFC" {
 		t.Fatalf("title = %q, want %q", view.Title, "Test RFC")
+	}
+}
+
+func TestRenderRFCByRepository_CachesReviewDocumentByHeadSHA(t *testing.T) {
+	rfcMarkdown := "---\ntitle: Cached Review Doc\n---\n# Cached Review Doc\n\nContent here.\n"
+	rfcContent := base64.StdEncoding.EncodeToString([]byte(rfcMarkdown))
+	var prGets atomic.Int64
+	var fileGets atomic.Int64
+	var contentGets atomic.Int64
+
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/owner/repo/pulls/7":
+			prGets.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"head": map[string]any{"sha": "abc123", "ref": "feature/review-doc"},
+				"user": map[string]any{"login": "alice"},
+			})
+		case r.URL.Path == "/repos/owner/repo/pulls/7/files":
+			fileGets.Add(1)
+			_ = json.NewEncoder(w).Encode([]map[string]string{
+				{"filename": "docs-cms/rfcs/rfc-007-cache.md", "status": "modified"},
+			})
+		case r.URL.Path == "/repos/owner/repo/contents/docs-cms/rfcs/rfc-007-cache.md":
+			contentGets.Add(1)
+			if r.URL.Query().Get("ref") != "abc123" {
+				t.Fatalf("content ref = %q, want abc123", r.URL.Query().Get("ref"))
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"name":    "rfc-007-cache.md",
+				"path":    "docs-cms/rfcs/rfc-007-cache.md",
+				"content": rfcContent,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gitea.Close()
+
+	store, err := workset.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open sqlite workset: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	resolver := &fakeResolver{
+		owner:    "owner",
+		name:     "repo",
+		registry: "gitea-local",
+		branch:   "main",
+		docsPath: "docs-cms/rfcs",
+		token:    "test-token",
+	}
+	service := NewServiceWithRepositoryResolver(resolver, map[string]string{"gitea-local": gitea.URL})
+	service.WithWorkset(store)
+
+	rfcID := makePRCatalogID(7, "docs-cms/rfcs/rfc-007-cache.md")
+	first, err := service.RenderRFCByRepository(t.Context(), "repo-1", rfcID)
+	if err != nil {
+		t.Fatalf("first render: %v", err)
+	}
+	if first.Title != "Cached Review Doc" || first.HeadSHA != "abc123" || first.PRAuthorLogin != "alice" {
+		t.Fatalf("unexpected first render: %+v", first)
+	}
+	if prGets.Load() != 2 || fileGets.Load() != 1 || contentGets.Load() != 1 {
+		t.Fatalf("first render calls: pr=%d files=%d content=%d, want 2/1/1", prGets.Load(), fileGets.Load(), contentGets.Load())
+	}
+
+	second, err := service.RenderRFCByRepository(t.Context(), "repo-1", rfcID)
+	if err != nil {
+		t.Fatalf("second render: %v", err)
+	}
+	if second.Title != first.Title || second.MarkdownSource != first.MarkdownSource || second.HeadSHA != "abc123" {
+		t.Fatalf("unexpected cached render: %+v", second)
+	}
+	if prGets.Load() != 3 {
+		t.Fatalf("second render should only re-check PR head: pr=%d", prGets.Load())
+	}
+	if fileGets.Load() != 1 || contentGets.Load() != 1 {
+		t.Fatalf("second render re-read PR document: files=%d content=%d, want 1/1", fileGets.Load(), contentGets.Load())
+	}
+}
+
+func TestListRepositoryRFCs_IncludesSummary(t *testing.T) {
+	rfcMarkdown := "---\ntitle: Test RFC\nstatus: draft\n---\n# Test RFC\n\nContent here.\n"
+	rfcContent := base64.StdEncoding.EncodeToString([]byte(rfcMarkdown))
+
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/owner/repo/contents/docs-cms/rfcs":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"name": "rfc-001-test.md", "path": "docs-cms/rfcs/rfc-001-test.md", "type": "file",
+			}})
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "all":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"number":          1,
+				"draft":           false,
+				"body":            "## PR Summary\n\nPlease review this RFC.",
+				"comments":        1,
+				"review_comments": 4,
+				"head":            map[string]any{"sha": "abc123", "ref": "feature/rfc"},
+				"labels":          []map[string]any{{"name": "hermit:rfc-ready"}},
+			}})
+		case r.URL.Path == "/repos/owner/repo/pulls/1/files":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"filename": "docs-cms/rfcs/rfc-001-test.md", "status": "added", "additions": 3,
+			}})
+		case isDocuchangoProjectConfigProbe(r):
+			http.NotFound(w, r)
+		case strings.HasPrefix(r.URL.Path, "/repos/owner/repo/contents/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"name":    "rfc-001-test.md",
+				"path":    "docs-cms/rfcs/rfc-001-test.md",
+				"sha":     "blobsha",
+				"content": rfcContent,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gitea.Close()
+
+	resolver := &fakeResolver{
+		owner:    "owner",
+		name:     "repo",
+		registry: "gitea-local",
+		branch:   "main",
+		docsPath: "docs-cms/rfcs",
+		token:    "test-token",
+	}
+	service := NewServiceWithRepositoryResolver(resolver, map[string]string{"gitea-local": gitea.URL})
+	handler := NewHandler(service)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/rfcs", handler.ListRepositoryRFCs)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/repositories/repo-1/rfcs", nil)
+	resp := httptest.NewRecorder()
+	mux.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("list repository rfcs status = %d, want 200; body = %s", resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		Items   []CatalogItem `json:"items"`
+		Total   int           `json:"total"`
+		Summary struct {
+			PendingReviewCount int `json:"pending_review_count"`
+			OpenPRCount        int `json:"open_pr_count"`
+			PRStates           struct {
+				Ready       int `json:"ready"`
+				Conflicted  int `json:"conflicted"`
+				Failed      int `json:"failed"`
+				NeedsReview int `json:"needs_review"`
+			} `json:"pr_states"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode list repository rfcs response: %v", err)
+	}
+	if payload.Summary.PendingReviewCount != 1 {
+		t.Fatalf("pending_review_count = %d, want 1", payload.Summary.PendingReviewCount)
+	}
+	if payload.Summary.OpenPRCount != 1 {
+		t.Fatalf("open_pr_count = %d, want 1", payload.Summary.OpenPRCount)
+	}
+	if payload.Summary.PRStates.NeedsReview != 1 {
+		t.Fatalf("pr_states.needs_review = %d, want 1", payload.Summary.PRStates.NeedsReview)
+	}
+	if payload.Total != len(payload.Items) {
+		t.Fatalf("total = %d, want %d", payload.Total, len(payload.Items))
+	}
+	var prItem *CatalogItem
+	for i := range payload.Items {
+		if payload.Items[i].PRNumber == 1 {
+			prItem = &payload.Items[i]
+			break
+		}
+	}
+	if prItem == nil {
+		t.Fatalf("expected PR catalog item in response")
+	}
+	if prItem.PRBody != "## PR Summary\n\nPlease review this RFC." || prItem.IssueComments != 1 || prItem.ReviewComments != 4 {
+		t.Fatalf("PR metadata = body %q issue %d review %d, want PR body and comment counts", prItem.PRBody, prItem.IssueComments, prItem.ReviewComments)
+	}
+}
+
+func TestListRepositoryRFCs_UsesSQLiteCache(t *testing.T) {
+	rfcMarkdown := "---\ntitle: Cached RFC\nstatus: accepted\n---\n# Cached RFC\n\nBody.\n"
+	rfcContent := base64.StdEncoding.EncodeToString([]byte(rfcMarkdown))
+	var upstreamCalls atomic.Int64
+
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls.Add(1)
+		switch {
+		case r.URL.Path == "/repos/owner/repo/contents/docs-cms/rfcs":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"name": "rfc-001-cached.md", "path": "docs-cms/rfcs/rfc-001-cached.md", "type": "file",
+			}})
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "all":
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case isDocuchangoProjectConfigProbe(r):
+			http.NotFound(w, r)
+		case strings.HasPrefix(r.URL.Path, "/repos/owner/repo/contents/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"name": "rfc-001-cached.md", "path": "docs-cms/rfcs/rfc-001-cached.md", "sha": "blobsha", "content": rfcContent,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gitea.Close()
+
+	resolver := &fakeResolver{
+		owner:    "owner",
+		name:     "repo",
+		registry: "gitea-local",
+		branch:   "main",
+		docsPath: "docs-cms/rfcs",
+		token:    "test-token",
+	}
+	store, err := workset.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open sqlite workset: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	service := NewServiceWithRepositoryResolver(resolver, map[string]string{"gitea-local": gitea.URL})
+	service.WithWorkset(store)
+
+	first, err := service.ListRFCsByRepository(t.Context(), "repo-1", false)
+	if err != nil {
+		t.Fatalf("first list repository rfcs: %v", err)
+	}
+	callsAfterFirst := upstreamCalls.Load()
+	if callsAfterFirst == 0 {
+		t.Fatalf("expected first call to hit upstream")
+	}
+	if first.Cache == nil || first.Cache.Cached {
+		t.Fatalf("first response cache metadata = %+v, want fresh non-cached metadata", first.Cache)
+	}
+
+	second, err := service.ListRFCsByRepository(t.Context(), "repo-1", false)
+	if err != nil {
+		t.Fatalf("second list repository rfcs: %v", err)
+	}
+	if upstreamCalls.Load() != callsAfterFirst {
+		t.Fatalf("second call hit upstream: calls before=%d after=%d", callsAfterFirst, upstreamCalls.Load())
+	}
+	if second.Cache == nil || !second.Cache.Cached {
+		t.Fatalf("second response cache metadata = %+v, want cached metadata", second.Cache)
+	}
+	if second.Total != first.Total {
+		t.Fatalf("second total = %d, want %d", second.Total, first.Total)
+	}
+}
+
+func TestListRepositoryRFCs_RefreshPreservesCachedBasisOnProviderError(t *testing.T) {
+	rfcMarkdown := "---\ntitle: Cached Basis\nstatus: accepted\n---\n# Cached Basis\n\nBody.\n"
+	rfcContent := base64.StdEncoding.EncodeToString([]byte(rfcMarkdown))
+	var failUpstream atomic.Bool
+	var upstreamCalls atomic.Int64
+
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls.Add(1)
+		if failUpstream.Load() {
+			http.Error(w, "bad credentials", http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case r.URL.Path == "/repos/owner/repo/contents/docs-cms/rfcs":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"name": "rfc-001-cached-basis.md", "path": "docs-cms/rfcs/rfc-001-cached-basis.md", "type": "file",
+			}})
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "all":
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case isDocuchangoProjectConfigProbe(r):
+			http.NotFound(w, r)
+		case strings.HasPrefix(r.URL.Path, "/repos/owner/repo/contents/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"name": "rfc-001-cached-basis.md", "path": "docs-cms/rfcs/rfc-001-cached-basis.md", "sha": "blobsha", "content": rfcContent,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gitea.Close()
+
+	resolver := &fakeResolver{
+		owner:    "owner",
+		name:     "repo",
+		registry: "gitea-local",
+		branch:   "main",
+		docsPath: "docs-cms/rfcs",
+		token:    "test-token",
+	}
+	store, err := workset.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open sqlite workset: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	service := NewServiceWithRepositoryResolver(resolver, map[string]string{"gitea-local": gitea.URL})
+	service.WithWorkset(store)
+
+	first, err := service.ListRFCsByRepository(t.Context(), "repo-1", false)
+	if err != nil {
+		t.Fatalf("prime list repository rfcs: %v", err)
+	}
+	callsAfterPrime := upstreamCalls.Load()
+	failUpstream.Store(true)
+
+	refreshed, err := service.ListRFCsByRepository(t.Context(), "repo-1", true)
+	if err != nil {
+		t.Fatalf("forced refresh should return cached basis after provider error: %v", err)
+	}
+	if upstreamCalls.Load() <= callsAfterPrime {
+		t.Fatalf("forced refresh did not attempt source of truth")
+	}
+	if refreshed.Cache == nil || !refreshed.Cache.Cached || refreshed.Cache.LastErrorCode != "provider_error" {
+		t.Fatalf("refresh cache metadata = %+v, want cached provider_error", refreshed.Cache)
+	}
+	if refreshed.Total != first.Total || refreshed.Items[0].Title != first.Items[0].Title {
+		t.Fatalf("cached basis mismatch: got total=%d title=%q, want total=%d title=%q", refreshed.Total, refreshed.Items[0].Title, first.Total, first.Items[0].Title)
+	}
+}
+
+func TestListRepositoryRFCs_DoesNotServeCacheForChangedRepositoryIdentity(t *testing.T) {
+	rfcMarkdown := "---\ntitle: Original Repo\nstatus: accepted\n---\n# Original Repo\n\nBody.\n"
+	rfcContent := base64.StdEncoding.EncodeToString([]byte(rfcMarkdown))
+	var upstreamCalls atomic.Int64
+
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls.Add(1)
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/repos/owner/other/"):
+			http.Error(w, "source unavailable", http.StatusBadGateway)
+		case r.URL.Path == "/repos/owner/repo/contents/docs-cms/rfcs":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"name": "rfc-001-original.md", "path": "docs-cms/rfcs/rfc-001-original.md", "type": "file",
+			}})
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "all":
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case isDocuchangoProjectConfigProbe(r):
+			http.NotFound(w, r)
+		case strings.HasPrefix(r.URL.Path, "/repos/owner/repo/contents/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"name": "rfc-001-original.md", "path": "docs-cms/rfcs/rfc-001-original.md", "sha": "blobsha", "content": rfcContent,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gitea.Close()
+
+	resolver := &fakeResolver{
+		owner:    "owner",
+		name:     "repo",
+		registry: "gitea-local",
+		branch:   "main",
+		docsPath: "docs-cms/rfcs",
+		token:    "test-token",
+	}
+	store, err := workset.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open sqlite workset: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	service := NewServiceWithRepositoryResolver(resolver, map[string]string{"gitea-local": gitea.URL})
+	service.WithWorkset(store)
+
+	if _, err := service.ListRFCsByRepository(t.Context(), "repo-1", false); err != nil {
+		t.Fatalf("prime list repository rfcs: %v", err)
+	}
+	callsAfterPrime := upstreamCalls.Load()
+	resolver.name = "other"
+
+	if _, err := service.ListRFCsByRepository(t.Context(), "repo-1", false); err == nil {
+		t.Fatalf("changed repository identity should not return stale cache")
+	}
+	if upstreamCalls.Load() <= callsAfterPrime {
+		t.Fatalf("changed repository identity did not attempt source of truth")
+	}
+}
+
+func TestRepositoryRFCListCacheTTLUsesConfiguredJitter(t *testing.T) {
+	service := NewServiceWithRepositoryResolver(&fakeResolver{}, nil)
+	service.WithRepositoryRFCListCacheTiming(3*time.Minute, time.Minute)
+
+	ttl := service.repositoryRFCListCacheTTL("repo-1")
+	if ttl < 3*time.Minute {
+		t.Fatalf("ttl = %s, want at least 3m", ttl)
+	}
+	if ttl >= 4*time.Minute {
+		t.Fatalf("ttl = %s, want less than 4m", ttl)
+	}
+	if ttl != service.repositoryRFCListCacheTTL("repo-1") {
+		t.Fatalf("ttl jitter should be stable for the same repository")
 	}
 }
 

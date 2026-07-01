@@ -19,29 +19,41 @@ import (
 	"hermit/internal/syncstatus"
 	"hermit/internal/thread"
 	"hermit/internal/ui"
+	"hermit/internal/workset"
 )
 
 const shutdownTimeout = 10 * time.Second
 
 // App wires foundational HTTP services for the Hermit monolith.
 type App struct {
-	server *http.Server
+	server  *http.Server
+	closers []io.Closer
 }
 
 // New creates an application with baseline routing and server configuration.
 func New(cfg config.Config) *App {
 	mux := newMux(cfg)
+	closers := []io.Closer{}
+	accessLogStore, err := observability.OpenAccessLog(cfg.DataDir)
+	if err != nil {
+		slog.Warn("sqlite access log disabled", "dataDir", cfg.DataDir, "error", err)
+	} else {
+		closers = append(closers, accessLogStore)
+		mux.HandleFunc("GET /api/v1/logs", observability.NewLogHandler(accessLogStore).List)
+	}
 
 	return &App{
 		server: &http.Server{
 			Addr:    cfg.ListenAddress,
-			Handler: observability.Middleware(mux),
+			Handler: observability.MiddlewareWithAccessLog(mux, accessLogStore),
 		},
+		closers: closers,
 	}
 }
 
 // Run starts the HTTP server and blocks until context cancellation or server error.
 func (a *App) Run(ctx context.Context) error {
+	defer a.close()
 	errCh := make(chan error, 1)
 
 	go func() {
@@ -73,21 +85,44 @@ func (a *App) Run(ctx context.Context) error {
 	}
 }
 
+func (a *App) close() {
+	for _, closer := range a.closers {
+		if err := closer.Close(); err != nil {
+			slog.Warn("close app resource failed", "error", err)
+		}
+	}
+}
+
 func newMux(cfg config.Config) *http.ServeMux {
 	mux := http.NewServeMux()
-	repositoryService := repository.NewService(nil)
-	repositoryService.SeedFromConfig(cfg.Repositories)
+	repositoryService := repository.NewPersistentService(nil, cfg.DataDir)
+	if hasProgrammaticRepositoryTokens(cfg.Repositories) {
+		repositoryService.ReplaceFromConfig(cfg.Repositories)
+	} else {
+		repositoryService.SeedFromConfig(cfg.Repositories)
+	}
 	repositoryHandler := repository.NewHandler(repositoryService)
 	mux.HandleFunc("POST /api/v1/repositories", repositoryHandler.CreateRepository)
 	mux.HandleFunc("GET /api/v1/repositories", repositoryHandler.ListRepositories)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}", repositoryHandler.GetRepository)
+	mux.HandleFunc("DELETE /api/v1/repositories/{repositoryId}", repositoryHandler.DeleteRepository)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/validate", repositoryHandler.ValidateRepository)
+	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rotate-token", repositoryHandler.RotateRepositoryToken)
 
 	registryBaseURLs := map[string]string{}
 	for _, registry := range cfg.Registries {
 		registryBaseURLs[registry.Name] = registry.BaseURL
 	}
+	worksetStore, err := workset.Open(cfg.DataDir)
+	if err != nil {
+		slog.Warn("sqlite workset disabled", "dataDir", cfg.DataDir, "error", err)
+	}
 	rfcService := rfc.NewServiceWithRepositoryResolver(repositoryService, registryBaseURLs)
+	rfcService.WithWorkset(worksetStore)
+	rfcService.WithRepositoryRFCListCacheTiming(
+		cfg.Cache.RepositoryRFCList.ReadTTL.Duration,
+		cfg.Cache.RepositoryRFCList.Jitter.Duration,
+	)
 	rfcHandler := rfc.NewHandler(rfcService)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/rfc", rfcHandler.GetDocument)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/rfc/render", rfcHandler.Render)
@@ -96,6 +131,7 @@ func newMux(cfg config.Config) *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/rfcs", rfcHandler.ListRepositoryRFCs)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/rfcs/{rfcId}", rfcHandler.RenderRepositoryRFCByID)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rfcs/{rfcId}/submit-for-review", rfcHandler.SubmitForReview)
+	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/review-sessions", rfcHandler.StartReviewSession)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/accept", rfcHandler.AcceptRFC)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/merge", rfcHandler.MergePR)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/ci-status", rfcHandler.GetCIStatus)
@@ -149,6 +185,15 @@ func newMux(cfg config.Config) *http.ServeMux {
 	mux.Handle("GET /", ui.Handler())
 
 	return mux
+}
+
+func hasProgrammaticRepositoryTokens(repositories []config.Repository) bool {
+	for _, repository := range repositories {
+		if repository.Token != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // meHandler proxies the authenticated user's identity from GitHub/Gitea.

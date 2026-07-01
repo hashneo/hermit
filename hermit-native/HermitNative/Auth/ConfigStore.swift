@@ -23,6 +23,8 @@ final class ConfigStore {
         case aiProvider        = "hermit.aiProvider"
         case serverMode        = "hermit.serverMode"   // JSON-encoded ServerMode
         case localNetworkToken = "hermit.localNetworkToken"
+        case cacheReadTTLSeconds = "hermit.cache.readTTLSeconds"
+        case cacheJitterSeconds  = "hermit.cache.jitterSeconds"
     }
 
     // MARK: - Properties
@@ -88,6 +90,22 @@ final class ConfigStore {
         }
     }
 
+    var cacheReadTTLSeconds: Int {
+        get {
+            let value = defaults.integer(forKey: Key.cacheReadTTLSeconds.rawValue)
+            return value > 0 ? value : 180
+        }
+        set { defaults.set(max(1, newValue), forKey: Key.cacheReadTTLSeconds.rawValue) }
+    }
+
+    var cacheJitterSeconds: Int {
+        get {
+            if defaults.object(forKey: Key.cacheJitterSeconds.rawValue) == nil { return 60 }
+            return max(0, defaults.integer(forKey: Key.cacheJitterSeconds.rawValue))
+        }
+        set { defaults.set(max(0, newValue), forKey: Key.cacheJitterSeconds.rawValue) }
+    }
+
     // MARK: - Convenience
 
     /// True when the minimum fields needed to connect are present.
@@ -118,7 +136,8 @@ final class ConfigStore {
 
     func deleteAll() {
         for key in [Key.baseURL, .serverBaseURL, .repoOwner, .repoName,
-                    .docsPath, .rfcLabel, .aiProvider, .serverMode, .localNetworkToken] {
+                    .docsPath, .rfcLabel, .aiProvider, .serverMode, .localNetworkToken,
+                    .cacheReadTTLSeconds, .cacheJitterSeconds] {
             defaults.removeObject(forKey: key.rawValue)
         }
     }

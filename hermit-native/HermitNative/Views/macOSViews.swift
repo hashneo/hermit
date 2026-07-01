@@ -2,13 +2,12 @@ import SwiftUI
 #if os(macOS)
 import AppKit
 
-// MARK: - hermit-noc: NSStatusItem / AppDelegate / popover / LSUIElement
-// (AppDelegate approach — registered via HermitNativeApp MenuBarExtra scene)
+// MARK: - hermit-noc: MenuBarExtra / LSUIElement
 
 // NOTE: macOS menu bar is handled declaratively via MenuBarExtra in HermitNativeApp.swift.
 // This file adds macOS-specific window management helpers.
 
-// MARK: - hermit-rsf: MenuBarPopover — RFC list sidebar + WKWebView detail
+// MARK: - hermit-rsf: MenuBarRFCBrowserView — RFC list sidebar + WKWebView detail
 
 struct MenuBarRFCBrowserView: View {
     @EnvironmentObject private var appState: AppState

@@ -15,13 +15,26 @@ struct RFCPullRequest: Identifiable {
     let id: Int
     let number: Int
     let title: String
+    let prTitle: String
+    let prState: String
+    let prMerged: Bool
     let body: String
     let headSHA: String
     let headRef: String
     let htmlURL: String
     let state: String
     let draft: Bool
+    let mergeable: Bool?
+    let mergeableState: String?
+    let documentType: String
+    let documentPath: String
+    let catalogID: String
     let labels: [String]
+    let changedFiles: Int
+    let additions: Int
+    let deletions: Int
+    let issueCommentCount: Int
+    let reviewCommentCount: Int
 }
 
 struct ThreadMessage: Identifiable, Hashable {
@@ -99,6 +112,34 @@ struct SubmitForReviewResult: Decodable {
         case prNumber = "pr_number"
         case htmlURL  = "html_url"
         case branch
+    }
+}
+
+struct ReviewSessionResult: Decodable, Equatable {
+    let prNumber: Int
+    let htmlURL: String
+    let branch: String
+    let filePath: String
+    let markerPath: String
+    let documentType: String
+    let previousPRNumber: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case prNumber = "pr_number"
+        case htmlURL = "html_url"
+        case branch
+        case filePath = "file_path"
+        case markerPath = "marker_path"
+        case documentType = "document_type"
+        case previousPRNumber = "previous_pr_number"
+    }
+}
+
+struct ReviewSessionRedirectError: LocalizedError {
+    let result: ReviewSessionResult
+
+    var errorDescription: String? {
+        "Opened review-session PR #\(result.prNumber) for this merged PR."
     }
 }
 

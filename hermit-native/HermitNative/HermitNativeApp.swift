@@ -1,6 +1,7 @@
 import SwiftUI
 #if os(macOS)
 import AppKit
+import Combine
 #endif
 
 // MARK: - hermit-y9x: Wire EmbeddedServerManager at app launch (macOS)
@@ -24,15 +25,8 @@ struct HermitNativeApp: App {
 
     var body: some Scene {
 #if os(macOS)
-        MenuBarExtra("Hermit", systemImage: advertiser.pendingInvitation != nil ? "person.crop.circle.badge.exclamationmark" : "doc.text.magnifyingglass") {
-            MenuBarContentView()
-                .environmentObject(appState)
-        }
-        .menuBarExtraStyle(.menu)
-
         Settings {
-            SettingsView()
-                .environmentObject(appState)
+            EmptyView()
         }
 #else
         WindowGroup {
@@ -62,8 +56,12 @@ struct HermitNativeApp: App {
 final class HermitAppDelegate: NSObject, NSApplicationDelegate {
     private var serverStarted = false
     private var restartObserver: NSObjectProtocol?
+    private var menuBarController: MenuBarStatusItemController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let menuBarController = MenuBarStatusItemController()
+        self.menuBarController = menuBarController
+        menuBarController.start()
         // hermit-9ds: live-restart the embedded server when credentials/repos change.
         restartObserver = NotificationCenter.default.addObserver(
             forName: .hermitRestartRequired,
@@ -88,6 +86,7 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        menuBarController?.stop()
         EmbeddedServerManager.shared.stop()
         PairingAdvertiser.shared.stop()
     }
@@ -197,39 +196,6 @@ extension HermitNativeApp {
     }
 }
 
-// MARK: - Settings Window Manager (macOS)
-// Opens the Settings window imperatively so it works from the MenuBarExtra
-// panel without needing @Environment(\.openSettings).
-
-#if os(macOS)
-@MainActor
-final class SettingsWindowManager {
-    static let shared = SettingsWindowManager()
-    private var controller: NSWindowController?
-
-    func open() {
-        if let existing = controller?.window, existing.isVisible {
-            existing.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
-        }
-        let view = SettingsView().environmentObject(AppState.shared)
-        let hosting = NSHostingController(rootView: view)
-        let window = NSWindow(contentViewController: hosting)
-        window.title = "Settings"
-        window.styleMask = [.titled, .closable, .resizable]
-        window.setContentSize(NSSize(width: 720, height: 860))
-        window.center()
-        window.isReleasedWhenClosed = false
-        let wc = NSWindowController(window: window)
-        controller = wc
-        wc.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
-    }
-}
-#endif
-
-
 @MainActor
 final class RFCViewerWindowManager {
     static let shared = RFCViewerWindowManager()
@@ -322,6 +288,223 @@ final class RFCViewerWindowManager {
         // Defer by one run-loop tick — calling setActivationPolicy synchronously here
         // causes the MenuBarExtra to disappear on macOS when an RFC window is opened
         // while the app is in .accessory mode (e.g. triggered by an iPad Handoff).
+        DispatchQueue.main.async {
+            NSApp.setActivationPolicy(.regular)
+        }
+    }
+}
+
+@MainActor
+final class MenuBarStatusItemController: NSObject {
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    private var panel: NSPanel?
+    private var outsideClickMonitor: Any?
+    private var localClickMonitor: Any?
+    private var cancellables: Set<AnyCancellable> = []
+
+    func start() {
+        guard let button = statusItem.button else { return }
+        button.isEnabled = true
+        button.target = self
+        button.action = #selector(togglePanel(_:))
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        button.toolTip = "Hermit"
+        updateIcon(hasPendingInvitation: PairingAdvertiser.shared.pendingInvitation != nil)
+        Self.log("status item started; buttonFrame=\(button.frame)")
+
+        PairingAdvertiser.shared.$pendingInvitation
+            .receive(on: RunLoop.main)
+            .sink { [weak self] invite in
+                self?.updateIcon(hasPendingInvitation: invite != nil)
+            }
+            .store(in: &cancellables)
+    }
+
+    func stop() {
+        closePanel()
+        if let outsideClickMonitor {
+            NSEvent.removeMonitor(outsideClickMonitor)
+            self.outsideClickMonitor = nil
+        }
+        if let localClickMonitor {
+            NSEvent.removeMonitor(localClickMonitor)
+            self.localClickMonitor = nil
+        }
+        cancellables.removeAll()
+        NSStatusBar.system.removeStatusItem(statusItem)
+    }
+
+    @objc private func togglePanel(_ sender: Any?) {
+        Self.log("status item clicked; visible=\(panel?.isVisible == true)")
+        if panel?.isVisible == true {
+            closePanel()
+        } else {
+            openPanel()
+        }
+    }
+
+    private func openPanel() {
+        guard let button = statusItem.button,
+              let buttonWindow = button.window else { return }
+
+        let buttonRect = button.convert(button.bounds, to: nil)
+        let screenRect = buttonWindow.convertToScreen(buttonRect)
+        let content = MenuBarContentView(
+            anchorScreenX: screenRect.midX,
+            onOpenReview: { [weak self] in
+                self?.closePanel()
+            },
+            onDetach: { [weak self] in
+                DashboardFloatingWindowManager.shared.open(appState: AppState.shared)
+                self?.closePanel()
+            }
+        )
+            .environmentObject(AppState.shared)
+        let hosting = NSHostingController(rootView: content)
+        hosting.view.wantsLayer = true
+        hosting.view.layer?.backgroundColor = NSColor.clear.cgColor
+
+        let initialFrame = NSRect(
+            x: screenRect.midX - 280,
+            y: screenRect.minY - 486,
+            width: 560,
+            height: 486
+        )
+        let panel = NSPanel(
+            contentRect: initialFrame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.contentViewController = hosting
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.level = .statusBar
+        panel.collectionBehavior = [.transient, .ignoresCycle, .canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isReleasedWhenClosed = false
+        panel.hidesOnDeactivate = false
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+
+        self.panel = panel
+        panel.orderFrontRegardless()
+        installClickMonitors()
+        Self.log("panel opened; statusRect=\(screenRect) initialFrame=\(initialFrame)")
+    }
+
+    private func closePanel() {
+        guard panel?.isVisible == true else { return }
+        panel?.orderOut(nil)
+        Self.log("panel closed")
+    }
+
+    private func installClickMonitors() {
+        if outsideClickMonitor == nil {
+            outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+                Task { @MainActor in
+                    self?.closeIfClickIsOutsidePanel()
+                }
+            }
+        }
+        if localClickMonitor == nil {
+            localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+                Task { @MainActor in
+                    self?.closeIfClickIsOutsidePanel()
+                }
+                return event
+            }
+        }
+    }
+
+    private func closeIfClickIsOutsidePanel() {
+        guard let panel,
+              panel.isVisible,
+              !panel.frame.contains(NSEvent.mouseLocation),
+              !statusItemFrameContainsMouse() else { return }
+        closePanel()
+    }
+
+    private func statusItemFrameContainsMouse() -> Bool {
+        guard let button = statusItem.button,
+              let buttonWindow = button.window else { return false }
+        let buttonRect = button.convert(button.bounds, to: nil)
+        let screenRect = buttonWindow.convertToScreen(buttonRect)
+        return screenRect.contains(NSEvent.mouseLocation)
+    }
+
+    private func updateIcon(hasPendingInvitation: Bool) {
+        let symbolName = hasPendingInvitation ? "person.crop.circle.badge.exclamationmark" : "doc.text.magnifyingglass"
+        statusItem.button?.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Hermit")
+    }
+
+    private static func log(_ message: String) {
+        let line = "[\(Date())] [MenuBarStatusItemController] \(message)\n"
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("hermit-native-debug.log").path
+        if !FileManager.default.fileExists(atPath: path) {
+            FileManager.default.createFile(atPath: path, contents: nil)
+        }
+        guard let data = line.data(using: .utf8),
+              let handle = FileHandle(forWritingAtPath: path) else { return }
+        handle.seekToEndOfFile()
+        handle.write(data)
+        try? handle.close()
+    }
+}
+
+// MARK: - Dashboard Floating Window Manager (macOS)
+
+@MainActor
+final class DashboardFloatingWindowManager {
+    static let shared = DashboardFloatingWindowManager()
+    private var controller: NSWindowController?
+
+    func open(appState: AppState) {
+        if let existing = controller?.window, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let content = MenuBarContentView(
+            managesWindowPresentation: false,
+            allowsDetach: false,
+            onOpenReview: {}
+        )
+            .environmentObject(appState)
+
+        let hosting = NSHostingController(rootView: content)
+        hosting.sizingOptions = []
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 780, height: 580),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable, .utilityWindow],
+            backing: .buffered,
+            defer: false
+        )
+        panel.contentViewController = hosting
+        panel.title = "Hermit Dashboard"
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
+        panel.minSize = NSSize(width: 780, height: 580)
+        panel.center()
+
+        let controller = NSWindowController(window: panel)
+        self.controller = controller
+
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.controller = nil }
+        }
+
+        controller.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
         DispatchQueue.main.async {
             NSApp.setActivationPolicy(.regular)
         }

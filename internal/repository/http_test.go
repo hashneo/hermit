@@ -3,8 +3,11 @@ package repository
 import (
 	"bytes"
 	"encoding/json"
+	"hermit/internal/config"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -15,9 +18,11 @@ func TestRepositoryConfigCreateGetValidate(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/repositories", handler.CreateRepository)
 	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}", handler.GetRepository)
+	mux.HandleFunc("DELETE /api/v1/repositories/{repositoryId}", handler.DeleteRepository)
 	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/validate", handler.ValidateRepository)
+	mux.HandleFunc("POST /api/v1/repositories/{repositoryId}/rotate-token", handler.RotateRepositoryToken)
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/repositories", bytes.NewBufferString(`{"owner":"hashicorp","name":"hermit","personal_access_token":"ghp_12345678901234567890"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/repositories", bytes.NewBufferString(`{"owner":"hashicorp","name":"hermit","base_url":"https://github.example.com/api/v3/","personal_access_token":"ghp_12345678901234567890","rfc_label":"docs:review"}`))
 	createResp := httptest.NewRecorder()
 	mux.ServeHTTP(createResp, createReq)
 
@@ -34,6 +39,12 @@ func TestRepositoryConfigCreateGetValidate(t *testing.T) {
 	}
 	if created.Auth.Method != "pat" {
 		t.Fatalf("auth method = %q, want %q", created.Auth.Method, "pat")
+	}
+	if created.BaseURL != "https://github.example.com/api/v3" {
+		t.Fatalf("base URL = %q, want normalized GitHub Enterprise API URL", created.BaseURL)
+	}
+	if created.RFCLabel != "docs:review" {
+		t.Fatalf("rfc label = %q, want docs:review", created.RFCLabel)
 	}
 
 	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/repositories/"+created.ID, nil)
@@ -56,6 +67,35 @@ func TestRepositoryConfigCreateGetValidate(t *testing.T) {
 	}
 	if !validation.Healthy {
 		t.Fatalf("validate healthy = false, want true")
+	}
+
+	rotateReq := httptest.NewRequest(http.MethodPost, "/api/v1/repositories/"+created.ID+"/rotate-token", bytes.NewBufferString(`{"personal_access_token":"ghp_rotated1234567890"}`))
+	rotateResp := httptest.NewRecorder()
+	mux.ServeHTTP(rotateResp, rotateReq)
+	if rotateResp.Code != http.StatusOK {
+		t.Fatalf("rotate status = %d, want %d", rotateResp.Code, http.StatusOK)
+	}
+
+	var rotated Config
+	if err := json.Unmarshal(rotateResp.Body.Bytes(), &rotated); err != nil {
+		t.Fatalf("decode rotate response: %v", err)
+	}
+	if !rotated.Validation.Healthy {
+		t.Fatalf("expected healthy validation after rotation")
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/repositories/"+created.ID, nil)
+	deleteResp := httptest.NewRecorder()
+	mux.ServeHTTP(deleteResp, deleteReq)
+	if deleteResp.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d, want %d", deleteResp.Code, http.StatusNoContent)
+	}
+
+	getDeletedReq := httptest.NewRequest(http.MethodGet, "/api/v1/repositories/"+created.ID, nil)
+	getDeletedResp := httptest.NewRecorder()
+	mux.ServeHTTP(getDeletedResp, getDeletedReq)
+	if getDeletedResp.Code != http.StatusNotFound {
+		t.Fatalf("get deleted status = %d, want %d", getDeletedResp.Code, http.StatusNotFound)
 	}
 }
 
@@ -83,5 +123,109 @@ func TestRepositoryConfigCreateRejectsInvalidPAT(t *testing.T) {
 	}
 	if created.Validation.LastErrorCode == "" {
 		t.Fatalf("expected validation last error code")
+	}
+}
+
+func TestPersistentRepositoryConfigSurvivesServiceRestart(t *testing.T) {
+	dataDir := t.TempDir()
+	service := NewPersistentService(nil, dataDir)
+
+	created, err := service.Create(t.Context(), createInput{
+		Owner:          "hashicorp",
+		Name:           "gantry",
+		Registry:       "github",
+		BaseURL:        "https://api.github.com/",
+		Token:          "ghp_12345678901234567890",
+		DocsPathPolicy: "docs",
+	})
+	if err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+
+	reloaded := NewPersistentService(nil, dataDir)
+	got, ok := reloaded.Get(created.ID)
+	if !ok {
+		t.Fatalf("expected repository %s after reload", created.ID)
+	}
+	if got.Owner != "hashicorp" || got.Name != "gantry" || got.DocsPathPolicy != "docs" {
+		t.Fatalf("unexpected repository after reload: %+v", got)
+	}
+	if got.BaseURL != "https://api.github.com" {
+		t.Fatalf("base URL after reload = %q", got.BaseURL)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "repositories.json")); err != nil {
+		t.Fatalf("expected repository store file: %v", err)
+	}
+}
+
+func TestReplaceFromConfigPrunesStalePersistentRepositories(t *testing.T) {
+	dataDir := t.TempDir()
+	service := NewPersistentService(nil, dataDir)
+
+	stale, err := service.Create(t.Context(), createInput{
+		Owner:          "hashicorp",
+		Name:           "stale",
+		Registry:       "github",
+		Token:          "ghp_stale1234567890",
+		DocsPathPolicy: "docs-cms/rfcs",
+	})
+	if err != nil {
+		t.Fatalf("create stale repository: %v", err)
+	}
+	kept, err := service.Create(t.Context(), createInput{
+		Owner:          "hashicorp",
+		Name:           "kept",
+		Registry:       "github",
+		Token:          "ghp_old1234567890",
+		DocsPathPolicy: "docs-cms/rfcs",
+	})
+	if err != nil {
+		t.Fatalf("create kept repository: %v", err)
+	}
+
+	reloaded := NewPersistentService(nil, dataDir)
+	reloaded.ReplaceFromConfig([]config.Repository{
+		{
+			Owner:          "hashicorp",
+			Name:           "kept",
+			Registry:       "github",
+			DefaultBranch:  "main",
+			DocsPathPolicy: "docs-cms/rfcs",
+			RFCLabel:       "hermit:rfc-ready",
+			Token:          "ghp_new1234567890",
+		},
+		{
+			Owner:          "hashicorp",
+			Name:           "new",
+			Registry:       "github",
+			DefaultBranch:  "main",
+			DocsPathPolicy: "docs",
+			RFCLabel:       "hermit:rfc-ready",
+			Token:          "ghp_newrepo123456",
+		},
+	})
+
+	items := reloaded.List()
+	if len(items) != 2 {
+		t.Fatalf("repository count = %d, want 2: %+v", len(items), items)
+	}
+	if _, ok := reloaded.Get(stale.ID); ok {
+		t.Fatalf("stale repository %s was not pruned", stale.ID)
+	}
+	gotKept, ok := reloaded.Get(kept.ID)
+	if !ok {
+		t.Fatalf("kept repository ID %s was not preserved", kept.ID)
+	}
+	if gotKept.Name != "kept" {
+		t.Fatalf("kept repository name = %q", gotKept.Name)
+	}
+
+	reloadedAgain := NewPersistentService(nil, dataDir)
+	items = reloadedAgain.List()
+	if len(items) != 2 {
+		t.Fatalf("reloaded repository count = %d, want 2: %+v", len(items), items)
+	}
+	if _, ok := reloadedAgain.Get(stale.ID); ok {
+		t.Fatalf("stale repository %s persisted after replacement", stale.ID)
 	}
 }

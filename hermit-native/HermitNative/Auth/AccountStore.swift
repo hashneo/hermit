@@ -56,11 +56,13 @@ extension Connection: Codable {
 /// A repository belonging to an account (connection).
 struct Repository: Identifiable, Codable, Equatable {
     var id:        UUID   = UUID()
+    var serverID:  String? = nil
     var accountID: UUID           // foreign key → Connection.id
     var owner:     String         // e.g. "gitea_admin"
     var name:      String         // e.g. "hermit-rfcs"
     var docsPath:  String         // e.g. "docs-cms/rfcs"
     var rfcLabel:  String         // e.g. "hermit:rfc-ready"
+    var lastSyncedAt: Date? = nil
 
     var fullName: String { "\(owner)/\(name)" }
 }
@@ -178,8 +180,7 @@ final class AccountStore: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
 
-        let isGitHub = base.contains("github.com")
-        let healthPath = isGitHub ? "/user" : "/api/v1/health"
+        let healthPath = Self.isGitHubAPIEndpoint(base) ? "/user" : "/api/v1/health"
         guard let url = URL(string: "\(base)\(healthPath)") else { return }
 
         var req = URLRequest(url: url, timeoutInterval: 8)
@@ -199,6 +200,19 @@ final class AccountStore: ObservableObject {
     // MARK: - Private
 
     private var connectedIDs: Set<UUID> = []
+
+    private static func isGitHubAPIEndpoint(_ endpoint: String) -> Bool {
+        guard let url = URL(string: endpoint),
+              let host = url.host?.lowercased() else { return false }
+
+        let path = url.path.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return host == "api.github.com" ||
+            host == "github.com" ||
+            host.hasPrefix("github.") ||
+            host.contains(".github.") ||
+            path == "api/v3" ||
+            path.hasSuffix("/api/v3")
+    }
 
     private func save() {
         AccountStore.saveToDefaults(connections: connections)
@@ -253,10 +267,16 @@ final class RepositoryStore: ObservableObject {
              docsPath: String = "docs-cms/rfcs", rfcLabel: String = "hermit:rfc-ready") {
         let repo = Repository(accountID: accountID, owner: owner, name: name,
                               docsPath: docsPath, rfcLabel: rfcLabel)
+        add(repo)
+    }
+
+    func add(_ repo: Repository, requiresRestart: Bool = true) {
         repositories.append(repo)
         save()
-        // hermit-9ds: no live server restart — user must relaunch to apply config changes.
-        NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
+        if requiresRestart {
+            // hermit-9ds: no live server restart — user must relaunch to apply config changes.
+            NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
+        }
     }
 
     func update(_ repo: Repository) {
@@ -265,6 +285,12 @@ final class RepositoryStore: ObservableObject {
         save()
         // hermit-9ds: no live server restart — user must relaunch to apply config changes.
         NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
+    }
+
+    func markSynced(_ repo: Repository, at date: Date = Date()) {
+        guard let idx = repositories.firstIndex(where: { $0.id == repo.id }) else { return }
+        repositories[idx].lastSyncedAt = date
+        save()
     }
 
     func remove(_ repo: Repository) {
@@ -296,9 +322,10 @@ final class RepositoryStore: ObservableObject {
                 $0.name.lowercased()  == inbound.name.lowercased()
             }) {
                 // Preserve the existing UUID; update mutable fields.
-                return Repository(id: existing.id, accountID: existing.accountID,
+                return Repository(id: existing.id, serverID: inbound.serverID, accountID: existing.accountID,
                                   owner: inbound.owner, name: inbound.name,
-                                  docsPath: inbound.docsPath, rfcLabel: inbound.rfcLabel)
+                                  docsPath: inbound.docsPath, rfcLabel: inbound.rfcLabel,
+                                  lastSyncedAt: existing.lastSyncedAt)
             }
             return inbound
         }

@@ -1,4 +1,9 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
 
 struct PRReviewSheet: View {
 
@@ -32,6 +37,7 @@ struct PRReviewSheet: View {
     @State private var threads: [ReviewThread] = []
     @State private var loadError: String? = nil
     @State private var submitError: String? = nil
+    @State private var reviewSessionRedirect: ReviewSessionResult? = nil
     @State private var isDismissing: Set<Int64> = []
     @State private var pendingDismissID: Int64? = nil
     @State private var isDeletingThread: Set<String> = []
@@ -157,6 +163,23 @@ struct PRReviewSheet: View {
                                     Label(err, systemImage: "exclamationmark.triangle.fill")
                                         .foregroundStyle(.red)
                                         .font(.caption)
+                                }
+                                if let redirect = reviewSessionRedirect {
+                                    HStack(spacing: 10) {
+                                        Label("Opened review-session PR #\(redirect.prNumber)", systemImage: "arrow.triangle.pull")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.secondary)
+                                        Spacer(minLength: 8)
+                                        Button {
+                                            openReviewSession(redirect)
+                                        } label: {
+                                            Label("Open PR #\(redirect.prNumber)", systemImage: "arrow.up.right.square")
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                    }
+                                    .padding(10)
+                                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                                 }
 
                                 HStack {
@@ -428,15 +451,31 @@ struct PRReviewSheet: View {
         guard !body.isEmpty else { return }
         isSubmitting = true
         submitError = nil
+        reviewSessionRedirect = nil
         do {
             try await onSubmit(body)
             reviewText = ""
             if let r = try? await onRefresh() { reviews = r }
             if let t = try? await onFetchThreads?() { threads = t }
         } catch {
-            submitError = error.localizedDescription
+            if let redirect = error as? ReviewSessionRedirectError {
+                reviewText = ""
+                reviewSessionRedirect = redirect.result
+                openReviewSession(redirect.result)
+            } else {
+                submitError = error.localizedDescription
+            }
         }
         isSubmitting = false
+    }
+
+    private func openReviewSession(_ result: ReviewSessionResult) {
+        guard let url = URL(string: result.htmlURL) else { return }
+#if os(macOS)
+        NSWorkspace.shared.open(url)
+#else
+        UIApplication.shared.open(url)
+#endif
     }
 
     private func doDismiss(_ reviewID: Int64) async {

@@ -11,27 +11,31 @@ regardless of sandbox state. It writes hermit.accounts / hermit.repositories
 JSON so the app has fully-populated stores on first launch without prompting.
 
 Usage:
-    python3 scripts/seed-native-prefs.py <bundle-id> [config/hermit.yaml] [--token TOKEN]
+    python3 scripts/seed-native-prefs.py <bundle-id> [config/hermit.yaml] [--repos-json config/hermit-repos.meridian.json] [--token TOKEN]
 """
 
 import json
 import plistlib
 import os
 import re
+import subprocess
 import sys
 import uuid
+from urllib.parse import urlparse
 
 # Fixed dev UUIDs — stable across runs so UserDefaults data is idempotent.
 DEV_ACCOUNT_ID = "00000000-0000-0000-0000-000000000001"
 DEV_REPO_ID    = "00000000-0000-0000-0000-000000000002"
+DEV_UUID_NAMESPACE = uuid.UUID("9df7786a-6338-4bd4-bebb-3f225c005a6a")
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: seed-native-prefs.py <bundle-id> [config/hermit.yaml] [--token TOKEN]", file=sys.stderr)
+        print("Usage: seed-native-prefs.py <bundle-id> [config/hermit.yaml] [--repos-json path] [--token TOKEN]", file=sys.stderr)
         sys.exit(1)
 
     bundle_id = sys.argv[1]
     cfg_path  = "config/hermit.yaml"
+    repos_json_path = None
     token_override = None
 
     args = sys.argv[2:]
@@ -39,6 +43,9 @@ def main():
     while i < len(args):
         if args[i] == "--token" and i + 1 < len(args):
             token_override = args[i + 1]
+            i += 2
+        elif args[i] == "--repos-json" and i + 1 < len(args):
+            repos_json_path = args[i + 1]
             i += 2
         elif not args[i].startswith("--"):
             cfg_path = args[i]
@@ -51,6 +58,60 @@ def main():
         sys.exit(0)
 
     cfg = open(cfg_path).read()
+    plist_path = os.path.expanduser(f"~/Library/Preferences/{bundle_id}.plist")
+    sandbox_plist = os.path.expanduser(
+        f"~/Library/Containers/{bundle_id}/Data/Library/Preferences/{bundle_id}.plist"
+    )
+
+    def load_plist(path):
+        return plistlib.load(open(path, "rb")) if os.path.exists(path) else {}
+
+    existing_prefs = {}
+    existing_prefs.update(load_plist(plist_path))
+    existing_prefs.update(load_plist(sandbox_plist))
+
+    def decode_existing_json(key):
+        value = existing_prefs.get(key)
+        if isinstance(value, bytes):
+            raw = value
+        elif isinstance(value, str):
+            raw = value.encode()
+        else:
+            return []
+        try:
+            return json.loads(raw.decode())
+        except Exception:
+            return []
+
+    def existing_token_for(endpoint):
+        endpoint = endpoint.rstrip("/")
+        for account in decode_existing_json("hermit.accounts"):
+            if str(account.get("endpoint", "")).rstrip("/") == endpoint:
+                token = account.get("token")
+                if token:
+                    return token
+        return ""
+
+    def gh_token_for(endpoint):
+        host = urlparse(endpoint).hostname
+        if not host:
+            return ""
+        if host == "api.github.com":
+            host = "github.com"
+        try:
+            result = subprocess.run(
+                ["gh", "auth", "token", "--hostname", host],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        return result.stdout.strip()
+
+    def stable_uuid(kind, key):
+        return str(uuid.uuid5(DEV_UUID_NAMESPACE, f"{kind}:{key}"))
 
     def first(pattern, default=""):
         m = re.search(pattern, cfg, re.MULTILINE)
@@ -82,30 +143,124 @@ def main():
             if m:
                 token = m.group(1).strip()
 
-    # Build hermit.accounts JSON (debug builds store token inline)
-    accounts = [
-        {
-            "id":       DEV_ACCOUNT_ID,
-            "name":     "Default (Gitea)",
-            "endpoint": account_endpoint,
-            "token":    token,
-        }
-    ]
+    accounts = []
+    repositories = []
 
-    # Build hermit.repositories JSON
-    repositories = [
-        {
-            "id":        DEV_REPO_ID,
-            "accountID": DEV_ACCOUNT_ID,
-            "owner":     owner,
-            "name":      name,
-            "docsPath":  docs,
-            "rfcLabel":  "hermit:rfc-ready",
-        }
-    ]
+    if repos_json_path and os.path.exists(repos_json_path):
+        repo_cfg = json.load(open(repos_json_path))
+        account_ids = {}
+        for account in repo_cfg.get("accounts", []):
+            account_key = account.get("id") or account.get("endpoint") or account.get("name")
+            endpoint = str(account.get("endpoint", "")).rstrip("/")
+            account_id = stable_uuid("account", account_key)
+            account_ids[account_key] = account_id
+            account_token = token_override or gh_token_for(endpoint) or existing_token_for(endpoint)
+            next_account = {
+                "id": account_id,
+                "name": account.get("name") or account_key,
+                "endpoint": endpoint,
+            }
+            if account_token:
+                next_account["token"] = account_token
+            accounts.append(next_account)
 
-    plist_path = os.path.expanduser(f"~/Library/Preferences/{bundle_id}.plist")
-    d = plistlib.load(open(plist_path, "rb")) if os.path.exists(plist_path) else {}
+        for repo in repo_cfg.get("repositories", []):
+            account_key = repo.get("account")
+            account_id = account_ids.get(account_key)
+            if not account_id:
+                continue
+            repo_owner = repo.get("owner", "")
+            repo_name = repo.get("name", "")
+            repo_docs = repo.get("docs_path", "docs-cms/rfcs").rstrip("/")
+            repositories.append({
+                "id": stable_uuid("repo", f"{account_key}/{repo_owner}/{repo_name}"),
+                "accountID": account_id,
+                "owner": repo_owner,
+                "name": repo_name,
+                "docsPath": repo_docs,
+                "rfcLabel": repo.get("rfc_label", "hermit:rfc-ready"),
+            })
+
+        existing_accounts = decode_existing_json("hermit.accounts")
+        existing_repositories = decode_existing_json("hermit.repositories")
+        account_endpoint_by_id = {
+            str(account.get("id")): str(account.get("endpoint", "")).rstrip("/")
+            for account in accounts
+        }
+        configured_account_endpoints = set(account_endpoint_by_id.values())
+        for account in existing_accounts:
+            endpoint = str(account.get("endpoint", "")).rstrip("/")
+            if endpoint and endpoint not in configured_account_endpoints:
+                accounts.append(account)
+                configured_account_endpoints.add(endpoint)
+                account_endpoint_by_id[str(account.get("id"))] = endpoint
+
+        existing_account_endpoint_by_id = {
+            str(account.get("id")): str(account.get("endpoint", "")).rstrip("/")
+            for account in existing_accounts
+        }
+
+        def repository_key(repo, endpoint_by_id):
+            return (
+                endpoint_by_id.get(str(repo.get("accountID")), ""),
+                str(repo.get("owner", "")).lower(),
+                str(repo.get("name", "")).lower(),
+            )
+
+        existing_by_key = {
+            repository_key(repo, existing_account_endpoint_by_id): repo
+            for repo in existing_repositories
+            if repository_key(repo, existing_account_endpoint_by_id)[0]
+        }
+        merged_repositories = []
+        configured_repo_keys = set()
+        for repo in repositories:
+            key = repository_key(repo, account_endpoint_by_id)
+            configured_repo_keys.add(key)
+            merged_repositories.append(existing_by_key.get(key, repo))
+        for repo in existing_repositories:
+            key = repository_key(repo, existing_account_endpoint_by_id)
+            if key[0] and key not in configured_repo_keys:
+                merged_repositories.append(repo)
+                configured_repo_keys.add(key)
+        repositories = merged_repositories
+
+        if not accounts or not repositories:
+            print(f"Warning: {repos_json_path} did not contain usable accounts/repositories; falling back to {cfg_path}")
+
+    if not accounts or not repositories:
+        # Build hermit.accounts JSON (debug builds store token inline)
+        accounts = [
+            {
+                "id":       DEV_ACCOUNT_ID,
+                "name":     "Default (Gitea)",
+                "endpoint": account_endpoint,
+                "token":    token,
+            }
+        ]
+
+        # Build hermit.repositories JSON
+        repositories = [
+            {
+                "id":        DEV_REPO_ID,
+                "accountID": DEV_ACCOUNT_ID,
+                "owner":     owner,
+                "name":      name,
+                "docsPath":  docs,
+                "rfcLabel":  "hermit:rfc-ready",
+            }
+        ]
+    else:
+        first_repo = repositories[0]
+        owner = first_repo["owner"]
+        name = first_repo["name"]
+        docs = first_repo["docsPath"]
+        first_account = next((account for account in accounts if account["id"] == first_repo["accountID"]), accounts[0])
+        account_endpoint = first_account["endpoint"]
+        base_url = account_endpoint.rstrip("/")
+        token = first_account.get("token", "")
+
+    d = load_plist(plist_path)
     d.update({
         # Legacy keys (used by GiteaAutoConfig / migration path)
         "hermit.baseURL":       base_url + "/",
@@ -124,19 +279,16 @@ def main():
 
     # Also write into the sandbox container if it exists.
     # Sandboxed apps (app-sandbox=true) read from the container, not ~/Library/Preferences.
-    sandbox_plist = os.path.expanduser(
-        f"~/Library/Containers/{bundle_id}/Data/Library/Preferences/{bundle_id}.plist"
-    )
     sandbox_prefs_dir = os.path.dirname(sandbox_plist)
     if os.path.isdir(os.path.expanduser(f"~/Library/Containers/{bundle_id}")):
         os.makedirs(sandbox_prefs_dir, exist_ok=True)
-        sd = plistlib.load(open(sandbox_plist, "rb")) if os.path.exists(sandbox_plist) else {}
+        sd = load_plist(sandbox_plist)
         sd.update(d)
         plistlib.dump(sd, open(sandbox_plist, "wb"))
         print(f"Seeded UserDefaults (sandboxed container) for {bundle_id}")
 
     print(f"  account:  {account_endpoint} (token: {token[:8]}…)" if token else f"  account:  {account_endpoint} (no token)")
-    print(f"  repo:     {owner}/{name} @ {docs}")
+    print(f"  repos:    {len(repositories)} configured; default {owner}/{name} @ {docs}")
 
 if __name__ == "__main__":
     main()
