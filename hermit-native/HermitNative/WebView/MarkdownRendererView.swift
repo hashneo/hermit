@@ -151,18 +151,19 @@ struct MarkdownRendererView: View {
     }
 
     private func orderedListView(items: [MarkdownBlock.ListItem]) -> some View {
-        // Re-number items per depth level so nested lists restart at 1.
+        // Pre-compute per-depth counts before entering the view-builder closure.
+        // Mutating a captured `var` inside ForEach is unsafe: SwiftUI may re-evaluate
+        // the closure without re-calling this function, leaving the counter at its
+        // previous end value and producing incorrect numbers on subsequent passes.
         var counters: [Int: Int] = [:]
+        let counts: [Int] = items.map { item in
+            counters[item.depth, default: 0] += 1
+            for key in counters.keys where key > item.depth { counters[key] = 0 }
+            return counters[item.depth]!
+        }
         return VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                let count: Int = {
-                    counters[item.depth, default: 0] += 1
-                    // Reset deeper levels when we step back up
-                    for key in counters.keys where key > item.depth {
-                        counters[key] = 0
-                    }
-                    return counters[item.depth]!
-                }()
+            ForEach(Array(zip(counts, items).enumerated()), id: \.offset) { _, pair in
+                let (count, item) = pair
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("\(count).")
                         .foregroundStyle(.secondary)

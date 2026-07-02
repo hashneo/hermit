@@ -121,57 +121,12 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
         serverStarted = true
         Task { @MainActor in
             let appState = AppState.shared
-
-            // If ConfigStore already has config (e.g. from a previous run or
-            // install-keychain-pat.sh), skip detection entirely.
-            let hasConfig = BookmarkStore.shared.hasBookmark || ConfigStore.shared.isConfigured
-            if !hasConfig {
-                // Try silent auto-detection first (reads DevConfig/ bundle or repo layout).
-                // Only show the folder picker if that also fails.
-                if let detected = try? GiteaAutoConfig.detect() {
-                    appState.isAuthenticated = true
-                    appState.baseURL         = detected.baseURL
-                    appState.giteaBaseURL    = detected.giteaBaseURL
-                    appState.repoOwner       = detected.owner
-                    appState.repoName        = detected.repo
-                    appState.docsPath        = detected.docsPath
-                    appState.rfcLabel        = detected.rfcLabel
-                    appState.pat             = detected.pat
-                    appState.serverMode      = .embeddedLocal
-                    // Persist so future launches skip detection
-                    ConfigStore.shared.apply(ConfigStore.RepoConfig(
-                        baseURL:   detected.giteaBaseURL.isEmpty ? detected.baseURL : detected.giteaBaseURL,
-                        owner:     detected.owner,
-                        repo:      detected.repo,
-                        docsPath:  detected.docsPath,
-                        rfcLabel:  detected.rfcLabel
-                    ))
-                    ConfigStore.shared.serverBaseURL = detected.baseURL
-                    if !detected.pat.isEmpty {
-                        if let conn = AccountStore.shared.connections.first {
-                            AccountStore.shared.update(conn, token: detected.pat)
-                        }
-                    }
-                } else {
-                    do {
-                        let detected = try GiteaAutoConfig.promptAndDetect()
-                        appState.isAuthenticated = true
-                        appState.baseURL         = detected.baseURL
-                        appState.giteaBaseURL    = detected.giteaBaseURL
-                        appState.repoOwner       = detected.owner
-                        appState.repoName        = detected.repo
-                        appState.docsPath        = detected.docsPath
-                        appState.rfcLabel        = detected.rfcLabel
-                        appState.pat             = detected.pat
-                        appState.serverMode      = .embeddedLocal
-                    } catch {
-                        // User cancelled or selected wrong folder — server won't start.
-                        // They can retry via Settings → Repository → Change…
-                        print("[startServerIfNeeded] repo setup cancelled or failed: \(error)")
-                        return
-                    }
-                }
-            }
+            // Start the embedded server unconditionally.  buildConfigJSON reads
+            // AccountStore + RepositoryStore directly, so the server starts with
+            // whatever repos are configured — or with an empty repo list if none
+            // are set up yet.  Repository and account config is handled entirely
+            // through Settings; the old GiteaAutoConfig folder-picker gate is no
+            // longer needed and was blocking startup after a config wipe.
             HermitNativeApp.startEmbeddedServer(appState: appState)
         }
     }

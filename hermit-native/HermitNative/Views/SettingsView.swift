@@ -53,12 +53,17 @@ struct SettingsView: View {
         // hermit-9ds: listen for config-change notifications from AccountStore/RepositoryStore
         .onReceive(NotificationCenter.default.publisher(for: .hermitRestartRequired)) { _ in
             showRestartBanner = true
+            // Auto-dismiss after 4 s — covers cases where the port publisher
+            // doesn't fire a new value (restart skipped, or port unchanged).
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(4))
+                showRestartBanner = false
+            }
         }
-        // Dismiss banner once the server has restarted and has a port again.
-        // EmbeddedServerManager only exists on macOS; on iOS the banner never shows.
+        // Also dismiss as soon as the server reports a new port.
 #if os(macOS)
-        .onReceive(EmbeddedServerManager.shared.$port) { port in
-            if port != nil { showRestartBanner = false }
+        .onReceive(EmbeddedServerManager.shared.$port.compactMap { $0 }) { _ in
+            showRestartBanner = false
         }
 #endif
     }
@@ -111,7 +116,7 @@ private struct AccountSettingsTab: View {
                 TableColumn("State") { conn in
                     ConnectionStateView(connection: conn)
                 }
-                .width(110)
+                .width(min: 110, ideal: 160)
 
                 TableColumn("Actions") { conn in
                     HStack(spacing: 4) {
@@ -161,15 +166,22 @@ private struct AccountSettingsTab: View {
     private func refreshAccountConnectivity() async {
         for conn in store.connections {
 #if os(macOS)
-            let host = resolvedCredentialHost(endpoint: conn.endpoint, override: "")
-            switch await GitCredentialHelper.lookup(host: host) {
-            case .success(let credential):
-                if !credential.password.isEmpty,
-                   credential.password != store.token(for: conn) {
-                    store.updateTokenOnly(conn, token: credential.password)
+            let storedToken = store.token(for: conn)
+            // Only invoke the credential helper when Hermit has no stored token.
+            // Once fetched, the token is written to Hermit's own Keychain entry
+            // (or UserDefaults in DEBUG) via updateTokenOnly — all subsequent
+            // reads come from there, with no system Keychain ACL prompts.
+            //
+            // Do NOT re-invoke on 401: the bad token is already in Hermit's
+            // store, and calling the helper every 60 s just re-prompts the user
+            // with the same (still-invalid) credential.  On 401 the user must
+            // edit the account to supply a fresh token.
+            if (storedToken ?? "").isEmpty {
+                let host = resolvedCredentialHost(endpoint: conn.endpoint, override: "")
+                if case .success(let cred) = await GitCredentialHelper.lookup(host: host),
+                   !cred.password.isEmpty {
+                    store.updateTokenOnly(conn, token: cred.password)
                 }
-            case .failure:
-                break
             }
 #endif
             let refreshed = store.connections.first(where: { $0.id == conn.id }) ?? conn
@@ -186,62 +198,177 @@ private struct ConnectionStateView: View {
 
     var body: some View {
         let connected = store.isConnected(connection)
-        Label(
-            connected ? "Connected" : "Disconnected",
-            systemImage: connected ? "checkmark.circle.fill" : "xmark.circle.fill"
-        )
-        .foregroundStyle(connected ? .green : .secondary)
-        .font(.subheadline)
+        let ssoURL    = store.ssoURL(for: connection)
+        let errMsg    = store.probeError(for: connection)?.message
+
+        if let url = ssoURL {
+            // Replace the whole state cell with a prominent SSO link so users
+            // can't miss the required action.
+            Link(destination: url) {
+                Label("Authorize SSO", systemImage: "person.badge.key")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.orange)
+            }
+            .buttonStyle(.borderless)
+            .help("Your token must be authorized for this organization's SAML SSO. Click to open GitHub.")
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                Label(
+                    connected ? "Connected" : "Disconnected",
+                    systemImage: connected ? "checkmark.circle.fill" : "xmark.circle.fill"
+                )
+                .foregroundStyle(connected ? .green : .secondary)
+                .font(.subheadline)
+
+                if !connected, let msg = errMsg {
+                    Text(msg)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+        }
     }
 }
 
 // MARK: - Add account sheet
 
+private enum AccountPreset: String, CaseIterable, Identifiable {
+    case github           = "GitHub"
+    case githubEnterprise = "GitHub Enterprise"
+    case gitea            = "Gitea"
+    case other            = "Other"
+
+    var id: String { rawValue }
+
+    /// Well-known API endpoint, or nil when the user must supply one.
+    var fixedEndpoint: String? {
+        switch self {
+        case .github:           return "https://api.github.com"
+        case .githubEnterprise: return nil
+        case .gitea:            return nil
+        case .other:            return nil
+        }
+    }
+
+    /// Default display name pre-filled into the Name field.
+    var defaultName: String {
+        switch self {
+        case .github:           return "GitHub"
+        case .githubEnterprise: return "GitHub Enterprise"
+        case .gitea:            return "Gitea"
+        case .other:            return ""
+        }
+    }
+
+    /// Placeholder shown in the endpoint field when the user must type one.
+    var endpointPlaceholder: String {
+        switch self {
+        case .github:           return ""
+        case .githubEnterprise: return "https://github.mycompany.com/api/v3"
+        case .gitea:            return "https://gitea.example.com"
+        case .other:            return "https://example.com"
+        }
+    }
+}
+
 private struct AddAccountSheet: View {
     @ObservedObject private var store = AccountStore.shared
     @Binding var isPresented: Bool
 
-    @State private var name     = ""
-    @State private var endpoint = ""
+    @State private var preset:   AccountPreset = .github
+    @State private var name     = AccountPreset.github.defaultName
+    @State private var endpoint = AccountPreset.github.fixedEndpoint ?? ""
     @State private var token    = ""
+    @State private var isSaving = false
 #if os(macOS)
-    @State private var credentialHost = ""
     @State private var credentialStatus: GitCredentialHelperStatus = .idle
-    @State private var checkingCredential = false
 #endif
 
     var canSave: Bool {
         !name.trimmingCharacters(in: .whitespaces).isEmpty &&
-        !endpoint.trimmingCharacters(in: .whitespaces).isEmpty
+        !effectiveEndpoint.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// The endpoint that will actually be saved — either the preset's fixed
+    /// value or whatever the user typed.
+    private var effectiveEndpoint: String {
+        preset.fixedEndpoint ?? endpoint
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Name", text: $name, prompt: Text("e.g. HashiCorp Gitea"))
-                    TextField("Endpoint", text: $endpoint, prompt: Text("https://gitea.example.com"))
+                    Picker("Type", selection: $preset) {
+                        ForEach(AccountPreset.allCases) { p in
+                            Text(p.rawValue).tag(p)
+                        }
+                    }
+                    .onChange(of: preset) { _, newPreset in
+                        // Pre-fill name when switching presets (don't clobber
+                        // something the user already typed for "Other").
+                        if name.isEmpty || name == preset.defaultName {
+                            name = newPreset.defaultName
+                        }
+                        // Clear the custom endpoint field when switching away
+                        // from a preset that needs one.
+                        if newPreset.fixedEndpoint != nil {
+                            endpoint = ""
+                        }
+                    }
+
+                    TextField("Name", text: $name, prompt: Text("Display name"))
+
+                    if let fixed = preset.fixedEndpoint {
+                        // Well-known endpoint — show it as read-only.
+                        LabeledContent("Endpoint", value: fixed)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        TextField(
+                            "Endpoint",
+                            text: $endpoint,
+                            prompt: Text(preset.endpointPlaceholder)
+                        )
                         .autocorrectionDisabled()
 #if os(iOS)
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
 #endif
+                    }
                 } header: {
                     Text("Connection")
                 }
-                Section("Authentication") {
+                // Authentication — macOS only.
+                // On iOS all GitHub API calls are proxied through the paired
+                // Mac's embedded server; the iPad never needs a PAT.
+#if os(macOS)
+                Section {
                     SecureField("Personal Access Token", text: $token)
                         .textContentType(.password)
+                    if credentialStatus != .idle {
+                        Label(credentialStatus.message, systemImage: credentialStatus.systemImage)
+                            .font(.caption)
+                            .foregroundStyle(credentialStatus.tint)
+                    }
+                } header: {
+                    Text("Authentication")
+                } footer: {
+                    Text("Leave blank to use your local Git credential helper automatically when saving.")
+                        .foregroundStyle(.secondary)
                 }
-#if os(macOS)
-                GitCredentialHelperSection(
-                    endpoint: endpoint,
-                    host: $credentialHost,
-                    status: credentialStatus,
-                    isChecking: checkingCredential,
-                    onCheck: { Task { await checkGitCredential(fillToken: false) } },
-                    onUse: { Task { await checkGitCredential(fillToken: true) } }
-                )
+#else
+                Section {
+                    Label(
+                        "Credentials are managed by your paired Mac. No token is needed on this device.",
+                        systemImage: "lock.laptopcomputer"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                } header: {
+                    Text("Authentication")
+                }
 #endif
             }
             .formStyle(.grouped)
@@ -255,43 +382,58 @@ private struct AddAccountSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        store.add(
-                            name: name.trimmingCharacters(in: .whitespaces),
-                            endpoint: endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-                                .trimmingCharacters(in: CharacterSet(charactersIn: "/")),
-                            token: token
-                        )
-                        isPresented = false
+                        Task { await saveAccount() }
                     }
-                    .disabled(!canSave)
+                    .disabled(!canSave || isSaving)
                 }
             }
         }
 #if os(macOS)
-        .frame(width: 420, height: 280)
+        .frame(width: 420, height: 290)
 #endif
     }
 
 #if os(macOS)
-    private func checkGitCredential(fillToken: Bool) async {
-        checkingCredential = true
-        credentialStatus = .checking
-        let host = resolvedCredentialHost(endpoint: endpoint, override: credentialHost)
-        let result = await GitCredentialHelper.lookup(host: host)
-        checkingCredential = false
-
-        switch result {
-        case .success(let credential):
-            credentialHost = credential.host
-            if fillToken {
-                token = credential.password
-                credentialStatus = .found("Loaded credential for \(credential.host).")
-            } else {
-                credentialStatus = .found("Credential helper returned a password for \(credential.host).")
+    private func saveAccount() async {
+        let resolvedToken: String
+        if token.trimmingCharacters(in: .whitespaces).isEmpty {
+            // No PAT entered — try the local Git credential helper automatically.
+            isSaving = true
+            credentialStatus = .checking
+            let host = resolvedCredentialHost(endpoint: effectiveEndpoint, override: "")
+            let result = await GitCredentialHelper.lookup(host: host)
+            isSaving = false
+            switch result {
+            case .success(let credential):
+                credentialStatus = .found("Token resolved via git credential helper for \(credential.host).")
+                resolvedToken = credential.password
+            case .failure(let msg):
+                // No credential found — tell the user rather than saving an empty token.
+                credentialStatus = .failed("No credential found: \(msg). Enter a Personal Access Token above.")
+                return   // keep the sheet open
             }
-        case .failure(let message):
-            credentialStatus = .failed(message)
+        } else {
+            resolvedToken = token
         }
+        store.add(
+            name: name.trimmingCharacters(in: .whitespaces),
+            endpoint: effectiveEndpoint
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/")),
+            token: resolvedToken
+        )
+        isPresented = false
+    }
+#else
+    private func saveAccount() async {
+        store.add(
+            name: name.trimmingCharacters(in: .whitespaces),
+            endpoint: effectiveEndpoint
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/")),
+            token: token
+        )
+        isPresented = false
     }
 #endif
 }
@@ -475,7 +617,7 @@ private struct GitCredentialHelperSection: View {
         } header: {
             Text("Git Credential Helper")
         } footer: {
-            Text("Hermit asks git credential fill for the host and stores only the returned token when you save. Leave the host blank to derive it from the endpoint.")
+            Text("Hermit calls git-credential-osxkeychain directly (bypassing /usr/bin/git which is incompatible with the App Sandbox). Leave the host blank to derive it from the endpoint.")
         }
     }
 
@@ -495,65 +637,133 @@ private enum GitCredentialLookupResult {
     case failure(String)
 }
 
+/// Reads Git credentials without going through `/usr/bin/git`.
+///
+/// `/usr/bin/git` links `libxcselect.dylib` (Xcode developer directory
+/// selector) which errors immediately inside the App Sandbox.
+///
+/// Strategy:
+///  1. `git-credential-osxkeychain get` — handles credentials stored by
+///     `git config --global credential.helper osxkeychain` (internet passwords).
+///  2. Direct `SecItemCopyMatching` for `gh:<host>` generic passwords — handles
+///     credentials stored by `gh auth login`.  The gh CLI creates these items
+///     with an open ACL so no system confirmation dialog appears.
 private enum GitCredentialHelper {
+
+    private static let helperCandidates: [String] = [
+        "/Library/Developer/CommandLineTools/usr/libexec/git-core/git-credential-osxkeychain",
+        "/Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git-credential-osxkeychain",
+    ]
+
     static func lookup(host: String) async -> GitCredentialLookupResult {
         let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedHost.isEmpty else {
             return .failure("Enter an endpoint or credential host first.")
         }
 
+        // Normalise api.github.com → github.com
+        let lookupHost: String
+        if trimmedHost == "api.github.com" {
+            lookupHost = "github.com"
+        } else if trimmedHost.hasPrefix("api.") {
+            lookupHost = String(trimmedHost.dropFirst(4))
+        } else {
+            lookupHost = trimmedHost
+        }
+
+        // 1. osxkeychain (internet passwords — git credential store)
+        if let helperPath = helperCandidates.first(where: {
+            FileManager.default.isExecutableFile(atPath: $0)
+        }), let cred = await osxKeychainLookup(helperPath: helperPath, host: lookupHost) {
+            return .success(cred)
+        }
+
+        // 2. gh CLI generic password — service "gh:<host>"
+        if let cred = ghCliKeychainLookup(host: lookupHost) {
+            return .success(cred)
+        }
+
+        return .failure("No credential found for \(lookupHost). Sign in with `gh auth login` or store a token via `git credential approve`.")
+    }
+
+    // MARK: - osxkeychain subprocess
+
+    private static func osxKeychainLookup(helperPath: String, host: String) async -> GitCredential? {
         return await Task.detached(priority: .userInitiated) {
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            process.arguments = ["credential", "fill"]
+            process.executableURL = URL(fileURLWithPath: helperPath)
+            process.arguments = ["get"]
 
-            let input = Pipe()
-            let output = Pipe()
-            let error = Pipe()
-            process.standardInput = input
-            process.standardOutput = output
-            process.standardError = error
+            let stdin  = Pipe()
+            let stdout = Pipe()
+            process.standardInput  = stdin
+            process.standardOutput = stdout
+            process.standardError  = FileHandle.nullDevice
 
             do {
                 try process.run()
-                let request = "protocol=https\nhost=\(trimmedHost)\n\n"
-                input.fileHandleForWriting.write(Data(request.utf8))
-                try? input.fileHandleForWriting.close()
+                stdin.fileHandleForWriting.write(
+                    Data("protocol=https\nhost=\(host)\n\n".utf8))
+                try? stdin.fileHandleForWriting.close()
                 process.waitUntilExit()
 
-                let outputData = output.fileHandleForReading.readDataToEndOfFile()
-                let errorData = error.fileHandleForReading.readDataToEndOfFile()
-                let stdout = String(data: outputData, encoding: .utf8) ?? ""
-                let stderr = String(data: errorData, encoding: .utf8) ?? ""
+                guard process.terminationStatus == 0 else { return nil }
 
-                guard process.terminationStatus == 0 else {
-                    let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if detail.isEmpty {
-                        return .failure("Git credential helper failed for \(trimmedHost).")
-                    }
-                    return .failure(detail)
-                }
-
-                var values: [String: String] = [:]
-                for line in stdout.split(separator: "\n") {
+                let out = String(data: stdout.fileHandleForReading.readDataToEndOfFile(),
+                                 encoding: .utf8) ?? ""
+                var kv: [String: String] = [:]
+                for line in out.split(separator: "\n") {
                     let parts = line.split(separator: "=", maxSplits: 1)
                     guard parts.count == 2 else { continue }
-                    values[String(parts[0])] = String(parts[1])
+                    kv[String(parts[0])] = String(parts[1])
                 }
-
-                guard let password = values["password"], !password.isEmpty else {
-                    return .failure("No password was returned for \(trimmedHost).")
-                }
-
-                return .success(GitCredential(
-                    host: values["host"] ?? trimmedHost,
-                    username: values["username"] ?? "",
-                    password: password
-                ))
+                guard let password = kv["password"], !password.isEmpty else { return nil }
+                return GitCredential(host: host, username: kv["username"] ?? "", password: password)
             } catch {
-                return .failure("Could not run git credential helper: \(error.localizedDescription)")
+                return nil
             }
         }.value
+    }
+
+    // MARK: - gh CLI Keychain (generic password, service "gh:<host>")
+
+    private static func ghCliKeychainLookup(host: String) -> GitCredential? {
+        let query: [CFString: Any] = [
+            kSecClass:              kSecClassGenericPassword,
+            kSecAttrService:        "gh:\(host)",
+            kSecReturnAttributes:   true,
+            kSecReturnData:         true,
+            kSecMatchLimit:         kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let dict     = item as? [CFString: Any],
+              let data     = dict[kSecValueData] as? Data,
+              let raw      = String(data: data, encoding: .utf8),
+              !raw.isEmpty
+        else { return nil }
+
+        // The gh CLI stores secrets via go-keyring which base64-encodes the
+        // value and prefixes it with "go-keyring-base64:".  Decode it so we
+        // get the actual token, not the encoded wrapper.
+        let password = decodeGoKeyring(raw)
+        guard !password.isEmpty else { return nil }
+
+        let username = (dict[kSecAttrAccount] as? String) ?? ""
+        return GitCredential(host: host, username: username, password: password)
+    }
+
+    /// Strips the `go-keyring-base64:` prefix used by the gh CLI's keyring
+    /// backend and base64-decodes the remainder.  Returns the input unchanged
+    /// if the prefix is absent (plain-text storage from older gh versions).
+    private static func decodeGoKeyring(_ raw: String) -> String {
+        let prefix = "go-keyring-base64:"
+        guard raw.hasPrefix(prefix) else { return raw }
+        let encoded = String(raw.dropFirst(prefix.count))
+        guard let data = Data(base64Encoded: encoded),
+              let decoded = String(data: data, encoding: .utf8)
+        else { return raw }
+        return decoded
     }
 }
 

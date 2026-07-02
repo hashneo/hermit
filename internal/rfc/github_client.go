@@ -47,7 +47,6 @@ type GitHubRFCClient interface {
 	// reviewer objections are cleared before the squash-merge.
 	DismissHumanRequestChangesReviews(ctx context.Context, baseURL, owner, name string, prNumber int, token string) error
 
-	// Ironhide path — check whether labels exist on the repo, then apply them to a PR.
 	// LabelExists returns true when the label is already defined on the repository.
 	LabelExists(ctx context.Context, baseURL, owner, name, label, token string) (bool, error)
 	// AddLabels appends labels to a pull request (issues API).
@@ -231,46 +230,30 @@ func (c *HTTPGitHubRFCClient) GetRFC(ctx context.Context, baseURL, owner, name, 
 	}, nil
 }
 
-func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, owner, name, docsPath, rfcLabel, token string) (ReviewReadyRFCResult, error) {
-	apiBase := strings.TrimRight(baseURL, "/")
-	docMatcher, hasDocuchangoProject, err := c.docuchangoDocumentMatcher(ctx, apiBase, owner, name, "", token)
-	if err != nil {
-		return ReviewReadyRFCResult{}, err
-	}
-	docsPath = strings.Trim(strings.TrimSpace(docsPath), "/")
-	if docsPath == "" {
-		docsPath = "docs-cms/rfcs"
-	}
-	if rfcLabel == "" {
-		rfcLabel = RFCReadyLabel
-	}
-
-	// Query PRs and inspect changed files client-side. Some providers
-	// (for example Gitea) do not support string label filters on this endpoint.
-	// Hermit also auto-applies workflow labels for Docuchango document changes,
-	// so label presence is an output of discovery rather than a hard precondition.
-	// Closed PRs are included only when they already carry review workflow labels,
-	// which keeps historical PRs out of the dashboard while preserving labeled
-	// docs-cms review work whose top-level PR state is closed or merged.
-	prURL := fmt.Sprintf("%s/repos/%s/%s/pulls?state=all&per_page=100", apiBase, owner, name)
-	prReq, err := http.NewRequestWithContext(ctx, http.MethodGet, prURL, nil)
-	if err != nil {
-		return ReviewReadyRFCResult{}, err
-	}
-	setGitHubHeaders(prReq, token)
-
-	prResp, err := c.client.Do(prReq)
-	if err != nil {
-		return ReviewReadyRFCResult{}, err
-	}
-	defer prResp.Body.Close()
-
-	if prResp.StatusCode < 200 || prResp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(prResp.Body, 2048))
-		return ReviewReadyRFCResult{}, fmt.Errorf("list pull requests failed: %d %s", prResp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
-	var pulls []struct {
+// fetchPaginatedPRs fetches all pull requests for the given state, following
+// Link header pagination.  When label is non-empty only PRs carrying that label
+// are returned (uses the issues list endpoint which supports label filtering).
+func (c *HTTPGitHubRFCClient) fetchPaginatedPRs(ctx context.Context, apiBase, owner, name, state, label, token string) ([]struct {
+	Number         int    `json:"number"`
+	Title          string `json:"title"`
+	Body           string `json:"body"`
+	HTMLURL        string `json:"html_url"`
+	State          string `json:"state"`
+	Draft          bool   `json:"draft"`
+	Merged         bool   `json:"merged"`
+	Mergeable      *bool  `json:"mergeable"`
+	MergeableState string `json:"mergeable_state"`
+	Comments       int    `json:"comments"`
+	ReviewComments int    `json:"review_comments"`
+	Head           struct {
+		SHA string `json:"sha"`
+		Ref string `json:"ref"`
+	} `json:"head"`
+	Labels []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+}, error) {
+	type pr = struct {
 		Number         int    `json:"number"`
 		Title          string `json:"title"`
 		Body           string `json:"body"`
@@ -290,8 +273,97 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 			Name string `json:"name"`
 		} `json:"labels"`
 	}
-	if err := json.NewDecoder(prResp.Body).Decode(&pulls); err != nil {
+
+	var all []pr
+	nextURL := fmt.Sprintf("%s/repos/%s/%s/pulls?state=%s&per_page=100", apiBase, owner, name, state)
+	if label != "" {
+		nextURL += "&labels=" + url.QueryEscape(label)
+	}
+
+	for nextURL != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		setGitHubHeaders(req, token)
+		resp, err := c.client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+			resp.Body.Close()
+			return nil, fmt.Errorf("list pull requests (%s) failed: %d %s", state, resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+		var page []pr
+		if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+			resp.Body.Close()
+			return nil, err
+		}
+		resp.Body.Close()
+		all = append(all, page...)
+		nextURL = githubNextPageURL(resp.Header.Get("Link"))
+	}
+	return all, nil
+}
+
+// githubNextPageURL extracts the URL for the next page from a GitHub Link header.
+// Returns "" when there is no next page.
+func githubNextPageURL(link string) string {
+	// Link: <https://...?page=2>; rel="next", <https://...?page=5>; rel="last"
+	for _, part := range strings.Split(link, ",") {
+		part = strings.TrimSpace(part)
+		segments := strings.Split(part, ";")
+		if len(segments) < 2 {
+			continue
+		}
+		rel := strings.TrimSpace(segments[1])
+		if rel == `rel="next"` {
+			u := strings.TrimSpace(segments[0])
+			u = strings.TrimPrefix(u, "<")
+			u = strings.TrimSuffix(u, ">")
+			return u
+		}
+	}
+	return ""
+}
+
+func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, owner, name, docsPath, rfcLabel, token string) (ReviewReadyRFCResult, error) {
+	apiBase := strings.TrimRight(baseURL, "/")
+	docMatcher, hasDocuchangoProject, err := c.docuchangoDocumentMatcher(ctx, apiBase, owner, name, "", token)
+	if err != nil {
 		return ReviewReadyRFCResult{}, err
+	}
+	docsPath = strings.Trim(strings.TrimSpace(docsPath), "/")
+	if docsPath == "" {
+		docsPath = "docs-cms/rfcs"
+	}
+	if rfcLabel == "" {
+		rfcLabel = RFCReadyLabel
+	}
+
+	// Query PRs and inspect changed files client-side. Some providers
+	// (for example Gitea) do not support string label filters on this endpoint.
+	// Hermit also auto-applies workflow labels for Docuchango document changes,
+	// Fetch all open PRs (paginated) and closed/merged PRs that still carry a
+	// review workflow label.  Using state=all with a fixed per_page cap misses
+	// open PRs that are older than the page boundary — on busy repos this
+	// silently drops legitimate RFC review requests.
+	//
+	// Strategy:
+	//   1. GET /pulls?state=open   — all open PRs, paginated; no label required.
+	//   2. GET /pulls?state=closed — closed/merged PRs, paginated; kept only
+	//      when they carry a review label so stale history stays out of the queue.
+	pulls, err := c.fetchPaginatedPRs(ctx, apiBase, owner, name, "open", "", token)
+	if err != nil {
+		return ReviewReadyRFCResult{}, err
+	}
+	if rfcLabel != "" {
+		closed, err := c.fetchPaginatedPRs(ctx, apiBase, owner, name, "closed", rfcLabel, token)
+		if err != nil {
+			return ReviewReadyRFCResult{}, err
+		}
+		pulls = append(pulls, closed...)
 	}
 
 	items := make([]ReviewReadyRFCItem, 0)

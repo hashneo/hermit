@@ -147,20 +147,17 @@ struct AcceptRFCResult: Decodable {
     let merged: Bool
     let blockedByCI: Bool
     let commitSHA: String
-    let handedToIronhide: Bool
 
     enum CodingKeys: String, CodingKey {
-        case merged           = "merged"
-        case blockedByCI      = "blocked_by_ci"
-        case commitSHA        = "commit_sha"
-        case handedToIronhide = "handed_to_ironhide"
+        case merged      = "merged"
+        case blockedByCI = "blocked_by_ci"
+        case commitSHA   = "commit_sha"
     }
 
-    init(merged: Bool, blockedByCI: Bool, commitSHA: String, handedToIronhide: Bool = false) {
+    init(merged: Bool, blockedByCI: Bool, commitSHA: String) {
         self.merged = merged
         self.blockedByCI = blockedByCI
         self.commitSHA = commitSHA
-        self.handedToIronhide = handedToIronhide
     }
 }
 

@@ -19,8 +19,9 @@ final class KeychainHelper {
     // MARK: - Generic low-level helpers
 
     private func readString(account: String) -> String? {
-        // NOTE: kSecAttrAccessible must NOT be included in read queries — it filters
-        // by accessibility class and silently misses items written with a different value.
+        // NOTE: kSecAttrAccessible must NOT be included in read queries — it
+        // filters by accessibility class and silently misses items written
+        // with a different value.
         let query: [CFString: Any] = [
             kSecClass:       kSecClassGenericPassword,
             kSecAttrService: service as CFString,
@@ -35,6 +36,12 @@ final class KeychainHelper {
     }
 
     private func writeString(_ value: String?, account: String) {
+        // Write to the standard macOS login Keychain.  Items created by
+        // HermitNative are automatically in the app's ACL — no password
+        // prompt is shown when the same app reads them back, even across
+        // binary rebuilds with ad-hoc ("Sign to Run Locally") signing.
+        // kSecAttrAccessibleAfterFirstUnlock ensures the item is readable
+        // after the first unlock without prompting.
         let query: [CFString: Any] = [
             kSecClass:          kSecClassGenericPassword,
             kSecAttrService:    service as CFString,
@@ -58,9 +65,10 @@ final class KeychainHelper {
 
     // MARK: - Accessibility migration
 
-    /// Re-writes all HermitNative Keychain items to kSecAttrAccessibleAfterFirstUnlock.
-    /// Items written by older builds used the default (kSecAttrAccessibleWhenUnlocked)
-    /// which triggers an unlock prompt when the Settings pane reads them.
+    /// Re-writes any HermitNative Keychain items still using the default
+    /// accessibility class (kSecAttrAccessibleWhenUnlocked) to
+    /// kSecAttrAccessibleAfterFirstUnlock so they are readable in the
+    /// background without an additional unlock prompt.
     private func migrateAccessibility() {
         let query: [CFString: Any] = [
             kSecClass:             kSecClassGenericPassword,
@@ -77,7 +85,6 @@ final class KeychainHelper {
             guard let account = item[kSecAttrAccount] as? String,
                   let data    = item[kSecValueData]   as? Data else { continue }
             let accessibility = item[kSecAttrAccessible] as? String
-            // Skip items already using the desired accessibility class
             if accessibility == (kSecAttrAccessibleAfterFirstUnlock as String) { continue }
             let find: [CFString: Any] = [
                 kSecClass:       kSecClassGenericPassword,
@@ -146,9 +153,10 @@ final class KeychainHelper {
     func savePairedToken(peerName: String, token: String) {
         guard let data = token.data(using: .utf8) else { return }
         let query: [CFString: Any] = [
-            kSecClass:       kSecClassGenericPassword,
-            kSecAttrService: "hermit.paired" as CFString,
-            kSecAttrAccount: peerName,
+            kSecClass:          kSecClassGenericPassword,
+            kSecAttrService:    "hermit.paired" as CFString,
+            kSecAttrAccount:    peerName as CFString,
+            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlock,
         ]
         let attrs: [CFString: Any] = [kSecValueData: data]
         if SecItemUpdate(query as CFDictionary, attrs as CFDictionary) == errSecItemNotFound {
@@ -162,7 +170,7 @@ final class KeychainHelper {
         let query: [CFString: Any] = [
             kSecClass:       kSecClassGenericPassword,
             kSecAttrService: "hermit.paired" as CFString,
-            kSecAttrAccount: peerName,
+            kSecAttrAccount: peerName as CFString,
         ]
         SecItemDelete(query as CFDictionary)
     }

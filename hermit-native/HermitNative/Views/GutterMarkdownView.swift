@@ -569,14 +569,20 @@ struct MarkdownBlockView: View {
     }
 
     private func orderedListView(items: [MarkdownBlock.ListItem]) -> some View {
+        // Pre-compute per-depth counts before entering the view-builder closure.
+        // Mutating a captured `var` inside ForEach is unsafe: SwiftUI can re-evaluate
+        // the closure for layout/diffing without re-calling this function, leaving the
+        // counter at its previous value and producing wrong numbers (e.g. 20–38 instead
+        // of 1–19 on the second pass).
         var counters: [Int: Int] = [:]
+        let counts: [Int] = items.map { item in
+            counters[item.depth, default: 0] += 1
+            for key in counters.keys where key > item.depth { counters[key] = 0 }
+            return counters[item.depth]!
+        }
         return VStack(alignment: .leading, spacing: 2) {
-            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                let count: Int = {
-                    counters[item.depth, default: 0] += 1
-                    for key in counters.keys where key > item.depth { counters[key] = 0 }
-                    return counters[item.depth]!
-                }()
+            ForEach(Array(zip(counts, items).enumerated()), id: \.offset) { _, pair in
+                let (count, item) = pair
                 selectable(listItemString(marker: "\(count).", inlines: item.inlines, depth: item.depth))
                     .fixedSize(horizontal: false, vertical: true)
             }

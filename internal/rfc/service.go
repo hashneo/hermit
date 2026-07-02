@@ -708,10 +708,9 @@ func (s *Service) StartReviewSession(ctx context.Context, repositoryID string, r
 
 // AcceptRFCResult is returned by AcceptRFC.
 type AcceptRFCResult struct {
-	Merged           bool   `json:"merged"`
-	BlockedByCI      bool   `json:"blocked_by_ci"`
-	CommitSHA        string `json:"commit_sha,omitempty"`         // SHA of the acceptance commit on the PR branch
-	HandedToIronhide bool   `json:"handed_to_ironhide,omitempty"` // true when ironhide labels were applied instead of direct merge
+	Merged      bool   `json:"merged"`
+	BlockedByCI bool   `json:"blocked_by_ci"`
+	CommitSHA   string `json:"commit_sha,omitempty"` // SHA of the acceptance commit on the PR branch
 }
 
 // AcceptRFC marks a PR RFC as accepted.
@@ -719,16 +718,13 @@ type AcceptRFCResult struct {
 // Flow:
 //  1. Fetch the current RFC file from the PR branch.
 //  2. Rewrite frontmatter status to "accepted" and commit (skipped if already accepted).
-//  3. Check whether both ironhide labels exist on the repository.
-//     - If YES: add ironhide-review and ironhide-merge labels to the PR and return
-//     HandedToIronhide=true.  Ironhide will handle merging.
-//     - If NO:  attempt a direct squash-merge.  If CI blocks the merge, return
+//  3. Attempt a direct squash-merge.  If CI blocks the merge, return
 //     BlockedByCI=true and CommitSHA so the caller can poll and retry.
 func (s *Service) AcceptRFC(ctx context.Context, repositoryID string, prNumber int, filePath string) (AcceptRFCResult, error) {
 	if s.repoResolver == nil {
 		return AcceptRFCResult{}, fmt.Errorf("repository resolver is not configured")
 	}
-	owner, name, registry, repoBaseURL, _, docsPath, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, _, docsPath, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return AcceptRFCResult{}, fmt.Errorf("repository not found")
 	}
@@ -776,49 +772,37 @@ func (s *Service) AcceptRFC(ctx context.Context, repositoryID string, prNumber i
 		}
 	}
 
-	// 4a. Ironhide path: if both labels exist on the repo, apply them and hand off.
-	const ironhideReview = "ironhide-review"
-	const ironhideMerge = "ironhide-merge"
-	reviewExists, err := client.LabelExists(ctx, baseURL, owner, name, ironhideReview, token)
-	if err != nil {
-		return AcceptRFCResult{}, fmt.Errorf("check ironhide-review label: %w", err)
-	}
-	mergeExists, err := client.LabelExists(ctx, baseURL, owner, name, ironhideMerge, token)
-	if err != nil {
-		return AcceptRFCResult{}, fmt.Errorf("check ironhide-merge label: %w", err)
-	}
-	if reviewExists && mergeExists {
-		if err := client.AddLabels(ctx, baseURL, owner, name, prNumber, []string{ironhideReview, ironhideMerge}, token); err != nil {
-			return AcceptRFCResult{}, fmt.Errorf("add ironhide labels: %w", err)
-		}
-		return AcceptRFCResult{HandedToIronhide: true, CommitSHA: sha}, nil
-	}
-
-	// 4b. Dismiss any pending bot reviews (e.g. copilot) so they don't block the merge.
+	// 4a. Dismiss any pending bot reviews (e.g. copilot) so they don't block the merge.
 	if err := client.DismissBotReviews(ctx, baseURL, owner, name, prNumber, token); err != nil {
 		// Non-fatal: log and continue. A failed dismissal should not abort the accept flow.
 		_ = fmt.Errorf("dismiss bot reviews (non-fatal): %w", err)
 	}
 
-	// 4c. Dismiss any outstanding human REQUEST_CHANGES reviews — the RFC has been formally
+	// 4b. Dismiss any outstanding human REQUEST_CHANGES reviews — the RFC has been formally
 	// accepted so reviewer objections are considered resolved by the accept decision.
 	if err := client.DismissHumanRequestChangesReviews(ctx, baseURL, owner, name, prNumber, token); err != nil {
 		// Non-fatal: same reasoning as bot dismissal above.
 		_ = fmt.Errorf("dismiss human request-changes reviews (non-fatal): %w", err)
 	}
 
-	// 4d. Resolve all open review threads so branch-protection "require
+	// 4c. Resolve all open review threads so branch-protection "require
 	// conversation resolution" does not block the squash-merge.
 	if err := s.resolveOpenThreads(ctx, repositoryID, prNumber, owner, name); err != nil {
 		return AcceptRFCResult{}, fmt.Errorf("resolve review threads: %w", err)
 	}
 
-	// 4e. Manual path: attempt squash-merge with retry/backoff so that a
+	// 4d. Manual path: attempt squash-merge with retry/backoff so that a
 	// brief lag in GitHub's branch-protection "conversations resolved" gate
 	// does not cause a spurious blocked_by_ci=true response.
 	merged, blockedByCI, err := s.mergeWithRetry(ctx, client, baseURL, owner, name, prNumber, token, repositoryID)
 	if err != nil {
 		return AcceptRFCResult{}, fmt.Errorf("merge PR: %w", err)
+	}
+
+	// Remove hermit:rfc-ready (and legacy workflow labels) so the PR drops out
+	// of the review queue immediately after a successful merge.
+	if merged && rfcLabel != "" {
+		_ = client.RemoveLabel(ctx, baseURL, owner, name, prNumber, rfcLabel, token)
 	}
 
 	return AcceptRFCResult{Merged: merged, BlockedByCI: blockedByCI, CommitSHA: sha}, nil
@@ -970,7 +954,7 @@ func (s *Service) MergePR(ctx context.Context, repositoryID string, prNumber int
 	if s.repoResolver == nil {
 		return MergePRResult{}, fmt.Errorf("repository resolver is not configured")
 	}
-	owner, name, registry, repoBaseURL, _, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, _, _, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return MergePRResult{}, fmt.Errorf("repository not found")
 	}
@@ -996,6 +980,12 @@ func (s *Service) MergePR(ctx context.Context, repositoryID string, prNumber int
 		slog.Error("MergePR service: github merge failed", "owner", owner, "repo", name, "prNumber", prNumber, "error", err)
 		return MergePRResult{}, fmt.Errorf("merge PR: %w", err)
 	}
+
+	// Remove hermit:rfc-ready so the PR drops out of the review queue.
+	if merged && rfcLabel != "" {
+		_ = client.RemoveLabel(ctx, baseURL, owner, name, prNumber, rfcLabel, token)
+	}
+
 	slog.Info("MergePR service: done", "owner", owner, "repo", name, "prNumber", prNumber, "merged", merged, "blockedByCI", blockedByCI)
 	return MergePRResult{Merged: merged, BlockedByCI: blockedByCI}, nil
 }

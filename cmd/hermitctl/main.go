@@ -219,10 +219,9 @@ type reviewMergeStatusResponse struct {
 }
 
 type reviewAcceptResult struct {
-	Merged           bool   `json:"merged"`
-	BlockedByCI      bool   `json:"blocked_by_ci"`
-	CommitSHA        string `json:"commit_sha,omitempty"`
-	HandedToIronhide bool   `json:"handed_to_ironhide,omitempty"`
+	Merged      bool   `json:"merged"`
+	BlockedByCI bool   `json:"blocked_by_ci"`
+	CommitSHA   string `json:"commit_sha,omitempty"`
 }
 
 type reviewMergeResult struct {
@@ -1015,9 +1014,6 @@ func (c cli) reviewAccept(args []string, stdout, stderr io.Writer) error {
 		return printJSON(stdout, result)
 	}
 	printMergeOutcome(stdout, "accepted", repoID, prNumber, result.Merged, result.BlockedByCI, result.CommitSHA)
-	if result.HandedToIronhide {
-		fmt.Fprintln(stdout, "handed_to_ironhide: true")
-	}
 	return nil
 }
 
