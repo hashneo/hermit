@@ -40,3 +40,4 @@ hermit-native/DerivedData/
 hermit-native/HermitNative/HermitServer.xcframework/
 HermitNative.app/
 .idea/
+scripts/__pycache__/
