@@ -5,13 +5,18 @@ import Combine
 
 /// A named server connection with its own endpoint and PAT.
 ///
-/// Non-secret fields (name, endpoint, id) persist in UserDefaults as JSON.
-/// The PAT is stored exclusively in the app's Keychain entry keyed by
-/// `hermit.account.<UUID>` — never in UserDefaults or any plist.
+/// In DEBUG builds the PAT is stored directly on this struct so it round-trips
+/// through UserDefaults alongside the other connection fields — no Keychain
+/// involved, no password prompts during development.
+/// In Release builds `token` is excluded from Codable; the PAT lives
+/// exclusively in the Keychain keyed by `hermit.account.<UUID>`.
 struct Connection: Identifiable, Equatable {
     var id:       UUID   = UUID()
     var name:     String          // e.g. "GitHub"
     var endpoint: String          // e.g. "https://api.github.com"
+#if DEBUG
+    var token:    String? = nil   // stored in UserDefaults in DEBUG builds only
+#endif
 
     var keychainKey: String { "hermit.account.\(id.uuidString)" }
 }
@@ -21,6 +26,9 @@ struct Connection: Identifiable, Equatable {
 extension Connection: Codable {
     enum CodingKeys: String, CodingKey {
         case id, name, endpoint
+#if DEBUG
+        case token
+#endif
     }
 
     init(from decoder: Decoder) throws {
@@ -28,6 +36,9 @@ extension Connection: Codable {
         id       = try c.decode(UUID.self,   forKey: .id)
         name     = try c.decode(String.self, forKey: .name)
         endpoint = try c.decode(String.self, forKey: .endpoint)
+#if DEBUG
+        token    = try c.decodeIfPresent(String.self, forKey: .token)
+#endif
     }
 
     func encode(to encoder: Encoder) throws {
@@ -35,6 +46,9 @@ extension Connection: Codable {
         try c.encode(id,       forKey: .id)
         try c.encode(name,     forKey: .name)
         try c.encode(endpoint, forKey: .endpoint)
+#if DEBUG
+        try c.encodeIfPresent(token, forKey: .token)
+#endif
     }
 }
 
@@ -48,7 +62,7 @@ struct Repository: Identifiable, Codable, Equatable {
     var owner:     String         // e.g. "gitea_admin"
     var name:      String         // e.g. "hermit-rfcs"
     var docsPath:  String         // e.g. "docs-cms/rfcs"
-    var rfcLabel:  String         // e.g. "hermit:rfc-ready"
+    var rfcLabel:  String         // e.g. ""
     var lastSyncedAt: Date? = nil
 
     var fullName: String { "\(owner)/\(name)" }
@@ -96,10 +110,14 @@ final class AccountStore: ObservableObject {
     // MARK: - Public API
 
     func add(name: String, endpoint: String, token: String) {
-        let conn = Connection(name: name, endpoint: endpoint)
+        var conn = Connection(name: name, endpoint: endpoint)
+#if DEBUG
+        conn.token = token.isEmpty ? nil : token
+#else
         if !token.isEmpty {
             KeychainHelper.shared.writeAccountToken(token, key: conn.keychainKey)
         }
+#endif
         connections.append(conn)
         save()
         NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
@@ -126,21 +144,32 @@ final class AccountStore: ObservableObject {
 
     private func updateInPlace(_ connection: Connection, token: String?) {
         guard let idx = connections.firstIndex(where: { $0.id == connection.id }) else { return }
+        var updated = connection
         if let token {
+#if DEBUG
+            updated.token = token.isEmpty ? nil : token
+#else
             KeychainHelper.shared.writeAccountToken(token, key: connection.keychainKey)
+#endif
         }
-        connections[idx] = connection
+        connections[idx] = updated
     }
 
     func remove(_ connection: Connection) {
+#if !DEBUG
         KeychainHelper.shared.deleteAccountToken(key: connection.keychainKey)
+#endif
         connections.removeAll { $0.id == connection.id }
         save()
         NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
     }
 
     func token(for connection: Connection) -> String? {
-        KeychainHelper.shared.readAccountToken(key: connection.keychainKey)
+#if DEBUG
+        return connection.token
+#else
+        return KeychainHelper.shared.readAccountToken(key: connection.keychainKey)
+#endif
     }
 
     // MARK: - SSO URL reporting
@@ -382,7 +411,7 @@ final class RepositoryStore: ObservableObject {
     }
 
     func add(accountID: UUID, owner: String, name: String,
-             docsPath: String = "docs-cms/rfcs", rfcLabel: String = "hermit:rfc-ready") {
+             docsPath: String = "docs-cms/rfcs", rfcLabel: String = "") {
         let repo = Repository(accountID: accountID, owner: owner, name: name,
                               docsPath: docsPath, rfcLabel: rfcLabel)
         add(repo)
@@ -471,7 +500,7 @@ final class RepositoryStore: ObservableObject {
             let accountID = UUID(uuidString: "00000000-0000-0000-0000-000000000001") ?? UUID()
             if !owner.isEmpty, !name.isEmpty {
                 let docs  = ud.string(forKey: "hermit.docsPath")  ?? "docs-cms/rfcs"
-                let label = ud.string(forKey: "hermit.rfcLabel")  ?? "hermit:rfc-ready"
+                let label = ud.string(forKey: "hermit.rfcLabel")  ?? ""
                 let repo  = Repository(accountID: accountID, owner: owner, name: name,
                                        docsPath: docs, rfcLabel: label)
                 repositories = [repo]

@@ -65,7 +65,7 @@ def test_preserves_settings_added_repository():
             "owner": "jrepp",
             "name": "merge-god",
             "docsPath": "docs-cms/rfcs",
-            "rfcLabel": "hermit:rfc-ready",
+            "rfcLabel": "",
             "serverID": "repo_existing",
         }
         existing_accounts = [
@@ -122,7 +122,7 @@ def test_seed_config_includes_merge_god_review_fixture_repo():
             "docs_path": "docs-cms/rfcs",
             "name": "merge-god",
             "owner": "jrepp",
-            "rfc_label": "hermit:rfc-ready",
+            "rfc_label": "",
         }
     ], review_fixture_repos
 

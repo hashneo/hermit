@@ -309,7 +309,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string,
 		return RepositoryRFCListResponse{}, fmt.Errorf("repository token unavailable")
 	}
 	baseURL := s.registryBaseURL(registry, repoBaseURL)
-	sourceKey := repositoryRFCListSourceKey(registry, baseURL, owner, name, branch, docsPath, rfcLabel)
+	sourceKey := repositoryRFCListSourceKey(registry, baseURL, owner, name, branch, docsPath)
 	cacheTTL := s.repositoryRFCListCacheTTL(repositoryID)
 	if s.workset != nil && !refresh {
 		if projection, ok, err := s.workset.GetFreshRepositoryRFCList(ctx, repositoryID, sourceKey, cacheTTL); err == nil && ok {
@@ -484,7 +484,7 @@ func (s *Service) repositoryRFCListCacheTTL(repositoryID string) time.Duration {
 	return readTTL + time.Duration(offset)
 }
 
-func repositoryRFCListSourceKey(registry, baseURL, owner, name, branch, docsPath, rfcLabel string) string {
+func repositoryRFCListSourceKey(registry, baseURL, owner, name, branch, docsPath string) string {
 	parts := []string{
 		strings.TrimSpace(registry),
 		strings.TrimRight(strings.TrimSpace(baseURL), "/"),
@@ -492,7 +492,6 @@ func repositoryRFCListSourceKey(registry, baseURL, owner, name, branch, docsPath
 		strings.TrimSpace(name),
 		strings.TrimSpace(branch),
 		strings.Trim(strings.TrimSpace(docsPath), "/"),
-		strings.TrimSpace(rfcLabel),
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return fmt.Sprintf("%x", sum)
@@ -525,17 +524,17 @@ type StartReviewSessionResult struct {
 }
 
 // SubmitForReview promotes a draft RFC on the main branch to "in-review" by:
-//  1. Ensuring the hermit:rfc-ready label exists on the repository.
-//  2. Fetching the current RFC content and rewriting its frontmatter status to "in-review".
-//  3. Creating a new branch (rfc-review/<slug>).
-//  4. Committing the updated file onto that branch.
-//  5. Opening a PR against the default branch with the hermit:rfc-ready label applied.
+//  1. Fetching the current RFC content and rewriting its frontmatter status to "in-review".
+//  2. Creating a new branch (rfc-review/<slug>).
+//  3. Committing the updated file onto that branch.
+//  4. Opening a PR — the Docuchango workflow labels are applied automatically
+//     on the next discovery cycle; no legacy rfcLabel is applied.
 func (s *Service) SubmitForReview(ctx context.Context, repositoryID, rfcPath string) (SubmitForReviewResult, error) {
 	if s.repoResolver == nil {
 		return SubmitForReviewResult{}, fmt.Errorf("repository resolver is not configured")
 	}
 
-	owner, name, registry, repoBaseURL, branch, _, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, branch, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return SubmitForReviewResult{}, fmt.Errorf("repository not found")
 	}
@@ -549,12 +548,7 @@ func (s *Service) SubmitForReview(ctx context.Context, repositoryID, rfcPath str
 	}
 	baseURL := s.registryBaseURL(registry, repoBaseURL)
 
-	// 1. Ensure the rfc-ready label exists.
-	if err := client.EnsureLabel(ctx, baseURL, owner, name, rfcLabel, "0075ca", "RFC ready for review", token); err != nil {
-		return SubmitForReviewResult{}, fmt.Errorf("ensure label: %w", err)
-	}
-
-	// 2. Fetch current RFC content, guard status transition, rewrite to "in-review".
+	// 1. Fetch current RFC content, guard status transition, rewrite to "in-review".
 	view, err := client.GetRFC(ctx, baseURL, owner, name, branch, rfcPath, token)
 	if err != nil {
 		return SubmitForReviewResult{}, fmt.Errorf("fetch rfc: %w", err)
@@ -568,7 +562,7 @@ func (s *Service) SubmitForReview(ctx context.Context, repositoryID, rfcPath str
 	updated := rewriteFrontmatterStatus(view.MarkdownSource, "in-review")
 	title := view.Title
 
-	// 3. Create review branch.
+	// 2. Create review branch.
 	headSHA, err := client.GetMainBranchSHA(ctx, baseURL, owner, name, branch, token)
 	if err != nil {
 		return SubmitForReviewResult{}, fmt.Errorf("get branch SHA: %w", err)
@@ -578,15 +572,15 @@ func (s *Service) SubmitForReview(ctx context.Context, repositoryID, rfcPath str
 		return SubmitForReviewResult{}, fmt.Errorf("create branch: %w", err)
 	}
 
-	// 4. Commit updated file.
+	// 3. Commit updated file.
 	commitMsg := fmt.Sprintf("docs(rfc): submit %s for review", path.Base(rfcPath))
 	if _, err := client.CommitFile(ctx, baseURL, owner, name, reviewBranch, rfcPath, updated, commitMsg, token); err != nil {
 		return SubmitForReviewResult{}, fmt.Errorf("commit file: %w", err)
 	}
 
-	// 5. Open PR with the rfc-ready label.
-	prBody := fmt.Sprintf("## %s\n\nSubmitted for review via Hermit.\n\n<!-- %s -->", title, rfcLabel)
-	pr, err := client.CreatePR(ctx, baseURL, owner, name, title, prBody, reviewBranch, branch, []string{rfcLabel}, token)
+	// 4. Open PR (workflow labels applied automatically on next discovery cycle).
+	prBody := fmt.Sprintf("## %s\n\nSubmitted for review via Hermit.", title)
+	pr, err := client.CreatePR(ctx, baseURL, owner, name, title, prBody, reviewBranch, branch, nil, token)
 	if err != nil {
 		return SubmitForReviewResult{}, fmt.Errorf("create PR: %w", err)
 	}
@@ -682,9 +676,7 @@ func (s *Service) StartReviewSession(ctx context.Context, repositoryID string, r
 	body += "\n\n<!-- hermit-review-session -->"
 
 	labels := []string{workflowLabel}
-	if docType == "rfc" && rfcLabel != "" && rfcLabel != workflowLabel {
-		labels = append(labels, rfcLabel)
-	}
+
 	pr, err := client.CreatePR(ctx, baseURL, owner, name, commitMsg, body, reviewBranch, branch, labels, token)
 	if err != nil {
 		return StartReviewSessionResult{}, fmt.Errorf("create PR: %w", err)
@@ -799,7 +791,7 @@ func (s *Service) AcceptRFC(ctx context.Context, repositoryID string, prNumber i
 		return AcceptRFCResult{}, fmt.Errorf("merge PR: %w", err)
 	}
 
-	// Remove hermit:rfc-ready (and legacy workflow labels) so the PR drops out
+	// Remove any legacy rfcLabel so the PR drops out
 	// of the review queue immediately after a successful merge.
 	if merged && rfcLabel != "" {
 		_ = client.RemoveLabel(ctx, baseURL, owner, name, prNumber, rfcLabel, token)
@@ -954,7 +946,7 @@ func (s *Service) MergePR(ctx context.Context, repositoryID string, prNumber int
 	if s.repoResolver == nil {
 		return MergePRResult{}, fmt.Errorf("repository resolver is not configured")
 	}
-	owner, name, registry, repoBaseURL, _, _, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, _, _, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return MergePRResult{}, fmt.Errorf("repository not found")
 	}
@@ -981,10 +973,7 @@ func (s *Service) MergePR(ctx context.Context, repositoryID string, prNumber int
 		return MergePRResult{}, fmt.Errorf("merge PR: %w", err)
 	}
 
-	// Remove hermit:rfc-ready so the PR drops out of the review queue.
-	if merged && rfcLabel != "" {
-		_ = client.RemoveLabel(ctx, baseURL, owner, name, prNumber, rfcLabel, token)
-	}
+
 
 	slog.Info("MergePR service: done", "owner", owner, "repo", name, "prNumber", prNumber, "merged", merged, "blockedByCI", blockedByCI)
 	return MergePRResult{Merged: merged, BlockedByCI: blockedByCI}, nil

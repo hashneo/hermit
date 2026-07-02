@@ -138,7 +138,7 @@ func Load() (Config, error) {
 			repository.DocsPathPolicy = "docs-cms/rfcs/"
 		}
 		if repository.RFCLabel == "" {
-			repository.RFCLabel = "hermit:rfc-ready"
+			repository.RFCLabel = ""
 		}
 	}
 

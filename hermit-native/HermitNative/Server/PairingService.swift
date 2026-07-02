@@ -267,7 +267,7 @@ extension PairingBrowser: MCNearbyServiceBrowserDelegate {
         let owner     = info?["owner"]    ?? ""
         let repo      = info?["repo"]     ?? ""
         let docsPath  = info?["docsPath"] ?? "docs-cms/rfcs"
-        let rfcLabel  = info?["rfcLabel"] ?? "hermit:rfc-ready"
+        let rfcLabel  = info?["rfcLabel"] ?? ""
         // peerID.displayName is the Mac's LocalHostName (e.g. Stevens-MacBook-Pro)
         let serverURL = "http://\(peerID.displayName).local:\(port)"
 

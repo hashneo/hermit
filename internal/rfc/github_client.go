@@ -73,7 +73,7 @@ type CreatedPR struct {
 }
 
 // RFCReadyLabel is the GitHub label that marks a PR as ready for RFC review.
-const RFCReadyLabel = "hermit:rfc-ready"
+const RFCReadyLabel = ""
 
 type ReviewReadyRFCItem struct {
 	PRNumber       int
@@ -339,9 +339,7 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 	if docsPath == "" {
 		docsPath = "docs-cms/rfcs"
 	}
-	if rfcLabel == "" {
-		rfcLabel = RFCReadyLabel
-	}
+	
 
 	// Query PRs and inspect changed files client-side. Some providers
 	// (for example Gitea) do not support string label filters on this endpoint.

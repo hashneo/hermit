@@ -36,12 +36,6 @@ final class KeychainHelper {
     }
 
     private func writeString(_ value: String?, account: String) {
-        // Write to the standard macOS login Keychain.  Items created by
-        // HermitNative are automatically in the app's ACL — no password
-        // prompt is shown when the same app reads them back, even across
-        // binary rebuilds with ad-hoc ("Sign to Run Locally") signing.
-        // kSecAttrAccessibleAfterFirstUnlock ensures the item is readable
-        // after the first unlock without prompting.
         let query: [CFString: Any] = [
             kSecClass:          kSecClassGenericPassword,
             kSecAttrService:    service as CFString,
@@ -57,18 +51,29 @@ final class KeychainHelper {
             kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlock,
         ]
         if SecItemUpdate(query as CFDictionary, attrs as CFDictionary) == errSecItemNotFound {
+            // Create the item with an open ACL (nil trusted-app list) so that
+            // any rebuild of the app binary — with a new ad-hoc code signature
+            // — can read it without triggering the login-keychain password
+            // prompt.  A nil trusted list means "any application may access
+            // this item"; the item is still confined to the login keychain and
+            // only accessible after first unlock.
             var add = query
             add[kSecValueData] = data
+#if os(macOS)
+            var secAccess: SecAccess?
+            if SecAccessCreate(service as CFString, nil as CFArray?, &secAccess) == errSecSuccess,
+               let access = secAccess {
+                add[kSecAttrAccess] = access
+            }
+#endif
             SecItemAdd(add as CFDictionary, nil)
         }
     }
 
     // MARK: - Accessibility migration
 
-    /// Re-writes any HermitNative Keychain items still using the default
-    /// accessibility class (kSecAttrAccessibleWhenUnlocked) to
-    /// kSecAttrAccessibleAfterFirstUnlock so they are readable in the
-    /// background without an additional unlock prompt.
+    /// Re-writes all HermitNative Keychain items with an open ACL so that
+    /// ad-hoc binary rebuilds never trigger the login-keychain password prompt.
     private func migrateAccessibility() {
         let query: [CFString: Any] = [
             kSecClass:             kSecClassGenericPassword,
@@ -84,18 +89,17 @@ final class KeychainHelper {
         for item in items {
             guard let account = item[kSecAttrAccount] as? String,
                   let data    = item[kSecValueData]   as? Data else { continue }
-            let accessibility = item[kSecAttrAccessible] as? String
-            if accessibility == (kSecAttrAccessibleAfterFirstUnlock as String) { continue }
+            // Delete the old item (which has a per-binary ACL) and re-create
+            // it with writeString, which sets a nil-trusted-list ACL.
             let find: [CFString: Any] = [
                 kSecClass:       kSecClassGenericPassword,
                 kSecAttrService: service as CFString,
                 kSecAttrAccount: account as CFString,
             ]
-            let update: [CFString: Any] = [
-                kSecValueData:      data,
-                kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlock,
-            ]
-            SecItemUpdate(find as CFDictionary, update as CFDictionary)
+            SecItemDelete(find as CFDictionary)
+            if let value = String(data: data, encoding: .utf8) {
+                writeString(value, account: account)
+            }
         }
     }
 

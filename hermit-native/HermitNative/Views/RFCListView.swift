@@ -248,7 +248,7 @@ struct SubmitForReviewSheet: View {
                 .foregroundStyle(Color.accentColor)
             Text("Submit for Review")
                 .font(.headline)
-            Text("This will:\n• Rewrite the RFC status to **in-review**\n• Ensure the `hermit:rfc-ready` label exists\n• Create a review branch\n• Open a pull request")
+            Text("This will:\n• Rewrite the RFC status to **in-review**\n• Create a review branch\n• Open a pull request\n• Workflow labels applied automatically on discovery")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

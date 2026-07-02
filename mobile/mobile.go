@@ -197,7 +197,7 @@ func buildConfig(sc StartConfig) (config.Config, error) {
 			r.DocsPath = "docs-cms/rfcs/"
 		}
 		if r.RFCLabel == "" {
-			r.RFCLabel = "hermit:rfc-ready"
+			r.RFCLabel = ""
 		}
 		key := registryKey{r.BaseURL}
 		if _, ok := registryNames[key]; !ok {

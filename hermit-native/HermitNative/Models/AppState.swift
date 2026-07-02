@@ -186,7 +186,7 @@ final class AppState: ObservableObject {
         repoOwner         = cs.repoOwner ?? ""
         repoName          = cs.repoName  ?? ""
         docsPath          = cs.docsPath  ?? "docs-cms/rfcs"
-        rfcLabel          = cs.rfcLabel  ?? "hermit:rfc-ready"
+        rfcLabel          = cs.rfcLabel  ?? ""
         serverMode        = cs.serverMode ?? .embeddedLocal
         localNetworkToken = cs.localNetworkToken ?? ""
         isAuthenticated   = cs.isConfigured && !resolvedPAT.isEmpty
@@ -208,7 +208,7 @@ final class AppState: ObservableObject {
         repoOwner     = cs.repoOwner ?? ""
         repoName      = cs.repoName  ?? ""
         docsPath      = cs.docsPath  ?? "docs-cms/rfcs"
-        rfcLabel      = cs.rfcLabel  ?? "hermit:rfc-ready"
+        rfcLabel      = cs.rfcLabel  ?? ""
         serverMode    = cs.serverMode ?? .embeddedLocal
         serverBaseURL = cs.serverBaseURL ?? ""
         isAuthenticated = cs.isConfigured && !pat.isEmpty

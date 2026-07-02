@@ -186,7 +186,7 @@ def main():
                 "owner": repo_owner,
                 "name": repo_name,
                 "docsPath": repo_docs,
-                "rfcLabel": repo.get("rfc_label", "hermit:rfc-ready"),
+                "rfcLabel": repo.get("rfc_label", ""),
             })
 
         existing_accounts = decode_existing_json("hermit.accounts")
@@ -283,7 +283,7 @@ def main():
                     "owner":     owner,
                     "name":      name,
                     "docsPath":  docs,
-                    "rfcLabel":  "hermit:rfc-ready",
+                    "rfcLabel":  "",
                 }
             ]
     else:
@@ -302,7 +302,7 @@ def main():
         "hermit.repoOwner":     owner,
         "hermit.repoName":      name,
         "hermit.docsPath":      docs,
-        "hermit.rfcLabel":      "hermit:rfc-ready",
+        "hermit.rfcLabel":      "",
         "hermit.serverMode":    '{"type":"embeddedLocal"}',
     }
     if not no_gitea:

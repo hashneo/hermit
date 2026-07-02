@@ -1013,7 +1013,7 @@ private struct AddRepoSheet: View {
     @State private var owner    = ""
     @State private var name     = ""
     @State private var docsPath = ""
-    @State private var rfcLabel = "hermit:rfc-ready"
+    @State private var rfcLabel = ""
     @State private var isSaving = false
 
     var canSave: Bool {
@@ -1057,7 +1057,7 @@ private struct AddRepoSheet: View {
 #if os(iOS)
                         .textInputAutocapitalization(.never)
 #endif
-                    TextField("RFC label", text: $rfcLabel, prompt: Text("hermit:rfc-ready"))
+                    TextField("RFC label", text: $rfcLabel, prompt: Text(""))
                         .autocorrectionDisabled()
 #if os(iOS)
                         .textInputAutocapitalization(.never)
@@ -1101,7 +1101,7 @@ private struct AddRepoSheet: View {
             owner: owner.trimmingCharacters(in: .whitespaces),
             name: name.trimmingCharacters(in: .whitespaces),
             docsPath: docsPath.isEmpty ? "docs-cms/rfcs" : docsPath.trimmingCharacters(in: .whitespaces),
-            rfcLabel: rfcLabel.isEmpty ? "hermit:rfc-ready" : rfcLabel.trimmingCharacters(in: .whitespaces)
+            rfcLabel: rfcLabel.isEmpty ? "" : rfcLabel.trimmingCharacters(in: .whitespaces)
         )
         let registeredServerID = await registerWithRunningServer(repo)
         if let serverID = registeredServerID {

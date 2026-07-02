@@ -154,7 +154,7 @@ func (s *Service) SeedFromConfig(repositories []config.Repository) {
 		}
 		rfcLabel := repository.RFCLabel
 		if rfcLabel == "" {
-			rfcLabel = "hermit:rfc-ready"
+			rfcLabel = ""
 		}
 
 		token := strings.TrimSpace(repository.Token)
@@ -280,7 +280,7 @@ func (s *Service) configFromRepository(repository config.Repository, now string)
 	}
 	rfcLabel := repository.RFCLabel
 	if rfcLabel == "" {
-		rfcLabel = "hermit:rfc-ready"
+		rfcLabel = ""
 	}
 
 	token := strings.TrimSpace(repository.Token)
@@ -347,7 +347,7 @@ func (s *Service) Create(ctx context.Context, input createInput) (Config, error)
 		input.DocsPathPolicy = "docs-cms/rfcs/"
 	}
 	if input.RFCLabel == "" {
-		input.RFCLabel = "hermit:rfc-ready"
+		input.RFCLabel = ""
 	}
 
 	fullName := repositoryKey(input.Registry, input.Owner, input.Name)
