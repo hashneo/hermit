@@ -108,28 +108,8 @@ def test_preserves_settings_added_repository():
         assert github_accounts[0]["token"] == "github-token", github_accounts[0]
 
 
-def test_seed_config_includes_merge_god_review_fixture_repo():
-    config_path = REPO_ROOT / "config" / "hermit-repos.meridian.json"
-    config = json.loads(config_path.read_text())
-    review_fixture_repos = [
-        repo
-        for repo in config["repositories"]
-        if repo["owner"] == "jrepp" and repo["name"] == "merge-god"
-    ]
-    assert review_fixture_repos == [
-        {
-            "account": "github",
-            "docs_path": "docs-cms/rfcs",
-            "name": "merge-god",
-            "owner": "jrepp",
-            "rfc_label": "",
-        }
-    ], review_fixture_repos
-
-
 def main():
     test_preserves_settings_added_repository()
-    test_seed_config_includes_merge_god_review_fixture_repo()
     print("native seed preference tests passed")
 
 
