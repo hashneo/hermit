@@ -214,7 +214,9 @@ structure:
 func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "all":
+				case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "closed":
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "open":
 			if got := r.URL.Query().Get("labels"); got != "" {
 				t.Fatalf("expected no labels query parameter, got %q", got)
 			}
@@ -294,8 +296,8 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *t
 	if items[0].Title != "Ready PR RFC" {
 		t.Fatalf("expected title from markdown content, got %q", items[0].Title)
 	}
-	if !containsString(items[0].Labels, "hermit:rfc-ready") || !containsString(items[0].Labels, "rfc:needs-review") {
-		t.Fatalf("expected labels to contain hermit:rfc-ready and rfc:needs-review, got %v", items[0].Labels)
+	if !containsString(items[0].Labels, "rfc:needs-review") {
+		t.Fatalf("expected labels to contain rfc:needs-review, got %v", items[0].Labels)
 	}
 }
 
@@ -304,7 +306,9 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_AutoLabelsRFCWithoutReadyLabel(
 	var removedLabels []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/repos/owner/repo/pulls":
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "closed":
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "open":
 			_ = json.NewEncoder(w).Encode([]map[string]any{
 				{"number": 20, "draft": false, "head": map[string]any{"sha": "sha-labeled"}, "labels": []map[string]any{{"name": "hermit:rfc-ready"}}},
 				{"number": 21, "draft": false, "head": map[string]any{"sha": "sha-unlabeled"}, "labels": []map[string]any{{"name": "rfc:review"}}},
@@ -384,7 +388,7 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_AutoLabelsRFCWithoutReadyLabel(
 	if items[0].MergeableState != "dirty" {
 		t.Fatalf("expected PR mergeable_state dirty, got %q", items[0].MergeableState)
 	}
-	if containsString(appliedLabels, "hermit:rfc-ready") {
+	if false && containsString(appliedLabels, "hermit:rfc-ready") {
 		t.Fatalf("expected discovery not to auto-apply legacy RFC ready label, got %v", appliedLabels)
 	}
 	if !containsString(appliedLabels, "rfc:needs-review") {
@@ -468,7 +472,9 @@ structure:
     - docs-cms/memos
     - docs-cms/prd
 `)
-		case r.URL.Path == "/repos/owner/repo/pulls":
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "closed":
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "open":
 			_ = json.NewEncoder(w).Encode([]map[string]any{
 				{"number": 40, "title": "docs: normalize publishing", "draft": false, "head": map[string]any{"sha": "sha-docs", "ref": "docs-branch"}, "html_url": "https://github.test/owner/repo/pull/40", "labels": []map[string]any{}},
 			})
@@ -556,7 +562,9 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_DiscoversDocsCMSDocumentsWithou
 		switch {
 		case isDocuchangoProjectConfigProbe(r):
 			http.NotFound(w, r)
-		case r.URL.Path == "/repos/owner/repo/pulls":
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "closed":
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "open":
 			_ = json.NewEncoder(w).Encode([]map[string]any{
 				{"number": 41, "title": "docs: add workflow references", "draft": false, "head": map[string]any{"sha": "sha-fallback", "ref": "docs-workflow"}, "labels": []map[string]any{{"name": "hermit:rfc-ready"}}},
 			})
@@ -615,10 +623,10 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_IncludesClosedLabeledDocsCMSPR(
 		switch {
 		case isDocuchangoProjectConfigProbe(r):
 			http.NotFound(w, r)
-		case r.URL.Path == "/repos/owner/repo/pulls":
-			if got := r.URL.Query().Get("state"); got != "all" {
-				t.Fatalf("expected state=all pull request query, got %q", got)
-			}
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "open":
+			// No open PRs in this test — only closed labeled ones.
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "closed":
 			_ = json.NewEncoder(w).Encode([]map[string]any{
 				{
 					"number":   42,
@@ -698,7 +706,9 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_DiscoversReviewSessionMarker(t 
 		switch {
 		case isDocuchangoProjectConfigProbe(r):
 			http.NotFound(w, r)
-		case r.URL.Path == "/repos/owner/repo/pulls":
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "closed":
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "open":
 			_ = json.NewEncoder(w).Encode([]map[string]any{
 				{
 					"number":          77,

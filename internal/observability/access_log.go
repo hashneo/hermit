@@ -23,6 +23,7 @@ const accessLogDatabaseFilename = "hermit-observability.db"
 type AccessLogStore struct {
 	db      *sql.DB
 	writeCh chan LogEntry
+	flushCh chan chan struct{} // used by Sync() to drain pending writes
 	stopCh  chan struct{}
 }
 
@@ -70,6 +71,7 @@ func OpenAccessLog(dataDir string) (*AccessLogStore, error) {
 	store := &AccessLogStore{
 		db:      db,
 		writeCh: make(chan LogEntry, 2048),
+		flushCh: make(chan chan struct{}, 8),
 		stopCh:  make(chan struct{}),
 	}
 	if err := store.migrate(context.Background()); err != nil {
@@ -80,23 +82,30 @@ func OpenAccessLog(dataDir string) (*AccessLogStore, error) {
 	return store, nil
 }
 
-// writeLoop drains the write channel serially — one goroutine, one connection,
-// zero lock contention.
+// Sync blocks until all writes queued before the call have been committed.
+// Intended for tests that need deterministic read-after-write behaviour.
+func (s *AccessLogStore) Sync() {
+	done := make(chan struct{})
+	s.flushCh <- done
+	<-done
+}
+
 func (s *AccessLogStore) writeLoop() {
 	for {
 		select {
 		case entry := <-s.writeCh:
 			_ = s.insertDirect(context.Background(), entry)
-		case <-s.stopCh:
-			// Flush remaining entries before exit.
-			for {
-				select {
-				case entry := <-s.writeCh:
-					_ = s.insertDirect(context.Background(), entry)
-				default:
-					return
-				}
+		case done := <-s.flushCh:
+			// Drain all pending writes then signal the caller.
+			for len(s.writeCh) > 0 {
+				_ = s.insertDirect(context.Background(), <-s.writeCh)
 			}
+			close(done)
+		case <-s.stopCh:
+			for len(s.writeCh) > 0 {
+				_ = s.insertDirect(context.Background(), <-s.writeCh)
+			}
+			return
 		}
 	}
 }

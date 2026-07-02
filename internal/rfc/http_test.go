@@ -52,7 +52,9 @@ func TestRenderPRRFC(t *testing.T) {
 	// Fake Gitea/GitHub API server.
 	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "all":
+				case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "closed":
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "open":
 			_ = json.NewEncoder(w).Encode([]map[string]any{
 				{
 					"number": 1,
@@ -207,7 +209,9 @@ func TestListRepositoryRFCs_IncludesSummary(t *testing.T) {
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
 				"name": "rfc-001-test.md", "path": "docs-cms/rfcs/rfc-001-test.md", "type": "file",
 			}})
-		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "all":
+				case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "closed":
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "open":
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
 				"number":          1,
 				"draft":           false,
@@ -314,7 +318,9 @@ func TestListRepositoryRFCs_UsesSQLiteCache(t *testing.T) {
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
 				"name": "rfc-001-cached.md", "path": "docs-cms/rfcs/rfc-001-cached.md", "type": "file",
 			}})
-		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "all":
+				case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "closed":
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "open":
 			_ = json.NewEncoder(w).Encode([]map[string]any{})
 		case isDocuchangoProjectConfigProbe(r):
 			http.NotFound(w, r)
@@ -389,7 +395,9 @@ func TestListRepositoryRFCs_RefreshPreservesCachedBasisOnProviderError(t *testin
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
 				"name": "rfc-001-cached-basis.md", "path": "docs-cms/rfcs/rfc-001-cached-basis.md", "type": "file",
 			}})
-		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "all":
+				case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "closed":
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "open":
 			_ = json.NewEncoder(w).Encode([]map[string]any{})
 		case isDocuchangoProjectConfigProbe(r):
 			http.NotFound(w, r)
@@ -456,7 +464,9 @@ func TestListRepositoryRFCs_DoesNotServeCacheForChangedRepositoryIdentity(t *tes
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
 				"name": "rfc-001-original.md", "path": "docs-cms/rfcs/rfc-001-original.md", "type": "file",
 			}})
-		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "all":
+				case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "closed":
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "open":
 			_ = json.NewEncoder(w).Encode([]map[string]any{})
 		case isDocuchangoProjectConfigProbe(r):
 			http.NotFound(w, r)
