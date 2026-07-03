@@ -401,6 +401,38 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 	}
 	pulls := append(openFetch.prs, closedFetch.prs...)
 
+	// Deduplicate by PR number — both open and closed fetches could return the
+	// same PR in test mocks or during paginated edge cases.
+	seen := make(map[int]struct{}, len(pulls))
+	uniquePulls := make([]struct {
+		Number         int    `json:"number"`
+		Title          string `json:"title"`
+		Body           string `json:"body"`
+		HTMLURL        string `json:"html_url"`
+		State          string `json:"state"`
+		Draft          bool   `json:"draft"`
+		Merged         bool   `json:"merged"`
+		Mergeable      *bool  `json:"mergeable"`
+		MergeableState string `json:"mergeable_state"`
+		Comments       int    `json:"comments"`
+		ReviewComments int    `json:"review_comments"`
+		Head           struct {
+			SHA string `json:"sha"`
+			Ref string `json:"ref"`
+		} `json:"head"`
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+	}, 0, len(pulls))
+	for _, pr := range pulls {
+		if _, ok := seen[pr.Number]; ok {
+			continue
+		}
+		seen[pr.Number] = struct{}{}
+		uniquePulls = append(uniquePulls, pr)
+	}
+	pulls = uniquePulls
+
 	// Pre-filter candidates.
 	type prEntry struct {
 		idx   int
