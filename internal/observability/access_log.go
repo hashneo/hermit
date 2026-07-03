@@ -22,11 +22,12 @@ const accessLogDatabaseFilename = "hermit-observability.db"
 // a buffered channel and consumed by a single background goroutine, keeping
 // middleware hot-path non-blocking and eliminating SQLITE_BUSY contention.
 type AccessLogStore struct {
-	db      *sql.DB
-	writeCh chan LogEntry
-	flushCh chan chan struct{} // used by Sync() to drain pending writes
-	stopCh  chan struct{}
-	stopped sync.Once // guards Close() against double-close panics
+	db       *sql.DB
+	writeCh  chan LogEntry
+	flushCh  chan chan struct{} // used by Sync() to drain pending writes
+	stopCh   chan struct{}
+	loopDone chan struct{} // closed by writeLoop when it exits
+	stopped  sync.Once    // guards Close() against double-close panics
 }
 
 type LogEntry struct {
@@ -71,10 +72,11 @@ func OpenAccessLog(dataDir string) (*AccessLogStore, error) {
 		return nil, err
 	}
 	store := &AccessLogStore{
-		db:      db,
-		writeCh: make(chan LogEntry, 2048),
-		flushCh: make(chan chan struct{}, 8),
-		stopCh:  make(chan struct{}),
+		db:       db,
+		writeCh:  make(chan LogEntry, 2048),
+		flushCh:  make(chan chan struct{}, 8),
+		stopCh:   make(chan struct{}),
+		loopDone: make(chan struct{}),
 	}
 	if err := store.migrate(context.Background()); err != nil {
 		_ = db.Close()
@@ -93,6 +95,7 @@ func (s *AccessLogStore) Sync() {
 }
 
 func (s *AccessLogStore) writeLoop() {
+	defer close(s.loopDone)
 	for {
 		select {
 		case entry := <-s.writeCh:
@@ -146,7 +149,8 @@ func (s *AccessLogStore) Close() error {
 		// Signal writeLoop to stop and tell it to notify us when it exits.
 		s.flushCh <- done // drain first
 		<-done
-		close(s.stopCh) // then stop
+		close(s.stopCh)   // then stop
+		<-s.loopDone      // wait for writeLoop to fully exit before closing DB
 		dbErr = s.db.Close()
 	})
 	return dbErr
