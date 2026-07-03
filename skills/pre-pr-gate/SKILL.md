@@ -1,12 +1,12 @@
 ---
 name: pre-pr-gate
-description: Compatibility alias for ci-precheck-pr workflow.
+description: Alias for ci-precheck-pr (backward compatibility).
 ---
 
-# Pre-PR Gate
+# pre-pr-gate
 
-This is a compatibility alias for `ci-precheck-pr`.
+This is a backward-compatibility alias.
 
-Use:
+**Canonical skill:** `ci-precheck-pr`
 
-- `skills/ci-precheck-pr/SKILL.md`
+Use: load the `ci-precheck-pr` skill instead.
