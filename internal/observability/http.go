@@ -49,26 +49,33 @@ func MiddlewareWithAccessLog(next http.Handler, store *AccessLogStore) http.Hand
 		)
 
 		if store != nil {
-			entry := LogEntry{
-				StartedAt:     start.UTC().Format(time.RFC3339Nano),
-				CompletedAt:   time.Now().UTC().Format(time.RFC3339Nano),
-				Kind:          "access",
-				Method:        r.Method,
-				Path:          r.URL.Path,
-				Query:         r.URL.RawQuery,
-				Status:        recorder.status,
-				DurationMS:    duration.Milliseconds(),
-				CorrelationID: correlationID,
-				RemoteAddr:    r.RemoteAddr,
-				UserAgent:     r.UserAgent(),
-				BytesWritten:  recorder.bytesWritten,
-			}
-			if recorder.status >= http.StatusBadRequest {
-				entry.Kind = "error"
-				entry.ErrorCode, entry.ErrorMessage = parseErrorBody(recorder.body.String())
-			}
-			if err := store.Insert(r.Context(), entry); err != nil {
-				slog.Warn("record http access log failed", "error", err)
+			// Skip high-frequency polling endpoints — they produce noise and
+			// no useful signal.  Only log errors from these paths.
+			isPolling := r.Method == http.MethodGet &&
+				(r.URL.Path == "/api/v1/repositories" ||
+					r.URL.Path == "/api/v1/sync-status")
+			if !isPolling || recorder.status >= http.StatusBadRequest {
+				entry := LogEntry{
+					StartedAt:     start.UTC().Format(time.RFC3339Nano),
+					CompletedAt:   time.Now().UTC().Format(time.RFC3339Nano),
+					Kind:          "access",
+					Method:        r.Method,
+					Path:          r.URL.Path,
+					Query:         r.URL.RawQuery,
+					Status:        recorder.status,
+					DurationMS:    duration.Milliseconds(),
+					CorrelationID: correlationID,
+					RemoteAddr:    r.RemoteAddr,
+					UserAgent:     r.UserAgent(),
+					BytesWritten:  recorder.bytesWritten,
+				}
+				if recorder.status >= http.StatusBadRequest {
+					entry.Kind = "error"
+					entry.ErrorCode, entry.ErrorMessage = parseErrorBody(recorder.body.String())
+				}
+				if err := store.Insert(r.Context(), entry); err != nil {
+					slog.Warn("record http access log failed", "error", err)
+				}
 			}
 		}
 	})

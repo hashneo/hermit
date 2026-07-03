@@ -33,7 +33,11 @@ hermit-native/HermitNative.xcodeproj/xcuserdata/
 hermit-native/**/*.xcuserstate
 hermit-native/DerivedData/
 
+# Local repos config (team/personal — not committed; copy from hermit-repos.example.json)
+/config/hermit-repos.*.json
+
 # gomobile build artifacts
 hermit-native/HermitNative/HermitServer.xcframework/
 HermitNative.app/
 .idea/
+scripts/__pycache__/

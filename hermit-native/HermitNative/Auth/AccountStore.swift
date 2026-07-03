@@ -5,16 +5,17 @@ import Combine
 
 /// A named server connection with its own endpoint and PAT.
 ///
-/// In DEBUG builds the PAT is stored directly on this struct so it persists
-/// in UserDefaults alongside the other connection fields — no Keychain prompts
-/// during development. In Release builds `token` is excluded from Codable and
-/// the PAT lives exclusively in the Keychain.
+/// In DEBUG builds the PAT is stored directly on this struct so it round-trips
+/// through UserDefaults alongside the other connection fields — no Keychain
+/// involved, no password prompts during development.
+/// In Release builds `token` is excluded from Codable; the PAT lives
+/// exclusively in the Keychain keyed by `hermit.account.<UUID>`.
 struct Connection: Identifiable, Equatable {
     var id:       UUID   = UUID()
-    var name:     String          // e.g. "HashiCorp Gitea"
-    var endpoint: String          // e.g. "https://gitea.example.com"
+    var name:     String          // e.g. "GitHub"
+    var endpoint: String          // e.g. "https://api.github.com"
 #if DEBUG
-    var token:    String? = nil   // stored in UserDefaults in debug builds only
+    var token:    String? = nil   // stored in UserDefaults in DEBUG builds only
 #endif
 
     var keychainKey: String { "hermit.account.\(id.uuidString)" }
@@ -61,7 +62,7 @@ struct Repository: Identifiable, Codable, Equatable {
     var owner:     String         // e.g. "gitea_admin"
     var name:      String         // e.g. "hermit-rfcs"
     var docsPath:  String         // e.g. "docs-cms/rfcs"
-    var rfcLabel:  String         // e.g. "hermit:rfc-ready"
+    var rfcLabel:  String         // e.g. ""
     var lastSyncedAt: Date? = nil
 
     var fullName: String { "\(owner)/\(name)" }
@@ -88,18 +89,16 @@ final class AccountStore: ObservableObject {
         var conns  = loaded
 
         // Migrate legacy single-account config when no accounts exist yet.
+        // Skip loopback endpoints — those are the embedded server's own address.
         if conns.isEmpty {
             if let endpoint = UserDefaults.standard.string(forKey: "hermit.serverBaseURL"),
-               !endpoint.isEmpty {
-                var conn = Connection(name: "Default", endpoint: endpoint)
-#if DEBUG
-                // hermit-dp7: In DEBUG, read legacy PAT from UserDefaults only (no Keychain).
-                let legacyToken = UserDefaults.standard.string(forKey: "hermit.pat") ?? ""
-                conn.token = legacyToken.isEmpty ? nil : legacyToken
-#else
+               !endpoint.isEmpty,
+               !Self.isLoopbackEndpoint(endpoint) {
+                let conn = Connection(name: "Default", endpoint: endpoint)
                 let legacyToken = KeychainHelper.shared.readAccountToken(key: "hermit.pat") ?? ""
-                KeychainHelper.shared.writeAccountToken(legacyToken, key: conn.keychainKey)
-#endif
+                if !legacyToken.isEmpty {
+                    KeychainHelper.shared.writeAccountToken(legacyToken, key: conn.keychainKey)
+                }
                 conns = [conn]
                 AccountStore.saveToDefaults(connections: conns)
             }
@@ -115,19 +114,24 @@ final class AccountStore: ObservableObject {
 #if DEBUG
         conn.token = token.isEmpty ? nil : token
 #else
-        KeychainHelper.shared.writeAccountToken(token, key: conn.keychainKey)
+        if !token.isEmpty {
+            KeychainHelper.shared.writeAccountToken(token, key: conn.keychainKey)
+        }
 #endif
         connections.append(conn)
         save()
-        // hermit-9ds: no live server restart — user must relaunch to apply config changes.
         NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
+        Task { await probe(conn) }
     }
 
     func update(_ connection: Connection, token: String? = nil) {
         updateInPlace(connection, token: token)
         save()
-        // hermit-9ds: no live server restart — user must relaunch to apply config changes.
         NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
+        // Re-probe after an edit so any token or endpoint change is reflected at once.
+        if let refreshed = connections.first(where: { $0.id == connection.id }) {
+            Task { await probe(refreshed) }
+        }
     }
 
     /// Update a token without triggering a server restart.
@@ -157,7 +161,6 @@ final class AccountStore: ObservableObject {
 #endif
         connections.removeAll { $0.id == connection.id }
         save()
-        // hermit-9ds: no live server restart — user must relaunch to apply config changes.
         NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
     }
 
@@ -169,10 +172,45 @@ final class AccountStore: ObservableObject {
 #endif
     }
 
+    // MARK: - SSO URL reporting
+    // Repo-level SAML errors (detected during RFC loading) are pushed here so
+    // ConnectionStateView can surface the authorization link on the account row
+    // even when the /user probe doesn't return an X-GitHub-SSO header.
+
+    private var ssoURLs: [UUID: URL] = [:]
+
+    func reportSSO(url: URL, for accountID: UUID) {
+        guard ssoURLs[accountID] != url else { return }
+        ssoURLs[accountID] = url
+        objectWillChange.send()
+    }
+
+    func clearSSO(for accountID: UUID) {
+        guard ssoURLs[accountID] != nil else { return }
+        ssoURLs.removeValue(forKey: accountID)
+        objectWillChange.send()
+    }
+
+    /// Returns the best available SSO URL for the connection — from either the
+    /// account probe (X-GitHub-SSO header) or a repo-level SAML error.
+    func ssoURL(for connection: Connection) -> URL? {
+        probeErrors[connection.id]?.ssoURL ?? ssoURLs[connection.id]
+    }
+
     // MARK: - Connectivity probe
+
+    struct ProbeError {
+        let statusCode: Int?
+        let message: String
+        let ssoURL: URL?
+    }
 
     func isConnected(_ connection: Connection) -> Bool {
         connectedIDs.contains(connection.id)
+    }
+
+    func probeError(for connection: Connection) -> ProbeError? {
+        probeErrors[connection.id]
     }
 
     func probe(_ connection: Connection) async {
@@ -180,7 +218,17 @@ final class AccountStore: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
 
-        let healthPath = Self.isGitHubAPIEndpoint(base) ? "/user" : "/api/v1/health"
+        // GitHub  → GET /user          (authenticated; returns 401 on bad/missing token)
+        // Gitea   → GET /api/v1/user   (authenticated; same behaviour as GitHub)
+        // Other   → GET /api/v1/health (unauthenticated reachability check only)
+        let isGitHub = Self.isGitHubAPIEndpoint(base)
+        let isGitea  = Self.isGiteaEndpoint(base)
+        let healthPath: String
+        if isGitHub || isGitea {
+            healthPath = "/user"
+        } else {
+            healthPath = "/api/v1/health"
+        }
         guard let url = URL(string: "\(base)\(healthPath)") else { return }
 
         var req = URLRequest(url: url, timeoutInterval: 8)
@@ -188,19 +236,104 @@ final class AccountStore: ObservableObject {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         do {
-            let (_, resp) = try await URLSession.shared.data(for: req)
-            let ok = (resp as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
-            if ok { connectedIDs.insert(connection.id) } else { connectedIDs.remove(connection.id) }
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            let httpResp   = resp as? HTTPURLResponse
+            let statusCode = httpResp?.statusCode
+            let ok = statusCode.map { (200..<300).contains($0) } ?? false
+            if ok {
+                connectedIDs.insert(connection.id)
+                probeErrors.removeValue(forKey: connection.id)
+                ssoURLs.removeValue(forKey: connection.id)
+            } else {
+                connectedIDs.remove(connection.id)
+                let body      = String(data: data, encoding: .utf8) ?? ""
+                let ssoHeader = httpResp?.value(forHTTPHeaderField: "X-GitHub-SSO")
+                var ssoURL    = extractSAMLURL(from: body) ?? extractSAMLURLFromHeader(ssoHeader)
+
+                // /user on GitHub doesn't return SAML headers even when SSO is
+                // enforced — it just returns 401 "Bad credentials".  Probe an
+                // associated repo endpoint which DOES return X-GitHub-SSO.
+                if ssoURL == nil, statusCode == 401, Self.isGitHubAPIEndpoint(base) {
+                    ssoURL = await probeRepoForSSO(base: base, connection: connection)
+                }
+
+                probeErrors[connection.id] = ProbeError(
+                    statusCode: statusCode,
+                    message:    probeMessage(statusCode: statusCode, body: body, ssoHeader: ssoHeader, ssoURL: ssoURL),
+                    ssoURL:     ssoURL
+                )
+            }
         } catch {
             connectedIDs.remove(connection.id)
+            probeErrors[connection.id] = ProbeError(
+                statusCode: nil,
+                message:    error.localizedDescription,
+                ssoURL:     nil
+            )
         }
         objectWillChange.send()
+    }
+
+    /// When the /user probe returns 401, try a repo endpoint which returns
+    /// the X-GitHub-SSO header when SAML SSO authorization is required.
+    private func probeRepoForSSO(base: String, connection: Connection) async -> URL? {
+        let repos = RepositoryStore.shared.repos(for: connection)
+        guard let repo = repos.first,
+              let repoURL = URL(string: "\(base)/repos/\(repo.owner)/\(repo.name)")
+        else { return nil }
+
+        var req = URLRequest(url: repoURL, timeoutInterval: 8)
+        if let token = token(for: connection) {
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        guard let (data, resp) = try? await URLSession.shared.data(for: req) else { return nil }
+        let body      = String(data: data, encoding: .utf8) ?? ""
+        let ssoHeader = (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-GitHub-SSO")
+        return extractSAMLURL(from: body) ?? extractSAMLURLFromHeader(ssoHeader)
     }
 
     // MARK: - Private
 
     private var connectedIDs: Set<UUID> = []
+    private var probeErrors:  [UUID: ProbeError] = [:]
 
+    private func probeMessage(statusCode: Int?, body: String, ssoHeader: String? = nil, ssoURL: URL? = nil) -> String {
+        // SAML SSO takes priority — detected via header, body, or repo probe.
+        if ssoURL != nil || ssoHeader != nil ||
+           body.localizedCaseInsensitiveContains("SAML") ||
+           body.localizedCaseInsensitiveContains("sso") {
+            return "Organization SSO authorization required."
+        }
+        switch statusCode {
+        case 401: return "Authentication failed — check the token for this account."
+        case 403: return "Access denied (403)."
+        default:  return statusCode.map { "HTTP \($0)." } ?? "Connection failed."
+        }
+    }
+
+    private func extractSAMLURL(from body: String) -> URL? {
+        guard body.localizedCaseInsensitiveContains("SAML") ||
+              body.localizedCaseInsensitiveContains("sso") else { return nil }
+        let pattern = #"https://[^\s\\"]+authorization_request=[^\s\\"]+"#
+        guard let range = body.range(of: pattern, options: .regularExpression) else { return nil }
+        return URL(string: String(body[range]))
+    }
+
+    /// Parses `X-GitHub-SSO: required; url=https://github.com/.../sso?...`
+    private func extractSAMLURLFromHeader(_ header: String?) -> URL? {
+        guard let header else { return nil }
+        let pattern = #"url=(https://[^\s;,]+)"#
+        guard let range = header.range(of: pattern, options: .regularExpression) else { return nil }
+        let matched = String(header[range]).replacingOccurrences(of: "url=", with: "")
+        return URL(string: matched)
+    }
+
+    private static func isLoopbackEndpoint(_ endpoint: String) -> Bool {
+        guard let host = URL(string: endpoint)?.host?.lowercased() else { return false }
+        return host == "localhost" || host == "127.0.0.1" || host == "::1"
+    }
+
+    /// True for github.com and GitHub Enterprise API endpoints.
     private static func isGitHubAPIEndpoint(_ endpoint: String) -> Bool {
         guard let url = URL(string: endpoint),
               let host = url.host?.lowercased() else { return false }
@@ -212,6 +345,20 @@ final class AccountStore: ObservableObject {
             host.contains(".github.") ||
             path == "api/v3" ||
             path.hasSuffix("/api/v3")
+    }
+
+    /// True for self-hosted Gitea instances.  Gitea exposes GET /api/v1/user
+    /// as an authenticated endpoint (returns 401 on bad/missing token), which
+    /// gives us proper credential validation rather than the unauthenticated
+    /// /api/v1/health check.
+    private static func isGiteaEndpoint(_ endpoint: String) -> Bool {
+        guard let url = URL(string: endpoint),
+              let host = url.host?.lowercased() else { return false }
+        // Localhost Gitea dev instances
+        if host == "localhost" || host == "127.0.0.1" { return true }
+        // Explicit /api/v1 path is the Gitea API base convention
+        let path = url.path.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return path == "api/v1" || path.hasSuffix("/api/v1")
     }
 
     private func save() {
@@ -264,7 +411,7 @@ final class RepositoryStore: ObservableObject {
     }
 
     func add(accountID: UUID, owner: String, name: String,
-             docsPath: String = "docs-cms/rfcs", rfcLabel: String = "hermit:rfc-ready") {
+             docsPath: String = "docs-cms/rfcs", rfcLabel: String = "") {
         let repo = Repository(accountID: accountID, owner: owner, name: name,
                               docsPath: docsPath, rfcLabel: rfcLabel)
         add(repo)
@@ -353,7 +500,7 @@ final class RepositoryStore: ObservableObject {
             let accountID = UUID(uuidString: "00000000-0000-0000-0000-000000000001") ?? UUID()
             if !owner.isEmpty, !name.isEmpty {
                 let docs  = ud.string(forKey: "hermit.docsPath")  ?? "docs-cms/rfcs"
-                let label = ud.string(forKey: "hermit.rfcLabel")  ?? "hermit:rfc-ready"
+                let label = ud.string(forKey: "hermit.rfcLabel")  ?? ""
                 let repo  = Repository(accountID: accountID, owner: owner, name: name,
                                        docsPath: docs, rfcLabel: label)
                 repositories = [repo]

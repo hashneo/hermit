@@ -73,7 +73,7 @@ final class PublishingSession: ObservableObject {
 
             // Step 5: open PR
             let prBody = "## \(rfcTitle)\n\nCreated via Hermit native app.\n\n" +
-                         "<!-- hermit:rfc-ready -->"
+                         ""
             let pr = try await withRetry { [self] in
                 try await self.client.createPR(
                     title: rfcTitle, body: prBody,

@@ -15,8 +15,16 @@ import (
 
 const accessLogDatabaseFilename = "hermit-observability.db"
 
+// AccessLogStore records HTTP access log entries into SQLite.
+//
+// SQLite allows only one writer at a time.  All writes are dispatched through
+// a buffered channel and consumed by a single background goroutine, keeping
+// middleware hot-path non-blocking and eliminating SQLITE_BUSY contention.
 type AccessLogStore struct {
-	db *sql.DB
+	db      *sql.DB
+	writeCh chan LogEntry
+	flushCh chan chan struct{} // used by Sync() to drain pending writes
+	stopCh  chan struct{}
 }
 
 type LogEntry struct {
@@ -53,22 +61,53 @@ func OpenAccessLog(dataDir string) (*AccessLogStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	configureAccessLogDBPool(db)
+	// Single connection for the write goroutine — eliminates lock contention.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	if err := configureAccessLogSQLite(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	store := &AccessLogStore{db: db}
+	store := &AccessLogStore{
+		db:      db,
+		writeCh: make(chan LogEntry, 2048),
+		flushCh: make(chan chan struct{}, 8),
+		stopCh:  make(chan struct{}),
+	}
 	if err := store.migrate(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
+	go store.writeLoop()
 	return store, nil
 }
 
-func configureAccessLogDBPool(db *sql.DB) {
-	db.SetMaxOpenConns(4)
-	db.SetMaxIdleConns(2)
+// Sync blocks until all writes queued before the call have been committed.
+// Intended for tests that need deterministic read-after-write behaviour.
+func (s *AccessLogStore) Sync() {
+	done := make(chan struct{})
+	s.flushCh <- done
+	<-done
+}
+
+func (s *AccessLogStore) writeLoop() {
+	for {
+		select {
+		case entry := <-s.writeCh:
+			_ = s.insertDirect(context.Background(), entry)
+		case done := <-s.flushCh:
+			// Drain all pending writes then signal the caller.
+			for len(s.writeCh) > 0 {
+				_ = s.insertDirect(context.Background(), <-s.writeCh)
+			}
+			close(done)
+		case <-s.stopCh:
+			for len(s.writeCh) > 0 {
+				_ = s.insertDirect(context.Background(), <-s.writeCh)
+			}
+			return
+		}
+	}
 }
 
 func configureAccessLogSQLite(db *sql.DB) error {
@@ -96,6 +135,7 @@ func (s *AccessLogStore) Close() error {
 	if s == nil || s.db == nil {
 		return nil
 	}
+	close(s.stopCh)
 	return s.db.Close()
 }
 
@@ -129,13 +169,25 @@ func (s *AccessLogStore) migrate(ctx context.Context) error {
 	return nil
 }
 
-func (s *AccessLogStore) Insert(ctx context.Context, entry LogEntry) error {
+// Insert enqueues an entry for async write.  It never blocks the caller —
+// if the channel is full the entry is silently dropped rather than stalling
+// the HTTP response path.
+func (s *AccessLogStore) Insert(_ context.Context, entry LogEntry) error {
 	if s == nil || s.db == nil {
 		return nil
 	}
 	if entry.Kind == "" {
 		entry.Kind = "access"
 	}
+	select {
+	case s.writeCh <- entry:
+	default:
+		// Channel full — drop rather than block.
+	}
+	return nil
+}
+
+func (s *AccessLogStore) insertDirect(ctx context.Context, entry LogEntry) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO http_access_log (
 		started_at, completed_at, kind, method, path, query, status, duration_ms,
 		correlation_id, remote_addr, user_agent, bytes_written, error_code, error_message
@@ -183,28 +235,15 @@ func (s *AccessLogStore) List(ctx context.Context, query LogQuery) ([]LogEntry, 
 	for rows.Next() {
 		var entry LogEntry
 		if err := rows.Scan(
-			&entry.ID,
-			&entry.StartedAt,
-			&entry.CompletedAt,
-			&entry.Kind,
-			&entry.Method,
-			&entry.Path,
-			&entry.Query,
-			&entry.Status,
-			&entry.DurationMS,
-			&entry.CorrelationID,
-			&entry.RemoteAddr,
-			&entry.UserAgent,
-			&entry.BytesWritten,
-			&entry.ErrorCode,
-			&entry.ErrorMessage,
+			&entry.ID, &entry.StartedAt, &entry.CompletedAt, &entry.Kind,
+			&entry.Method, &entry.Path, &entry.Query, &entry.Status,
+			&entry.DurationMS, &entry.CorrelationID, &entry.RemoteAddr,
+			&entry.UserAgent, &entry.BytesWritten, &entry.ErrorCode, &entry.ErrorMessage,
 		); err != nil {
 			return nil, err
 		}
 		entries = append(entries, entry)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return entries, nil
+	return entries, rows.Err()
 }
+

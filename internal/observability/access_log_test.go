@@ -22,6 +22,7 @@ func TestMiddlewareWithAccessLogRecordsErrors(t *testing.T) {
 	req.Header.Set(CorrelationHeader, "corr-test")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
+	store.Sync() // wait for async write to complete
 
 	entries, err := store.List(req.Context(), LogQuery{Kind: "error", Limit: 10})
 	if err != nil {
@@ -79,6 +80,7 @@ func TestLogHandlerList(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("insert error: %v", err)
 	}
+	store.Sync() // wait for async writes to complete
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/logs?kind=error&limit=5", nil)
 	rec := httptest.NewRecorder()

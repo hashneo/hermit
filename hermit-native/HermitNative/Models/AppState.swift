@@ -142,10 +142,13 @@ final class AppState: ObservableObject {
                 rfcLabel: detected.rfcLabel
             ))
             if !detected.pat.isEmpty {
-                if let conn = AccountStore.shared.connections.first {
-                    // Use updateTokenOnly to avoid posting hermitRestartRequired
-                    // during init — the server has not started yet at this point.
-                    AccountStore.shared.updateTokenOnly(conn, token: detected.pat)
+                // Only update the fixed dev-account UUID, never any other account
+                // (e.g. a real GitHub PAT the user has configured).  Using
+                // connections.first here would silently replace a GitHub PAT with
+                // the local Gitea token every time `make dev` rebuilds the app.
+                let devUUID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+                if let devConn = AccountStore.shared.connections.first(where: { $0.id == devUUID }) {
+                    AccountStore.shared.updateTokenOnly(devConn, token: detected.pat)
                 }
             }
 #if os(iOS)
@@ -183,7 +186,7 @@ final class AppState: ObservableObject {
         repoOwner         = cs.repoOwner ?? ""
         repoName          = cs.repoName  ?? ""
         docsPath          = cs.docsPath  ?? "docs-cms/rfcs"
-        rfcLabel          = cs.rfcLabel  ?? "hermit:rfc-ready"
+        rfcLabel          = cs.rfcLabel  ?? ""
         serverMode        = cs.serverMode ?? .embeddedLocal
         localNetworkToken = cs.localNetworkToken ?? ""
         isAuthenticated   = cs.isConfigured && !resolvedPAT.isEmpty
@@ -205,7 +208,7 @@ final class AppState: ObservableObject {
         repoOwner     = cs.repoOwner ?? ""
         repoName      = cs.repoName  ?? ""
         docsPath      = cs.docsPath  ?? "docs-cms/rfcs"
-        rfcLabel      = cs.rfcLabel  ?? "hermit:rfc-ready"
+        rfcLabel      = cs.rfcLabel  ?? ""
         serverMode    = cs.serverMode ?? .embeddedLocal
         serverBaseURL = cs.serverBaseURL ?? ""
         isAuthenticated = cs.isConfigured && !pat.isEmpty

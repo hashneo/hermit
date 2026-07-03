@@ -30,13 +30,14 @@ DEV_UUID_NAMESPACE = uuid.UUID("9df7786a-6338-4bd4-bebb-3f225c005a6a")
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: seed-native-prefs.py <bundle-id> [config/hermit.yaml] [--repos-json path] [--token TOKEN]", file=sys.stderr)
+        print("Usage: seed-native-prefs.py <bundle-id> [config/hermit.yaml] [--repos-json path] [--token TOKEN] [--no-gitea]", file=sys.stderr)
         sys.exit(1)
 
     bundle_id = sys.argv[1]
     cfg_path  = "config/hermit.yaml"
     repos_json_path = None
     token_override = None
+    no_gitea = False
 
     args = sys.argv[2:]
     i = 0
@@ -47,6 +48,9 @@ def main():
         elif args[i] == "--repos-json" and i + 1 < len(args):
             repos_json_path = args[i + 1]
             i += 2
+        elif args[i] == "--no-gitea":
+            no_gitea = True
+            i += 1
         elif not args[i].startswith("--"):
             cfg_path = args[i]
             i += 1
@@ -66,6 +70,10 @@ def main():
     def load_plist(path):
         return plistlib.load(open(path, "rb")) if os.path.exists(path) else {}
 
+    # Load existing prefs from both locations so we can preserve tokens and
+    # user-added accounts regardless of whether the app is sandboxed.
+    # Sandbox plist wins on key conflicts (it is the authoritative store for
+    # a running sandboxed app).
     existing_prefs = {}
     existing_prefs.update(load_plist(plist_path))
     existing_prefs.update(load_plist(sandbox_plist))
@@ -178,7 +186,7 @@ def main():
                 "owner": repo_owner,
                 "name": repo_name,
                 "docsPath": repo_docs,
-                "rfcLabel": repo.get("rfc_label", "hermit:rfc-ready"),
+                "rfcLabel": repo.get("rfc_label", ""),
             })
 
         existing_accounts = decode_existing_json("hermit.accounts")
@@ -229,27 +237,55 @@ def main():
             print(f"Warning: {repos_json_path} did not contain usable accounts/repositories; falling back to {cfg_path}")
 
     if not accounts or not repositories:
-        # Build hermit.accounts JSON (debug builds store token inline)
-        accounts = [
-            {
-                "id":       DEV_ACCOUNT_ID,
-                "name":     "Default (Gitea)",
-                "endpoint": account_endpoint,
-                "token":    token,
-            }
-        ]
+        # Default path (no repos-json or it was empty).
+        # Preserve every existing account; only refresh the dev Gitea account's
+        # PAT — unless --no-gitea is set, in which case we leave accounts
+        # entirely alone so a deleted Gitea account is not resurrected.
+        existing_accounts = decode_existing_json("hermit.accounts")
 
-        # Build hermit.repositories JSON
-        repositories = [
-            {
-                "id":        DEV_REPO_ID,
-                "accountID": DEV_ACCOUNT_ID,
-                "owner":     owner,
-                "name":      name,
-                "docsPath":  docs,
-                "rfcLabel":  "hermit:rfc-ready",
-            }
-        ]
+        if no_gitea:
+            # Gitea is disabled: preserve whatever the user has configured and
+            # do not insert or update the dev Gitea sentinel account.
+            accounts = existing_accounts if existing_accounts else []
+            print("  --no-gitea: leaving hermit.accounts unchanged")
+        else:
+            dev_found = False
+            merged_accounts = []
+            for a in existing_accounts:
+                if a.get("id") == DEV_ACCOUNT_ID:
+                    a = dict(a)
+                    if token:
+                        a["token"] = token
+                    dev_found = True
+                    merged_accounts.append(a)
+                else:
+                    merged_accounts.append(a)
+            if not dev_found:
+                dev_account = {
+                    "id":       DEV_ACCOUNT_ID,
+                    "name":     "Default (Gitea)",
+                    "endpoint": account_endpoint,
+                }
+                if token:
+                    dev_account["token"] = token
+                merged_accounts.insert(0, dev_account)
+            accounts = merged_accounts
+
+        # Seed the default repo only when no repos are stored yet.
+        existing_repositories = decode_existing_json("hermit.repositories")
+        if existing_repositories:
+            repositories = existing_repositories
+        else:
+            repositories = [
+                {
+                    "id":        DEV_REPO_ID,
+                    "accountID": DEV_ACCOUNT_ID,
+                    "owner":     owner,
+                    "name":      name,
+                    "docsPath":  docs,
+                    "rfcLabel":  "",
+                }
+            ]
     else:
         first_repo = repositories[0]
         owner = first_repo["owner"]
@@ -260,32 +296,33 @@ def main():
         base_url = account_endpoint.rstrip("/")
         token = first_account.get("token", "")
 
-    d = load_plist(plist_path)
-    d.update({
+    non_secret = {
         # Legacy keys (used by GiteaAutoConfig / migration path)
-        "hermit.baseURL":       base_url + "/",
         "hermit.serverBaseURL": "http://localhost:8080",
         "hermit.repoOwner":     owner,
         "hermit.repoName":      name,
         "hermit.docsPath":      docs,
-        "hermit.rfcLabel":      "hermit:rfc-ready",
+        "hermit.rfcLabel":      "",
         "hermit.serverMode":    '{"type":"embeddedLocal"}',
-        # New store keys
-        "hermit.accounts":      json.dumps(accounts).encode(),
-        "hermit.repositories":  json.dumps(repositories).encode(),
-    })
-    plistlib.dump(d, open(plist_path, "wb"))
-    print(f"Seeded UserDefaults (non-sandboxed) for {bundle_id}")
+    }
+    if not no_gitea:
+        # Only write the Gitea API base URL when Gitea is enabled; writing it
+        # when disabled causes GiteaAutoConfig to treat the app as Gitea-backed.
+        non_secret["hermit.baseURL"] = base_url + "/"
 
-    # Also write into the sandbox container if it exists.
-    # Sandboxed apps (app-sandbox=true) read from the container, not ~/Library/Preferences.
-    sandbox_prefs_dir = os.path.dirname(sandbox_plist)
+    def write_plist(path, label):
+        d = load_plist(path)
+        d.update(non_secret)
+        d["hermit.accounts"]     = json.dumps(accounts).encode()
+        d["hermit.repositories"] = json.dumps(repositories).encode()
+        plistlib.dump(d, open(path, "wb"))
+        print(f"Seeded UserDefaults ({label}) — {len(accounts)} account(s), {len(repositories)} repo(s)")
+
+    write_plist(plist_path, f"non-sandboxed: {bundle_id}")
+
     if os.path.isdir(os.path.expanduser(f"~/Library/Containers/{bundle_id}")):
-        os.makedirs(sandbox_prefs_dir, exist_ok=True)
-        sd = load_plist(sandbox_plist)
-        sd.update(d)
-        plistlib.dump(sd, open(sandbox_plist, "wb"))
-        print(f"Seeded UserDefaults (sandboxed container) for {bundle_id}")
+        os.makedirs(os.path.dirname(sandbox_plist), exist_ok=True)
+        write_plist(sandbox_plist, f"sandboxed: {bundle_id}")
 
     print(f"  account:  {account_endpoint} (token: {token[:8]}…)" if token else f"  account:  {account_endpoint} (no token)")
     print(f"  repos:    {len(repositories)} configured; default {owner}/{name} @ {docs}")

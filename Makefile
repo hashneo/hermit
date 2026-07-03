@@ -16,7 +16,7 @@ GITEA_DATA_DIR := ./data/gitea
 GITEA_SEED_SCRIPT := ./scripts/seed-gitea-pr.sh
 GITEA_TOKEN_SCRIPT := ./scripts/gitea-token.sh
 HERMIT_ENABLE_GITEA ?= 0
-HERMIT_NATIVE_REPOS_JSON ?= config/hermit-repos.meridian.json
+HERMIT_NATIVE_REPOS_JSON ?=
 
 .DEFAULT_GOAL := build
 
@@ -146,11 +146,16 @@ native-embed-config: ## Copy config/hermit.yaml + .tmp/gitea-token-export.sh int
 	else \
 		echo "Warning: config/hermit.yaml not found — DevConfig will be empty"; \
 	fi
-	@if [ -f .tmp/gitea-token-export.sh ]; then \
+	@if [ "$(HERMIT_ENABLE_GITEA)" = "1" ] && [ -f .tmp/gitea-token-export.sh ]; then \
 		cp .tmp/gitea-token-export.sh hermit-native/HermitNative/DevConfig/gitea-token-export.sh; \
 		echo "Embedded .tmp/gitea-token-export.sh into DevConfig/"; \
 	else \
-		echo "Warning: .tmp/gitea-token-export.sh not found — token will not be embedded"; \
+		rm -f hermit-native/HermitNative/DevConfig/gitea-token-export.sh; \
+		if [ "$(HERMIT_ENABLE_GITEA)" != "1" ]; then \
+			echo "HERMIT_ENABLE_GITEA=$(HERMIT_ENABLE_GITEA) — removed DevConfig/gitea-token-export.sh (prevents stale Gitea config)"; \
+		else \
+			echo "Warning: .tmp/gitea-token-export.sh not found — token will not be embedded"; \
+		fi \
 	fi
 
 native-build-macos: gomobile-build native-embed-config ## Build the native app for macOS (rebuilds xcframework if Go changed)
@@ -217,7 +222,11 @@ native-seed-prefs: ## Write hermit config into the non-sandboxed UserDefaults pl
 			echo "Warning: HERMIT_NATIVE_REPOS_JSON=$(HERMIT_NATIVE_REPOS_JSON) not found — falling back to config/hermit.yaml"; \
 		fi; \
 	fi; \
-	$(PYTHON) scripts/seed-native-prefs.py "$$BUNDLE_ID" config/hermit.yaml $$REPOS_JSON_ARG
+	GITEA_ARG=""; \
+	if [ "$(HERMIT_ENABLE_GITEA)" != "1" ]; then \
+		GITEA_ARG="--no-gitea"; \
+	fi; \
+	$(PYTHON) scripts/seed-native-prefs.py "$$BUNDLE_ID" config/hermit.yaml $$REPOS_JSON_ARG $$GITEA_ARG
 
 native-open: build gomobile-build native-build-macos native-seed-prefs ## Build Go binary + xcframework + macOS app, then launch
 	@pkill -x HermitNative 2>/dev/null || true
@@ -282,6 +291,28 @@ dev: ## Zero-to-demo: optionally start Gitea, build + deploy app
 	fi
 	@printf '  Server:  embedded; port assigned at runtime\n'
 	@printf '\033[1;32m══════════════════════════════════════════\033[0m\n\n'
+
+wipe-config: ## Wipe all persisted Hermit config: UserDefaults, Keychain PATs, cached tokens, DevConfig token
+	@BUNDLE_ID=$$(grep -E '^HERMIT_BUNDLE_ID\s*=' hermit-native/Local.xcconfig 2>/dev/null | head -1 | sed 's/.*=[ \t]*//;s/[[:space:]]*//g'); \
+	if [ -z "$$BUNDLE_ID" ]; then \
+		echo "Warning: HERMIT_BUNDLE_ID not set — skipping UserDefaults/Keychain wipe"; \
+	else \
+		echo "Wiping UserDefaults ($$BUNDLE_ID)..."; \
+		defaults delete "$$BUNDLE_ID" 2>/dev/null && echo "  global defaults cleared" || echo "  global defaults already empty"; \
+		rm -f "$(HOME)/Library/Preferences/$$BUNDLE_ID.plist" && echo "  non-sandboxed plist removed" || true; \
+		rm -f "$(HOME)/Library/Containers/$$BUNDLE_ID/Data/Library/Preferences/$$BUNDLE_ID.plist" \
+			&& echo "  sandboxed plist removed" || echo "  sandboxed plist not found"; \
+		echo "Wiping Keychain PATs..."; \
+		security dump-keychain 2>/dev/null | awk -F'"' '/acct.*hermit\.account\./{print $$4}' | \
+			while read acct; do \
+				security delete-generic-password -a "$$acct" -s "HermitNative" 2>/dev/null \
+					&& echo "  removed: $$acct" || true; \
+			done; \
+	fi
+	@echo "Removing cached token files..."
+	@rm -f .tmp/gitea-token.env .tmp/gitea-token-export.sh
+	@rm -f hermit-native/HermitNative/DevConfig/gitea-token-export.sh
+	@echo "Wipe complete."
 
 reset: ## Full reset: kill app, destroy Gitea container + data, remove keychain entries, wipe build artifacts
 	@echo "Stopping HermitNative..."

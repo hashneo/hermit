@@ -69,8 +69,6 @@ struct RFCLifecycleToolbar: ToolbarContent {
     @State private var awaitingMergeSHA: String? = nil
     /// True once CI passed (manual path) — enables the Merge button.
     @State private var ciPassed = false
-    /// True after ironhide labels were applied — show confirmation badge.
-    @State private var handedToIronhide = false
 
     // MARK: - Lifecycle action model
 
@@ -208,17 +206,9 @@ struct RFCLifecycleToolbar: ToolbarContent {
                       : "Requires admin or maintain permission on this repository")
             }
 
-            // PR RFCs — Accept & Merge / Merge / CI waiting / Ironhide / Approve PR / Update Branch
+            // PR RFCs — Accept & Merge / Merge / CI waiting / Approve PR / Update Branch
             if isPullRequest {
-                if handedToIronhide {
-                    Button {} label: {
-                        Label("Handed to Ironhide", systemImage: "checkmark.shield.fill")
-                            .foregroundStyle(.green)
-                    }
-                    .disabled(true)
-                    .help("Ironhide labels applied. Ironhide will review and merge this PR automatically.")
-                } else {
-                    // Approve & Merge — hidden once Merge is unlocked or we're awaiting post-accept CI
+                // Approve & Merge — hidden once Merge is unlocked or we're awaiting post-accept CI
                     if awaitingMergeSHA == nil && !canMergePR && !prAlreadyAccepted {
                         Button {
                             pendingAction = .approveAndMerge
@@ -293,9 +283,8 @@ struct RFCLifecycleToolbar: ToolbarContent {
                               ? "RFC is approved — merge the pull request"
                               : !prApproved
                                   ? "PR must be approved before merging"
-                                  : "Waiting for CI checks to pass")
+                                   : "Waiting for CI checks to pass")
                     }
-                }
 
                 // Reviews — opens the review sheet for both authors and reviewers.
                 Button {
@@ -358,12 +347,10 @@ struct RFCLifecycleToolbar: ToolbarContent {
                             Task {
                                 switch captured {
                                 case .markImplemented: await runAction(onMarkImplemented)
-                                case .approveAndMerge:
+                                 case .approveAndMerge:
                                     isActioning = true
                                     if let result = await onApproveAndMerge?() {
-                                        if result.handedToIronhide {
-                                            handedToIronhide = true
-                                        } else if result.blockedByCI {
+                                        if result.blockedByCI {
                                             awaitingMergeSHA = result.commitSHA
                                             ciPassed = false
                                         }

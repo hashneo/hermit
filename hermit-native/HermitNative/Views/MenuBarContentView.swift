@@ -1377,13 +1377,20 @@ private struct CompactRepositoryReviewBucketRow: View {
             .buttonStyle(.plain)
 
             if let issue = bucket.issue {
-                Text(issue.repositoryRowSummary)
-                    .font(.caption)
-                    .foregroundStyle(issue.tint)
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 2)
-                    .lineLimit(2)
-                    .help(issue.helpText)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(issue.repositoryRowSummary)
+                        .font(.caption)
+                        .foregroundStyle(issue.tint)
+                        .lineLimit(2)
+                    if let url = issue.actionURL {
+                        Link(issue.actionLabel, destination: url)
+                            .font(.caption.weight(.semibold))
+                            .tint(issue.tint)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 2)
+                .help(issue.helpText)
             } else if bucket.groups.isEmpty {
                 Text(bucket.isLoading ? "Calculating from cached basis..." : "No review documents waiting.")
                     .font(.caption)
@@ -3163,14 +3170,23 @@ private struct RepositoryIssueStrip: View {
             Spacer(minLength: 8)
 
             HStack(spacing: 6) {
-                Button("Retry", action: onRetry)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                Button("Settings", action: onSettings)
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-            }
-            .fixedSize()
+                    if let url = issue.actionURL {
+                        Link(destination: url) {
+                            Label(issue.actionLabel, systemImage: "arrow.up.right.square")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(issue.tint)
+                        .controlSize(.small)
+                    }
+                    Button("Retry", action: onRetry)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    Button("Settings", action: onSettings)
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                }
+                .fixedSize()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -3226,6 +3242,12 @@ private struct IssueBanner: View {
                         Text(recovery)
                             .font(compact ? .caption : .footnote)
                             .foregroundStyle(.secondary)
+                    }
+                    if let url = issue.actionURL {
+                        Link(issue.actionLabel, destination: url)
+                            .font(compact ? .caption.weight(.semibold) : .footnote.weight(.semibold))
+                            .tint(issue.tint)
+                            .padding(.top, 2)
                     }
                 }
 
@@ -3721,6 +3743,14 @@ private final class MenuBarDashboardStore: ObservableObject {
             }
             state.isLoading = false
             state.issue = menuIssue(for: error)
+            // Propagate any SSO URL to AccountStore so the Settings account row
+            // can surface the Authorize SSO link even when the /user probe
+            // doesn't return an X-GitHub-SSO header.
+            if let ssoURL = state.issue?.actionURL {
+                AccountStore.shared.reportSSO(url: ssoURL, for: repo.accountID)
+            } else {
+                AccountStore.shared.clearSSO(for: repo.accountID)
+            }
             stats.recordFailure()
             setState(state, for: repo, reason: "load-error")
         }
@@ -3842,6 +3872,10 @@ private struct MenuBarIssue: Equatable {
     let recovery: String?
     let systemImage: String
     let tint: Color
+    /// Optional deep-link that lets the user resolve the issue directly —
+    /// used for SAML SSO authorization, token rotation pages, etc.
+    var actionURL: URL? = nil
+    var actionLabel: String = "Open"
 
     static func configuration(title: String, message: String, recovery: String?) -> MenuBarIssue {
         MenuBarIssue(
@@ -3876,6 +3910,17 @@ private func isRepositoryAuthenticationIssue(_ issue: MenuBarIssue) -> Bool {
         || searchable.contains("bad credentials")
 }
 
+/// Extracts the SAML SSO authorization URL from a GitHub SAML enforcement
+/// error message.  The URL appears after "visit " in the embedded GitHub JSON.
+private func extractSAMLAuthURL(from message: String) -> URL? {
+    guard message.localizedCaseInsensitiveContains("SAML") ||
+          message.localizedCaseInsensitiveContains("sso") else { return nil }
+    // The URL pattern GitHub embeds: https://github.com/.../sso?authorization_request=...
+    let pattern = #"https://[^\s\\"]+authorization_request=[^\s\\"]+"#
+    guard let range = message.range(of: pattern, options: .regularExpression) else { return nil }
+    return URL(string: String(message[range]))
+}
+
 private func menuIssue(for error: Error) -> MenuBarIssue {
     if let apiError = error as? HermitAPIError {
         switch apiError {
@@ -3902,6 +3947,21 @@ private func menuIssue(for error: Error) -> MenuBarIssue {
 }
 
 private func menuIssue(forHTTPStatus statusCode: Int?, message: String) -> MenuBarIssue {
+    // GitHub SAML SSO enforcement — arrives as 502 (Go maps GitHub 403 → 502).
+    // The error body embeds a URL the user must visit to authorize the token.
+    if let ssoURL = extractSAMLAuthURL(from: message) {
+        return MenuBarIssue(
+            title: "GitHub SSO authorization required",
+            shortTitle: "SSO",
+            message: "Your token must be authorized for this organization's SAML SSO before Hermit can access the repository.",
+            recovery: "Click 'Authorize SSO' to open GitHub and grant access, then retry.",
+            systemImage: "person.badge.key",
+            tint: .orange,
+            actionURL: ssoURL,
+            actionLabel: "Authorize SSO"
+        )
+    }
+
     if let statusCode, (500...599).contains(statusCode) {
         return MenuBarIssue(title: "Repository refresh failed", shortTitle: "Refresh", message: message, recovery: "The local Hermit service failed while refreshing repository data from the git provider. Retry, then inspect backend logs if needed.", systemImage: "server.rack", tint: .orange)
     }

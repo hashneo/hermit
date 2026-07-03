@@ -187,7 +187,7 @@ struct SetupView: View {
                     owner:    ownerT,
                     repo:     repoT,
                     docsPath: docs.isEmpty ? "docs-cms/rfcs" : docs,
-                    rfcLabel: "hermit:rfc-ready"
+                    rfcLabel: ""
                 )
                 ConfigStore.shared.apply(repoConfig)
                 ConfigStore.shared.serverBaseURL = url

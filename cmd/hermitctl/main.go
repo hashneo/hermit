@@ -219,10 +219,9 @@ type reviewMergeStatusResponse struct {
 }
 
 type reviewAcceptResult struct {
-	Merged           bool   `json:"merged"`
-	BlockedByCI      bool   `json:"blocked_by_ci"`
-	CommitSHA        string `json:"commit_sha,omitempty"`
-	HandedToIronhide bool   `json:"handed_to_ironhide,omitempty"`
+	Merged      bool   `json:"merged"`
+	BlockedByCI bool   `json:"blocked_by_ci"`
+	CommitSHA   string `json:"commit_sha,omitempty"`
 }
 
 type reviewMergeResult struct {
@@ -1015,9 +1014,6 @@ func (c cli) reviewAccept(args []string, stdout, stderr io.Writer) error {
 		return printJSON(stdout, result)
 	}
 	printMergeOutcome(stdout, "accepted", repoID, prNumber, result.Merged, result.BlockedByCI, result.CommitSHA)
-	if result.HandedToIronhide {
-		fmt.Fprintln(stdout, "handed_to_ironhide: true")
-	}
 	return nil
 }
 
@@ -1243,14 +1239,14 @@ func repoImportLocal(args []string, stdout, stderr io.Writer) error {
 		if accountID == "" {
 			return fmt.Errorf("repository %s/%s references unknown account %q", repo.Owner, repo.Name, repo.Account)
 		}
-		repoID := upsertRepositoryWithServerID(&prefs, accountID, strings.TrimSpace(repo.Owner), strings.TrimSpace(repo.Name), normalizeDocsPath(repo.DocsPath), firstNonEmpty(repo.RFCLabel, "hermit:rfc-ready"), strings.TrimSpace(repo.ServerID))
+		repoID := upsertRepositoryWithServerID(&prefs, accountID, strings.TrimSpace(repo.Owner), strings.TrimSpace(repo.Name), normalizeDocsPath(repo.DocsPath), repo.RFCLabel, strings.TrimSpace(repo.ServerID))
 		imported++
 		if prefs.RepositoriesActiveID == "" || strings.EqualFold(strings.TrimSpace(*setActive), repo.Owner+"/"+repo.Name) {
 			prefs.RepositoriesActiveID = repoID
 			prefs.RepoOwner = strings.TrimSpace(repo.Owner)
 			prefs.RepoName = strings.TrimSpace(repo.Name)
 			prefs.DocsPath = normalizeDocsPath(repo.DocsPath)
-			prefs.RFCLabel = firstNonEmpty(repo.RFCLabel, "hermit:rfc-ready")
+			prefs.RFCLabel = repo.RFCLabel
 		}
 	}
 	if prefs.ServerMode == "" {
@@ -1376,7 +1372,7 @@ func repoAddLocal(args []string, stdin io.Reader, stdout, stderr io.Writer) erro
 	registry := fs.String("registry", "github", "configured registry name")
 	baseURL := fs.String("base-url", "", "registry API base URL for this repository/account")
 	docsPath := fs.String("docs-path", "docs-cms/rfcs", "docs path policy")
-	rfcLabel := fs.String("rfc-label", "hermit:rfc-ready", "RFC label")
+	rfcLabel := fs.String("rfc-label", "", "RFC label (deprecated — workflow labels are used instead)")
 	accountName := fs.String("account-name", "", "display name for the local native account")
 	bundleID := fs.String("bundle-id", "", "HermitNative bundle identifier; defaults from hermit-native/Local.xcconfig")
 	configPath := fs.String("config", "", "Hermit config file path used to resolve registry base URLs")
@@ -2401,7 +2397,7 @@ func shareConfigFromPrefs(prefs nativePrefs) shareConfig {
 			Owner:    repo.Owner,
 			Name:     repo.Name,
 			DocsPath: normalizeDocsPath(repo.DocsPath),
-			RFCLabel: firstNonEmpty(repo.RFCLabel, "hermit:rfc-ready"),
+			RFCLabel: repo.RFCLabel,
 			ServerID: repo.ServerID,
 		})
 	}

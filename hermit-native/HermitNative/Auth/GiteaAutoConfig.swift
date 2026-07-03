@@ -90,7 +90,7 @@ enum GiteaAutoConfig {
             owner:         owner,
             repo:          repo,
             docsPath:      docsPath,
-            rfcLabel:      "hermit:rfc-ready",
+            rfcLabel:      "",
             resolvedFrom:  configURL.path
         )
     }
@@ -195,7 +195,7 @@ enum GiteaAutoConfig {
             owner:         owner,
             repo:          repo,
             docsPath:      docsPath,
-            rfcLabel:      "hermit:rfc-ready",
+            rfcLabel:      "",
             resolvedFrom:  configURL.path
         )
     }

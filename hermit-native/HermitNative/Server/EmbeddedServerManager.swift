@@ -184,7 +184,6 @@ final class EmbeddedServerManager: ObservableObject {
                 "owner":    repo.owner,
                 "repo":     repo.name,
                 "docsPath": repo.docsPath,
-                "rfcLabel": repo.rfcLabel,
             ])
         }
 
@@ -196,7 +195,6 @@ final class EmbeddedServerManager: ObservableObject {
                 "owner":    appState.repoOwner,
                 "repo":     appState.repoName,
                 "docsPath": appState.docsPath,
-                "rfcLabel": appState.rfcLabel,
             ])
         }
 
