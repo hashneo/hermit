@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -25,6 +26,7 @@ type AccessLogStore struct {
 	writeCh chan LogEntry
 	flushCh chan chan struct{} // used by Sync() to drain pending writes
 	stopCh  chan struct{}
+	stopped sync.Once // guards Close() against double-close panics
 }
 
 type LogEntry struct {
@@ -135,8 +137,19 @@ func (s *AccessLogStore) Close() error {
 	if s == nil || s.db == nil {
 		return nil
 	}
-	close(s.stopCh)
-	return s.db.Close()
+	// stopped.Do ensures Close() is idempotent — closing stopCh twice panics.
+	// We also wait for writeLoop to drain and exit before closing the DB so
+	// no in-flight insert races against db.Close().
+	var dbErr error
+	s.stopped.Do(func() {
+		done := make(chan struct{})
+		// Signal writeLoop to stop and tell it to notify us when it exits.
+		s.flushCh <- done // drain first
+		<-done
+		close(s.stopCh) // then stop
+		dbErr = s.db.Close()
+	})
+	return dbErr
 }
 
 func (s *AccessLogStore) migrate(ctx context.Context) error {
@@ -175,6 +188,13 @@ func (s *AccessLogStore) migrate(ctx context.Context) error {
 func (s *AccessLogStore) Insert(_ context.Context, entry LogEntry) error {
 	if s == nil || s.db == nil {
 		return nil
+	}
+	// Become a no-op once the store is closed so callers that race with
+	// Close() don't enqueue entries that will never be written.
+	select {
+	case <-s.stopCh:
+		return nil
+	default:
 	}
 	if entry.Kind == "" {
 		entry.Kind = "access"

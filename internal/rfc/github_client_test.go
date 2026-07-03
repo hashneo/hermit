@@ -394,8 +394,8 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_AutoLabelsRFCWithoutReadyLabel(
 	if items[0].MergeableState != "dirty" {
 		t.Fatalf("expected PR mergeable_state dirty, got %q", items[0].MergeableState)
 	}
-	if false && containsString(appliedLabels, "hermit:rfc-ready") {
-		t.Fatalf("expected discovery not to auto-apply legacy RFC ready label, got %v", appliedLabels)
+	if containsString(appliedLabels, "hermit:rfc-ready") {
+		t.Fatalf("discovery must not auto-apply the legacy hermit:rfc-ready label, got %v", appliedLabels)
 	}
 	if !containsString(appliedLabels, "rfc:needs-review") {
 		t.Fatalf("expected auto-applied RFC review workflow label, got %v", appliedLabels)

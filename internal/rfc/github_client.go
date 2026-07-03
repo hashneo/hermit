@@ -231,10 +231,17 @@ func (c *HTTPGitHubRFCClient) GetRFC(ctx context.Context, baseURL, owner, name, 
 	}, nil
 }
 
-// fetchPaginatedPRs fetches all pull requests for the given state, following
-// Link header pagination.  When label is non-empty only PRs carrying that label
-// are returned (uses the issues list endpoint which supports label filtering).
-func (c *HTTPGitHubRFCClient) fetchPaginatedPRs(ctx context.Context, apiBase, owner, name, state, label, token string) ([]struct {
+// fetchPaginatedPRs fetches pull requests for the given state, following
+// Link header pagination.
+//
+// Note: the GitHub /pulls endpoint does NOT support label filtering — the
+// `label` parameter is intentionally unused here.  Closed-PR filtering by
+// workflow label is performed client-side in ListReviewReadyRFCs via
+// prHasReviewWorkflowLabel after the full list is fetched.
+//
+// To avoid fetching thousands of historical closed PRs the closed-state fetch
+// is capped at maxClosedPRPages pages (500 PRs).
+func (c *HTTPGitHubRFCClient) fetchPaginatedPRs(ctx context.Context, apiBase, owner, name, state, _ /* label */, token string) ([]struct {
 	Number         int    `json:"number"`
 	Title          string `json:"title"`
 	Body           string `json:"body"`
@@ -277,11 +284,18 @@ func (c *HTTPGitHubRFCClient) fetchPaginatedPRs(ctx context.Context, apiBase, ow
 
 	var all []pr
 	nextURL := fmt.Sprintf("%s/repos/%s/%s/pulls?state=%s&per_page=100", apiBase, owner, name, state)
-	if label != "" {
-		nextURL += "&labels=" + url.QueryEscape(label)
-	}
+	// NOTE: do NOT append &labels= here — the /pulls endpoint silently ignores
+	// label filters.  Workflow-label filtering is done client-side.
 
+	const maxClosedPRPages = 5 // cap at 500 closed PRs to avoid full-history scans
+	page := 0
 	for nextURL != "" {
+		if state == "closed" {
+			page++
+			if page > maxClosedPRPages {
+				break
+			}
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
 		if err != nil {
 			return nil, err
@@ -384,11 +398,10 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 		openCh <- prFetchErr{prs, err}
 	}()
 	go func() {
-		if rfcLabel == "" {
-			closedCh <- prFetchErr{}
-			return
-		}
-		prs, err := c.fetchPaginatedPRs(ctx, apiBase, owner, name, "closed", rfcLabel, token)
+		// Always fetch closed PRs regardless of rfcLabel — workflow-label
+		// filtering (rfc:needs-review, rfc:review, rfc:needs-changes) is
+		// applied client-side in the candidate loop below.
+		prs, err := c.fetchPaginatedPRs(ctx, apiBase, owner, name, "closed", "", token)
 		closedCh <- prFetchErr{prs, err}
 	}()
 	openFetch   := <-openCh
@@ -435,7 +448,6 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 
 	// Pre-filter candidates.
 	type prEntry struct {
-		idx   int
 		pr    struct {
 			Number         int    `json:"number"`
 			Title          string `json:"title"`
