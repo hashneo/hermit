@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -302,6 +303,7 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *t
 }
 
 func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_AutoLabelsRFCWithoutReadyLabel(t *testing.T) {
+	var mu sync.Mutex
 	var appliedLabels []string
 	var removedLabels []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -349,10 +351,14 @@ func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_AutoLabelsRFCWithoutReadyLabel(
 				Labels []string `json:"labels"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&payload)
+			mu.Lock()
 			appliedLabels = append(appliedLabels, payload.Labels...)
+			mu.Unlock()
 			_ = json.NewEncoder(w).Encode(payload)
 		case isIssueLabelDelete(r):
+			mu.Lock()
 			removedLabels = append(removedLabels, path.Base(r.URL.Path))
+			mu.Unlock()
 			w.WriteHeader(http.StatusOK)
 		case handleWorkflowLabelTestRequest(w, r):
 			return
@@ -412,9 +418,13 @@ indexes:
     targets: [docs/proposals/*.md]
 `)
 		case "/repos/owner/repo/pulls":
-			_ = json.NewEncoder(w).Encode([]map[string]any{
-				{"number": 30, "draft": false, "head": map[string]any{"sha": "sha-indexed"}, "labels": []map[string]any{{"name": "hermit:rfc-ready"}}},
-			})
+			if r.URL.Query().Get("state") == "open" {
+				_ = json.NewEncoder(w).Encode([]map[string]any{
+					{"number": 30, "draft": false, "head": map[string]any{"sha": "sha-indexed"}, "labels": []map[string]any{{"name": "hermit:rfc-ready"}}},
+				})
+			} else {
+				_ = json.NewEncoder(w).Encode([]map[string]any{})
+			}
 		case "/repos/owner/repo/pulls/30/files":
 			_ = json.NewEncoder(w).Encode([]map[string]any{
 				{"filename": "docs/proposals/rfc-030-indexed.md", "status": "added", "additions": 5},
