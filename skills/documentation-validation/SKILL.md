@@ -65,14 +65,16 @@ related_memos: []
 
 ## Diagram requirements
 
-All architecture diagrams MUST use Mermaid — no ASCII art:
+All architecture diagrams MUST use Mermaid — no ASCII art.
 
-```markdown
-```mermaid
-flowchart TD
-    A[Component] --> B[Other Component]
-```
-```
+Example Mermaid diagram (use in your `.md` files with a mermaid fenced block):
+
+    ```mermaid
+    flowchart TD
+        A[Component] --> B[Other Component]
+    ```
+
+Supported diagram types: `flowchart`, `sequenceDiagram`, `stateDiagram-v2`, `classDiagram`, `erDiagram`.
 
 ## CHANGELOG maintenance
 

@@ -28,9 +28,12 @@ CURRENT=$(git branch --show-current)
 
 if [ "$CURRENT" != "$PR_BRANCH" ]; then
   mkdir -p .tmp/worktrees
-  git worktree add .tmp/worktrees/pr-$PR_NUMBER $PR_BRANCH
-  echo "Working in worktree: .tmp/worktrees/pr-$PR_NUMBER"
-  # All subsequent edits, git add, git commit, git push happen in that directory
+  REPO_ROOT=$(git rev-parse --show-toplevel)
+  WORKTREE="$REPO_ROOT/.tmp/worktrees/pr-$PR_NUMBER"
+  git worktree add "$WORKTREE" "$PR_BRANCH"
+  cd "$WORKTREE"
+  echo "Working in worktree: $WORKTREE"
+  # All subsequent edits, git add, git commit, git push happen here
 fi
 ```
 
@@ -155,11 +158,12 @@ gh pr merge $PR_NUMBER --squash --auto
 
 ```bash
 # Exit worktree if used
-cd /Users/staylor/Development/github/ibm/hermit
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || git -C "$WORKTREE" rev-parse --show-toplevel)
+cd "$REPO_ROOT"
 git worktree remove .tmp/worktrees/pr-$PR_NUMBER 2>/dev/null || true
 
 git checkout main
 git pull origin main
-git branch -d $PR_BRANCH 2>/dev/null || true
-git push origin --delete $PR_BRANCH 2>/dev/null || true
+git branch -d "$PR_BRANCH" 2>/dev/null || true
+git push origin --delete "$PR_BRANCH" 2>/dev/null || true
 ```

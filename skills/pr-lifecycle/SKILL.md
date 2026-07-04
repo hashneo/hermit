@@ -73,7 +73,17 @@ Copilot will automatically post a review. Wait for it to appear before proceedin
 ```bash
 PR_NUMBER=$(gh pr view --json number --jq '.number')
 gh api repos/hashneo/hermit/pulls/$PR_NUMBER/comments --paginate \
-  > .tmp/pr-comments.json
+  | python3 -c "
+import sys,json
+# --paginate emits one JSON array per page; merge all into one list
+import re,io
+text=sys.stdin.read()
+all_items=[]
+for block in re.findall(r'\[.*?\]', text, re.DOTALL):
+    try: all_items.extend(json.loads(block))
+    except: pass
+print(json.dumps(all_items))
+" > .tmp/pr-comments-$PR_NUMBER.json
 ```
 
 Also fetch inline review threads:
@@ -155,8 +165,10 @@ gh pr merge $PR_NUMBER --squash --auto
 ## Step 12 — Cleanup
 
 ```bash
+# Capture the branch name BEFORE switching away from it
+MERGED_BRANCH=$(git branch --show-current)
 git checkout main
 git pull origin main
-git branch -d $(git branch --show-current 2>/dev/null || echo "old-branch")
-git push origin --delete <branch-name>
+git branch -d "$MERGED_BRANCH"
+git push origin --delete "$MERGED_BRANCH" 2>/dev/null || true
 ```
