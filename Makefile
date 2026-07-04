@@ -126,31 +126,31 @@ gitea-seed-pr:
 # ── Native Swift App (macOS + iPadOS) ─────────────────────────────────────────
 
 NATIVE_DIR        := hermit-native
-NATIVE_PROJECT    := $(NATIVE_DIR)/HermitNative.xcodeproj
-NATIVE_SCHEME     := HermitNative
+NATIVE_PROJECT    := $(NATIVE_DIR)/Hermit.xcodeproj
+NATIVE_SCHEME     := Hermit
 NATIVE_BUILD_DIR  := $(NATIVE_DIR)/build
 IPAD_SIM_NAME     ?= iPad Pro 13-inch (M4)
 IPAD_SIM_UDID     ?= $(shell DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl list devices available | grep "$(IPAD_SIM_NAME)" | head -1 | grep -oE '[A-F0-9-]{36}')
-NATIVE_APP_SRC    := $(NATIVE_BUILD_DIR)/Build/Products/Debug/HermitNative.app
-NATIVE_APP_DEST   := HermitNative.app
+NATIVE_APP_SRC    := $(NATIVE_BUILD_DIR)/Build/Products/Debug/Hermit.app
+NATIVE_APP_DEST   := Hermit.app
 XCODE             := DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild
 PYTHON            ?= /usr/bin/python3
 
 native-build: native-build-macos native-build-ipad ## Build the native app for macOS and iPad simulator
 
 native-embed-config: ## Copy config/hermit.yaml + .tmp/gitea-token-export.sh into the app bundle resources (debug only)
-	@mkdir -p hermit-native/HermitNative/DevConfig
+	@mkdir -p hermit-native/Hermit/DevConfig
 	@if [ -f config/hermit.yaml ]; then \
-		cp config/hermit.yaml hermit-native/HermitNative/DevConfig/hermit.yaml; \
+		cp config/hermit.yaml hermit-native/Hermit/DevConfig/hermit.yaml; \
 		echo "Embedded config/hermit.yaml into DevConfig/"; \
 	else \
 		echo "Warning: config/hermit.yaml not found — DevConfig will be empty"; \
 	fi
 	@if [ "$(HERMIT_ENABLE_GITEA)" = "1" ] && [ -f .tmp/gitea-token-export.sh ]; then \
-		cp .tmp/gitea-token-export.sh hermit-native/HermitNative/DevConfig/gitea-token-export.sh; \
+		cp .tmp/gitea-token-export.sh hermit-native/Hermit/DevConfig/gitea-token-export.sh; \
 		echo "Embedded .tmp/gitea-token-export.sh into DevConfig/"; \
 	else \
-		rm -f hermit-native/HermitNative/DevConfig/gitea-token-export.sh; \
+		rm -f hermit-native/Hermit/DevConfig/gitea-token-export.sh; \
 		if [ "$(HERMIT_ENABLE_GITEA)" != "1" ]; then \
 			echo "HERMIT_ENABLE_GITEA=$(HERMIT_ENABLE_GITEA) — removed DevConfig/gitea-token-export.sh (prevents stale Gitea config)"; \
 		else \
@@ -159,7 +159,7 @@ native-embed-config: ## Copy config/hermit.yaml + .tmp/gitea-token-export.sh int
 	fi
 
 native-build-macos: gomobile-build native-embed-config ## Build the native app for macOS (rebuilds xcframework if Go changed)
-	@echo "Building HermitNative for macOS..."
+	@echo "Building Hermit for macOS..."
 	$(XCODE) \
 		-project $(NATIVE_PROJECT) \
 		-scheme $(NATIVE_SCHEME) \
@@ -167,12 +167,12 @@ native-build-macos: gomobile-build native-embed-config ## Build the native app f
 		-configuration Debug \
 		-derivedDataPath $(NATIVE_BUILD_DIR) \
 		build
-	@echo "Copying HermitNative.app to project root..."
+	@echo "Copying Hermit.app to project root..."
 	@rm -rf $(NATIVE_APP_DEST)
 	@cp -R $(NATIVE_APP_SRC) $(NATIVE_APP_DEST)
 
 native-build-ipad: ## Build the native app for iPad simulator
-	@echo "Building HermitNative for iPad simulator ($(IPAD_SIM_NAME), UDID=$(IPAD_SIM_UDID))..."
+	@echo "Building Hermit for iPad simulator ($(IPAD_SIM_NAME), UDID=$(IPAD_SIM_UDID))..."
 	$(XCODE) \
 		-project $(NATIVE_PROJECT) \
 		-scheme $(NATIVE_SCHEME) \
@@ -181,10 +181,10 @@ native-build-ipad: ## Build the native app for iPad simulator
 		-derivedDataPath $(NATIVE_BUILD_DIR) \
 		build 2>&1
 
-IPAD_SIM_APP_BUNDLE := $(NATIVE_BUILD_DIR)/Build/Products/Debug-iphonesimulator/HermitNative.app
+IPAD_SIM_APP_BUNDLE := $(NATIVE_BUILD_DIR)/Build/Products/Debug-iphonesimulator/Hermit.app
 
 ipad-sim-deploy: native-build-ipad ## Build and deploy to iPad simulator (boots simulator if needed)
-	@echo "Deploying HermitNative to iPad simulator '$(IPAD_SIM_NAME)' ($(IPAD_SIM_UDID))..."
+	@echo "Deploying Hermit to iPad simulator '$(IPAD_SIM_NAME)' ($(IPAD_SIM_UDID))..."
 	@if [ -z "$(IPAD_SIM_UDID)" ]; then \
 		echo "ERROR: No available simulator named '$(IPAD_SIM_NAME)'."; \
 		echo "Run: DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl list devices available"; \
@@ -198,7 +198,7 @@ ipad-sim-deploy: native-build-ipad ## Build and deploy to iPad simulator (boots 
 	echo "Launched $$BUNDLE_ID in simulator $(IPAD_SIM_UDID)"
 
 native-test: ## Run the native app test suite
-	@echo "Testing HermitNative..."
+	@echo "Testing Hermit..."
 	$(XCODE) \
 		-project $(NATIVE_PROJECT) \
 		-scheme $(NATIVE_SCHEME) \
@@ -207,7 +207,7 @@ native-test: ## Run the native app test suite
 		test
 
 native-clean: ## Clean the native app build artifacts
-	@echo "Cleaning HermitNative build..."
+	@echo "Cleaning Hermit build..."
 	rm -rf $(NATIVE_BUILD_DIR) $(NATIVE_APP_DEST)
 	$(XCODE) -project $(NATIVE_PROJECT) -scheme $(NATIVE_SCHEME) clean 2>/dev/null || true
 
@@ -229,7 +229,7 @@ native-seed-prefs: ## Write hermit config into the non-sandboxed UserDefaults pl
 	$(PYTHON) scripts/seed-native-prefs.py "$$BUNDLE_ID" config/hermit.yaml $$REPOS_JSON_ARG $$GITEA_ARG
 
 native-open: build gomobile-build native-build-macos native-seed-prefs ## Build Go binary + xcframework + macOS app, then launch
-	@pkill -x HermitNative 2>/dev/null || true
+	@pkill -x Hermit 2>/dev/null || true
 	@pkill -f "bin/hermit" 2>/dev/null || true
 	@sleep 0.5
 	@open $(NATIVE_APP_DEST)
@@ -273,7 +273,7 @@ dev: ## Zero-to-demo: optionally start Gitea, build + deploy app
 	@$(MAKE) build
 	@$(MAKE) native-build-macos
 	@$(MAKE) native-seed-prefs
-	@pkill -x HermitNative 2>/dev/null || true
+	@pkill -x Hermit 2>/dev/null || true
 	@pkill -f "bin/hermit" 2>/dev/null || true
 	@sleep 0.5
 	@cp -R $(NATIVE_APP_SRC) $(NATIVE_APP_DEST)
@@ -315,8 +315,8 @@ wipe-config: ## Wipe all persisted Hermit config: UserDefaults, Keychain PATs, c
 	@echo "Wipe complete."
 
 reset: ## Full reset: kill app, destroy Gitea container + data, remove keychain entries, wipe build artifacts
-	@echo "Stopping HermitNative..."
-	@pkill -x HermitNative 2>/dev/null || true
+	@echo "Stopping Hermit..."
+	@pkill -x Hermit 2>/dev/null || true
 	@pkill -f "bin/hermit" 2>/dev/null || true
 	@echo "Tearing down Gitea..."
 	@$(MAKE) gitea-reset
@@ -325,7 +325,7 @@ reset: ## Full reset: kill app, destroy Gitea container + data, remove keychain 
 	@echo "Removing Keychain entries..."
 	@# Delete all per-account tokens (hermit.account.<UUID>)
 	@security dump-keychain 2>/dev/null | awk -F'"' '/acct.*hermit\.account\./{print $$4}' | \
-		while read acct; do security delete-generic-password -a "$$acct" -s "HermitNative" 2>/dev/null || true; done
+		while read acct; do security delete-generic-password -a "$$acct" -s "Hermit" 2>/dev/null || true; done
 	@echo "Removing UserDefaults and sandbox container..."
 	@BUNDLE_ID=$$(grep -E '^HERMIT_BUNDLE_ID\s*=' hermit-native/Local.xcconfig 2>/dev/null | head -1 | sed 's/.*=[ \t]*//;s/[[:space:]]*//g'); \
 		if [ -n "$$BUNDLE_ID" ]; then \
@@ -343,7 +343,7 @@ reset: ## Full reset: kill app, destroy Gitea container + data, remove keychain 
 
 IPAD_UDID        ?=
 IPAD_DEVICE_ID   ?=
-IPAD_APP_BUNDLE  := $(NATIVE_BUILD_DIR)/Build/Products/Debug-iphoneos/HermitNative.app
+IPAD_APP_BUNDLE  := $(NATIVE_BUILD_DIR)/Build/Products/Debug-iphoneos/Hermit.app
 
 ipad-deploy: ## Build and push to connected iPad (requires Developer Mode enabled)
 	@if [ -z "$(IPAD_UDID)" ]; then \
@@ -361,7 +361,7 @@ ipad-deploy: ## Build and push to connected iPad (requires Developer Mode enable
 		echo "  4. Set IPAD_UDID and IPAD_DEVICE_ID in .local.mk"; \
 		exit 0; \
 	fi; \
-	echo "Building HermitNative for iPad..."; \
+	echo "Building Hermit for iPad..."; \
 	$(XCODE) \
 		-project $(NATIVE_PROJECT) \
 		-scheme $(NATIVE_SCHEME) \
@@ -379,7 +379,7 @@ ipad-deploy: ## Build and push to connected iPad (requires Developer Mode enable
 
 # ── gomobile xcframework ───────────────────────────────────────────────────────
 
-GOMOBILE_OUT := $(NATIVE_DIR)/HermitNative/HermitServer.xcframework
+GOMOBILE_OUT := $(NATIVE_DIR)/Hermit/HermitServer.xcframework
 
 gomobile-build: ## Compile the Go mobile package into HermitServer.xcframework (auto-installs gomobile if needed)
 	@if ! command -v gomobile >/dev/null 2>&1; then \

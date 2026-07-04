@@ -7,19 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		B001FF01 /* HermitServer.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B001C002 /* HermitServer.xcframework */; platformFilter = macos; };
-		B001FF02 /* HermitServer.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = B001C002 /* HermitServer.xcframework */; platformFilter = macos; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		88C952BF1FC4569AAA227167 /* GutterMarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DEF0D01EB6E30FF8CF74D70 /* GutterMarkdownView.swift */; };
 		AB7C0F2701C62D56AC09227C /* SelectableTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41AFAD009AFAE5101431EBE5 /* SelectableTextView.swift */; };
-		B001000A /* HermitNativeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000B /* HermitNativeApp.swift */; };
+		B001000A /* HermitApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000B /* HermitApp.swift */; };
 		B001000C /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000D /* AppState.swift */; };
 		B001000E /* RFC.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000F /* RFC.swift */; };
-		B001RR01 /* RecentRFCStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001RR00 /* RecentRFCStore.swift */; };
 		B0010010 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010011 /* KeychainHelper.swift */; };
-		B001AC01 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001AC00 /* AccountStore.swift */; };
 		B0010012 /* GitHubAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010013 /* GitHubAPIClient.swift */; };
 		B0010014 /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010015 /* AIProvider.swift */; };
-		B00100A2 /* TemplateAIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100A3 /* TemplateAIProvider.swift */; };
 		B0010016 /* AppleIntelligenceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010017 /* AppleIntelligenceProvider.swift */; };
 		B0010018 /* OpenAIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010019 /* OpenAIProvider.swift */; };
 		B001001A /* RFCInterviewPrompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001001B /* RFCInterviewPrompts.swift */; };
@@ -27,12 +22,9 @@
 		B001001E /* VoiceCommentSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001001F /* VoiceCommentSession.swift */; };
 		B0010020 /* PublishingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010021 /* PublishingSession.swift */; };
 		B0010022 /* RFCPublishingHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010023 /* RFCPublishingHelpers.swift */; };
-		B00100A0 /* SubmitForReviewSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100A1 /* SubmitForReviewSession.swift */; };
 		B0010024 /* VoiceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010025 /* VoiceEngine.swift */; };
 		B0010026 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010027 /* SpeechRecognizer.swift */; };
 		B0010028 /* SpeechSynthesizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010029 /* SpeechSynthesizer.swift */; };
-		B001FF10 /* LiveVoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001FF11 /* LiveVoiceSession.swift */; };
-		B001FF12 /* PRReviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001FF13 /* PRReviewSheet.swift */; };
 		B001002A /* WaveformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001002B /* WaveformView.swift */; };
 		B001002C /* WebViewRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001002D /* WebViewRenderer.swift */; };
 		B001002E /* MarkdownRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001002F /* MarkdownRenderer.swift */; };
@@ -45,17 +37,20 @@
 		B001003C /* macOSViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001003D /* macOSViews.swift */; };
 		B001003E /* iPadRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001003F /* iPadRootView.swift */; };
 		B0010040 /* RFCDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010041 /* RFCDetailView.swift */; };
-		B00100C0 /* RFCToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100C1 /* RFCToolbar.swift */; };
 		B0010042 /* RFCInterviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010043 /* RFCInterviewView.swift */; };
 		B0010044 /* RFCListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010045 /* RFCListView.swift */; };
-		B00100B0 /* DiagramPopoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100B1 /* DiagramPopoutView.swift */; };
 		B0010046 /* RFCPreviewPublishingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010047 /* RFCPreviewPublishingView.swift */; };
 		B0010048 /* ThreadPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010049 /* ThreadPanelView.swift */; };
 		B001004B /* GiteaAutoConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001004C /* GiteaAutoConfig.swift */; };
+		B00100A0 /* SubmitForReviewSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100A1 /* SubmitForReviewSession.swift */; };
+		B00100A2 /* TemplateAIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100A3 /* TemplateAIProvider.swift */; };
+		B00100B0 /* DiagramPopoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100B1 /* DiagramPopoutView.swift */; };
+		B00100C0 /* RFCToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100C1 /* RFCToolbar.swift */; };
 		B001A001 /* MarkdownParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A002 /* MarkdownParser.swift */; };
 		B001A003 /* MarkdownRendererView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A004 /* MarkdownRendererView.swift */; };
 		B001A005 /* MermaidView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A006 /* MermaidView.swift */; };
 		B001A007 /* SyntaxHighlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A008 /* SyntaxHighlighter.swift */; };
+		B001AC01 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001AC00 /* AccountStore.swift */; };
 		B001B001 /* HermitModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B002 /* HermitModels.swift */; };
 		B001B003 /* HermitAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B004 /* HermitAPIClient.swift */; };
 		B001B005 /* EmbeddedServerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B006 /* EmbeddedServerManager.swift */; };
@@ -65,77 +60,14 @@
 		B001D004 /* HermitActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D001 /* HermitActivity.swift */; };
 		B001D005 /* BookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D006 /* BookmarkStore.swift */; };
 		B001D007 /* DevConfig in Resources */ = {isa = PBXBuildFile; fileRef = B001D008 /* DevConfig */; };
-		B001LOG1 /* com.hashicorp.hermit.plist in Resources */ = {isa = PBXBuildFile; fileRef = B001LOG2 /* com.hashicorp.hermit.plist */; };
 		B001D009 /* ThreadPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D00A /* ThreadPopoverView.swift */; };
 		B001D010 /* ConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D011 /* ConfigStore.swift */; };
+		B001FF10 /* LiveVoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001FF11 /* LiveVoiceSession.swift */; };
+		B001FF12 /* PRReviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001FF13 /* PRReviewSheet.swift */; };
+		B001LOG1 /* com.hashicorp.hermit.plist in Resources */ = {isa = PBXBuildFile; fileRef = B001LOG2 /* com.hashicorp.hermit.plist */; };
+		B001RR01 /* RecentRFCStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001RR00 /* RecentRFCStore.swift */; };
 		F51CA0CA0595C036D8E2D00B /* CommentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 702547F1AF611276712EA42C /* CommentStore.swift */; };
 /* End PBXBuildFile section */
-
-/* Begin PBXFileReference section */
-		41AFAD009AFAE5101431EBE5 /* SelectableTextView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectableTextView.swift; sourceTree = "<group>"; };
-		702547F1AF611276712EA42C /* CommentStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CommentStore.swift; sourceTree = "<group>"; };
-		7DEF0D01EB6E30FF8CF74D70 /* GutterMarkdownView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GutterMarkdownView.swift; sourceTree = "<group>"; };
-		B001000B /* HermitNativeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitNativeApp.swift; sourceTree = "<group>"; };
-		B001000D /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
-		B001000F /* RFC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFC.swift; sourceTree = "<group>"; };
-		B001RR00 /* RecentRFCStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentRFCStore.swift; sourceTree = "<group>"; };
-		B0010011 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
-		B001AC00 /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
-		B0010013 /* GitHubAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubAPIClient.swift; sourceTree = "<group>"; };
-		B0010015 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
-		B00100A3 /* TemplateAIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemplateAIProvider.swift; sourceTree = "<group>"; };
-		B0010017 /* AppleIntelligenceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleIntelligenceProvider.swift; sourceTree = "<group>"; };
-		B0010019 /* OpenAIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIProvider.swift; sourceTree = "<group>"; };
-		B001001B /* RFCInterviewPrompts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCInterviewPrompts.swift; sourceTree = "<group>"; };
-		B001001D /* RFCInterviewSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCInterviewSession.swift; sourceTree = "<group>"; };
-		B001001F /* VoiceCommentSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCommentSession.swift; sourceTree = "<group>"; };
-		B0010021 /* PublishingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PublishingSession.swift; sourceTree = "<group>"; };
-		B0010023 /* RFCPublishingHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCPublishingHelpers.swift; sourceTree = "<group>"; };
-		B00100A1 /* SubmitForReviewSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubmitForReviewSession.swift; sourceTree = "<group>"; };
-		B0010025 /* VoiceEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceEngine.swift; sourceTree = "<group>"; };
-		B0010027 /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
-		B0010029 /* SpeechSynthesizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSynthesizer.swift; sourceTree = "<group>"; };
-		B001FF11 /* LiveVoiceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVoiceSession.swift; sourceTree = "<group>"; };
-		B001FF13 /* PRReviewSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRReviewSheet.swift; sourceTree = "<group>"; };
-		B001002B /* WaveformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformView.swift; sourceTree = "<group>"; };
-		B001002D /* WebViewRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewRenderer.swift; sourceTree = "<group>"; };
-		B001002F /* MarkdownRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRenderer.swift; sourceTree = "<group>"; };
-		B0010031 /* BundledAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledAssets.swift; sourceTree = "<group>"; };
-		B0010033 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
-		B0010035 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
-		B0010037 /* RFCBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCBrowserView.swift; sourceTree = "<group>"; };
-		B0010039 /* MenuBarContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarContentView.swift; sourceTree = "<group>"; };
-		B001003B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		B001003D /* macOSViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = macOSViews.swift; sourceTree = "<group>"; };
-		B001003F /* iPadRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadRootView.swift; sourceTree = "<group>"; };
-		B0010041 /* RFCDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCDetailView.swift; sourceTree = "<group>"; };
-		B00100C1 /* RFCToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCToolbar.swift; sourceTree = "<group>"; };
-		B0010043 /* RFCInterviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCInterviewView.swift; sourceTree = "<group>"; };
-		B0010045 /* RFCListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCListView.swift; sourceTree = "<group>"; };
-		B00100B1 /* DiagramPopoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagramPopoutView.swift; sourceTree = "<group>"; };
-		B0010047 /* RFCPreviewPublishingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCPreviewPublishingView.swift; sourceTree = "<group>"; };
-		B0010049 /* ThreadPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadPanelView.swift; sourceTree = "<group>"; };
-		B001004A /* HermitNative.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HermitNative.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		B001004C /* GiteaAutoConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GiteaAutoConfig.swift; sourceTree = "<group>"; };
-		B001A002 /* MarkdownParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownParser.swift; sourceTree = "<group>"; };
-		B001A004 /* MarkdownRendererView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRendererView.swift; sourceTree = "<group>"; };
-		B001A006 /* MermaidView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MermaidView.swift; sourceTree = "<group>"; };
-		B001A008 /* SyntaxHighlighter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyntaxHighlighter.swift; sourceTree = "<group>"; };
-		B001B002 /* HermitModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitModels.swift; sourceTree = "<group>"; };
-		B001B004 /* HermitAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitAPIClient.swift; sourceTree = "<group>"; };
-		B001B006 /* EmbeddedServerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedServerManager.swift; sourceTree = "<group>"; };
-		B001B008 /* ServerDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDiscoveryService.swift; sourceTree = "<group>"; };
-		B001B00A /* PairingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingService.swift; sourceTree = "<group>"; };
-		B001C002 /* HermitServer.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = HermitServer.xcframework; sourceTree = "<group>"; };
-		B001D001 /* HermitActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitActivity.swift; sourceTree = "<group>"; };
-		B001D003 /* SpotlightDonor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightDonor.swift; sourceTree = "<group>"; };
-		B001D006 /* BookmarkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkStore.swift; sourceTree = "<group>"; };
-		B001D008 /* DevConfig */ = {isa = PBXFileReference; lastKnownFileType = folder; path = DevConfig; sourceTree = "<group>"; };
-		B001LOG2 /* com.hashicorp.hermit.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "com.hashicorp.hermit.plist"; sourceTree = "<group>"; };
-		B001D00A /* ThreadPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadPopoverView.swift; sourceTree = "<group>"; };
-		B001D011 /* ConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigStore.swift; sourceTree = "<group>"; };
-		HERMIT0001 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
-/* End PBXFileReference section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		B001FF03 /* Embed Frameworks */ = {
@@ -149,6 +81,72 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		41AFAD009AFAE5101431EBE5 /* SelectableTextView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectableTextView.swift; sourceTree = "<group>"; };
+		702547F1AF611276712EA42C /* CommentStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CommentStore.swift; sourceTree = "<group>"; };
+		7DEF0D01EB6E30FF8CF74D70 /* GutterMarkdownView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GutterMarkdownView.swift; sourceTree = "<group>"; };
+		B001000B /* HermitApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitApp.swift; sourceTree = "<group>"; };
+		B001000D /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		B001000F /* RFC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFC.swift; sourceTree = "<group>"; };
+		B0010011 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		B0010013 /* GitHubAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubAPIClient.swift; sourceTree = "<group>"; };
+		B0010015 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
+		B0010017 /* AppleIntelligenceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleIntelligenceProvider.swift; sourceTree = "<group>"; };
+		B0010019 /* OpenAIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIProvider.swift; sourceTree = "<group>"; };
+		B001001B /* RFCInterviewPrompts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCInterviewPrompts.swift; sourceTree = "<group>"; };
+		B001001D /* RFCInterviewSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCInterviewSession.swift; sourceTree = "<group>"; };
+		B001001F /* VoiceCommentSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCommentSession.swift; sourceTree = "<group>"; };
+		B0010021 /* PublishingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PublishingSession.swift; sourceTree = "<group>"; };
+		B0010023 /* RFCPublishingHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCPublishingHelpers.swift; sourceTree = "<group>"; };
+		B0010025 /* VoiceEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceEngine.swift; sourceTree = "<group>"; };
+		B0010027 /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
+		B0010029 /* SpeechSynthesizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSynthesizer.swift; sourceTree = "<group>"; };
+		B001002B /* WaveformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformView.swift; sourceTree = "<group>"; };
+		B001002D /* WebViewRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewRenderer.swift; sourceTree = "<group>"; };
+		B001002F /* MarkdownRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRenderer.swift; sourceTree = "<group>"; };
+		B0010031 /* BundledAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledAssets.swift; sourceTree = "<group>"; };
+		B0010033 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
+		B0010035 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		B0010037 /* RFCBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCBrowserView.swift; sourceTree = "<group>"; };
+		B0010039 /* MenuBarContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarContentView.swift; sourceTree = "<group>"; };
+		B001003B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		B001003D /* macOSViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = macOSViews.swift; sourceTree = "<group>"; };
+		B001003F /* iPadRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadRootView.swift; sourceTree = "<group>"; };
+		B0010041 /* RFCDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCDetailView.swift; sourceTree = "<group>"; };
+		B0010043 /* RFCInterviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCInterviewView.swift; sourceTree = "<group>"; };
+		B0010045 /* RFCListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCListView.swift; sourceTree = "<group>"; };
+		B0010047 /* RFCPreviewPublishingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCPreviewPublishingView.swift; sourceTree = "<group>"; };
+		B0010049 /* ThreadPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadPanelView.swift; sourceTree = "<group>"; };
+		B001004A /* Hermit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hermit.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B001004C /* GiteaAutoConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GiteaAutoConfig.swift; sourceTree = "<group>"; };
+		B00100A1 /* SubmitForReviewSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubmitForReviewSession.swift; sourceTree = "<group>"; };
+		B00100A3 /* TemplateAIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemplateAIProvider.swift; sourceTree = "<group>"; };
+		B00100B1 /* DiagramPopoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagramPopoutView.swift; sourceTree = "<group>"; };
+		B00100C1 /* RFCToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCToolbar.swift; sourceTree = "<group>"; };
+		B001A002 /* MarkdownParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownParser.swift; sourceTree = "<group>"; };
+		B001A004 /* MarkdownRendererView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRendererView.swift; sourceTree = "<group>"; };
+		B001A006 /* MermaidView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MermaidView.swift; sourceTree = "<group>"; };
+		B001A008 /* SyntaxHighlighter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyntaxHighlighter.swift; sourceTree = "<group>"; };
+		B001AC00 /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
+		B001B002 /* HermitModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitModels.swift; sourceTree = "<group>"; };
+		B001B004 /* HermitAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitAPIClient.swift; sourceTree = "<group>"; };
+		B001B006 /* EmbeddedServerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedServerManager.swift; sourceTree = "<group>"; };
+		B001B008 /* ServerDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDiscoveryService.swift; sourceTree = "<group>"; };
+		B001B00A /* PairingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingService.swift; sourceTree = "<group>"; };
+		B001C002 /* HermitServer.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = HermitServer.xcframework; sourceTree = "<group>"; };
+		B001D001 /* HermitActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitActivity.swift; sourceTree = "<group>"; };
+		B001D003 /* SpotlightDonor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightDonor.swift; sourceTree = "<group>"; };
+		B001D006 /* BookmarkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkStore.swift; sourceTree = "<group>"; };
+		B001D008 /* DevConfig */ = {isa = PBXFileReference; lastKnownFileType = folder; path = DevConfig; sourceTree = "<group>"; };
+		B001D00A /* ThreadPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadPopoverView.swift; sourceTree = "<group>"; };
+		B001D011 /* ConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigStore.swift; sourceTree = "<group>"; };
+		B001FF11 /* LiveVoiceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVoiceSession.swift; sourceTree = "<group>"; };
+		B001FF13 /* PRReviewSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRReviewSheet.swift; sourceTree = "<group>"; };
+		B001LOG2 /* com.hashicorp.hermit.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = com.hashicorp.hermit.plist; sourceTree = "<group>"; };
+		B001RR00 /* RecentRFCStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentRFCStore.swift; sourceTree = "<group>"; };
+		HERMIT0001 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
+/* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		B0010080 /* Frameworks */ = {
@@ -165,15 +163,15 @@
 			isa = PBXGroup;
 			children = (
 				HERMIT0001 /* Local.xcconfig */,
-				B0010091 /* HermitNative */,
+				B0010091 /* Hermit */,
 				B0010092 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		B0010091 /* HermitNative */ = {
+		B0010091 /* Hermit */ = {
 			isa = PBXGroup;
 			children = (
-				B001000B /* HermitNativeApp.swift */,
+				B001000B /* HermitApp.swift */,
 				B0010093 /* Models */,
 				B0010094 /* Auth */,
 				B0010095 /* Clients */,
@@ -187,13 +185,13 @@
 				B001D008 /* DevConfig */,
 				B001C003 /* Frameworks */,
 			);
-			path = HermitNative;
+			path = Hermit;
 			sourceTree = "<group>";
 		};
 		B0010092 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				B001004A /* HermitNative.app */,
+				B001004A /* Hermit.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -337,9 +335,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		B0010050 /* HermitNative */ = {
+		B0010050 /* Hermit */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = B0010060 /* Build configuration list for PBXNativeTarget "HermitNative" */;
+			buildConfigurationList = B0010060 /* Build configuration list for PBXNativeTarget "Hermit" */;
 			buildPhases = (
 				B0010051 /* Sources */,
 				B0010080 /* Frameworks */,
@@ -350,9 +348,9 @@
 			);
 			dependencies = (
 			);
-			name = HermitNative;
-			productName = HermitNative;
-			productReference = B001004A /* HermitNative.app */;
+			name = Hermit;
+			productName = Hermit;
+			productReference = B001004A /* Hermit.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -370,7 +368,7 @@
 					};
 				};
 			};
-			buildConfigurationList = B0010071 /* Build configuration list for PBXProject "HermitNative" */;
+			buildConfigurationList = B0010071 /* Build configuration list for PBXProject "Hermit" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -383,7 +381,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				B0010050 /* HermitNative */,
+				B0010050 /* Hermit */,
 			);
 		};
 /* End PBXProject section */
@@ -405,7 +403,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B001000A /* HermitNativeApp.swift in Sources */,
+				B001000A /* HermitApp.swift in Sources */,
 				B001000C /* AppState.swift in Sources */,
 				B001D004 /* HermitActivity.swift in Sources */,
 				B001D002 /* SpotlightDonor.swift in Sources */,
@@ -595,8 +593,8 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = "HermitNative/HermitNative-Debug.entitlements";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
+				CODE_SIGN_ENTITLEMENTS = "Hermit/Hermit-Debug.entitlements";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -605,18 +603,21 @@
 				DEVELOPMENT_TEAM = "$(HERMIT_TEAM_ID)";
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphoneos*]" = HermitServer.xcframework;
+				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphonesimulator*]" = HermitServer.xcframework;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
-					"$(PROJECT_DIR)/HermitNative",
-					"$(PROJECT_DIR)/HermitNative/HermitServer.xcframework/macos-arm64_x86_64",
+					"$(PROJECT_DIR)/Hermit",
+					"$(PROJECT_DIR)/Hermit/HermitServer.xcframework/macos-arm64_x86_64",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = HermitNative/Info.plist;
+				INFOPLIST_FILE = Hermit/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Hermit Desktop";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Hermit uses Bluetooth to discover and pair with nearby Macs.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Hermit uses the local network to discover and connect to the Hermit server on your Mac.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Hermit uses the microphone to let you dictate RFC content and voice comments.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Hermit uses speech recognition to transcribe your voice into RFC text and comments.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Hermit uses the microphone to let you dictate RFC content using your voice.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Hermit uses on-device speech recognition to transcribe your voice into RFC text.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportsDocumentBrowser = NO;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
@@ -627,11 +628,13 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.2;
 				MARKETING_VERSION = 0.1.0;
-				"OTHER_LDFLAGS[sdk=macosx*]" = "$(inherited) -framework HermitServer";
+				"OTHER_LDFLAGS[sdk=macosx*]" = (
+					"$(inherited)",
+					"-framework",
+					HermitServer,
+				);
 				OTHER_SWIFT_FLAGS = "$(inherited)";
 				"OTHER_SWIFT_FLAGS[sdk=macosx*]" = "$(inherited) -DHERMIT_EMBEDDED_SERVER";
-				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphoneos*]" = "HermitServer.xcframework";
-				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphonesimulator*]" = "HermitServer.xcframework";
 				PRODUCT_BUNDLE_IDENTIFIER = "$(HERMIT_BUNDLE_ID)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "macosx iphonesimulator iphoneos";
@@ -649,22 +652,29 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = HermitNative/HermitNative.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Hermit/Hermit.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = "$(HERMIT_TEAM_ID)";
 				ENABLE_PREVIEWS = YES;
+				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphoneos*]" = HermitServer.xcframework;
+				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphonesimulator*]" = HermitServer.xcframework;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
-					"$(PROJECT_DIR)/HermitNative",
-					"$(PROJECT_DIR)/HermitNative/HermitServer.xcframework/macos-arm64_x86_64",
+					"$(PROJECT_DIR)/Hermit",
+					"$(PROJECT_DIR)/Hermit/HermitServer.xcframework/macos-arm64_x86_64",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Hermit Desktop";
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Hermit uses the microphone to let you dictate RFC content and voice comments.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Hermit uses speech recognition to transcribe your voice into RFC text and comments.";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Hermit uses Bluetooth to discover and pair with nearby Macs.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Hermit uses the local network to discover and connect to the Hermit server on your Mac.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Hermit uses the microphone to let you dictate RFC content using your voice.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Hermit uses on-device speech recognition to transcribe your voice into RFC text.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportsDocumentBrowser = NO;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
@@ -675,13 +685,16 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.2;
 				MARKETING_VERSION = 0.1.0;
-				"OTHER_LDFLAGS[sdk=macosx*]" = "$(inherited) -framework HermitServer";
+				"OTHER_LDFLAGS[sdk=macosx*]" = (
+					"$(inherited)",
+					"-framework",
+					HermitServer,
+				);
 				OTHER_SWIFT_FLAGS = "$(inherited)";
 				"OTHER_SWIFT_FLAGS[sdk=macosx*]" = "$(inherited) -DHERMIT_EMBEDDED_SERVER";
-				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphoneos*]" = "HermitServer.xcframework";
-				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphonesimulator*]" = "HermitServer.xcframework";
 				PRODUCT_BUNDLE_IDENTIFIER = "$(HERMIT_BUNDLE_ID)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SUPPORTED_PLATFORMS = "macosx iphonesimulator iphoneos";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
@@ -694,7 +707,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		B0010060 /* Build configuration list for PBXNativeTarget "HermitNative" */ = {
+		B0010060 /* Build configuration list for PBXNativeTarget "Hermit" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				B0010063 /* Debug */,
@@ -703,7 +716,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		B0010071 /* Build configuration list for PBXProject "HermitNative" */ = {
+		B0010071 /* Build configuration list for PBXProject "Hermit" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				B0010061 /* Debug */,

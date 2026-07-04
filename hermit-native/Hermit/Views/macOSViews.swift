@@ -4,7 +4,7 @@ import AppKit
 
 // MARK: - hermit-noc: MenuBarExtra / LSUIElement
 
-// NOTE: macOS menu bar is handled declaratively via MenuBarExtra in HermitNativeApp.swift.
+// NOTE: macOS menu bar is handled declaratively via MenuBarExtra in HermitApp.swift.
 // This file adds macOS-specific window management helpers.
 
 // MARK: - hermit-rsf: MenuBarRFCBrowserView — RFC list sidebar + WKWebView detail

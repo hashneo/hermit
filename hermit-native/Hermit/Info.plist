@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.hashicorp.hermit</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>hermit</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_hermit-pair._tcp</string>
+		<string>_hermit-pair._udp</string>
+		<string>_hermit._tcp</string>
+	</array>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>com.hashicorp.hermit.view-rfc</string>
+		<string>com.hashicorp.hermit.handoff</string>
+	</array>
+</dict>
+</plist>
