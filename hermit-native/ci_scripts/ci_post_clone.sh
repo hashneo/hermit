@@ -7,7 +7,11 @@
 
 set -e
 
-XCCONFIG="$CI_WORKSPACE/hermit-native/Local.xcconfig"
+# Resolve Local.xcconfig path relative to this script's location.
+# The script lives at hermit-native/ci_scripts/, so one level up is hermit-native/.
+# This avoids any dependency on CI_WORKSPACE which is not set during post-clone.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+XCCONFIG="$SCRIPT_DIR/../Local.xcconfig"
 
 : "${HERMIT_TEAM_ID:?HERMIT_TEAM_ID must be set in Xcode Cloud workflow environment}"
 : "${HERMIT_BUNDLE_ID:?HERMIT_BUNDLE_ID must be set in Xcode Cloud workflow environment}"
