@@ -1,39 +1,67 @@
 ---
 name: ci-precheck-pr
-description: Pre-PR quality and readiness checks before opening or updating a pull request.
+description: Pre-PR quality gate matching CI. Run before opening or updating a pull request to ensure all three CI jobs (backend, openapi, ui) will pass.
 ---
 
-# CI Precheck (PR)
+# ci-precheck-pr
 
-Run this before opening/updating a PR.
+Run before opening a PR or after making changes on a feature branch. Mirrors the three CI jobs that must pass for merge.
 
-## Workflow
-
-1. Ensure branch is current:
+## Step 1 — Detect scope
 
 ```bash
-git status
-git branch --show-current
+git diff --name-only origin/main...HEAD
 ```
 
-2. Run checks for modified scope:
+## Step 2 — Run all applicable gates
 
+### Backend (Go) — mirrors CI `backend` job
+```bash
+make build                    # go build ./...
+go test ./...                 # all unit tests
+make test-native-config       # seed-prefs integration tests
+python3 -m py_compile scripts/*.py  # Python syntax check
+python3 scripts/test-native-seed-prefs.py
+```
+
+### OpenAPI — mirrors CI `openapi` job
+```bash
+npx --yes @redocly/cli@latest lint api/openapi/v1/openapi.yaml
+```
+
+### UI — mirrors CI `ui` job
+```bash
+cd ui && npm ci && npm run build
+```
+
+### Docs (if docs-cms/ changed)
 ```bash
 docuchango validate --verbose
-make lint || true
-make test || true
 ```
 
-3. Review what PR contains:
+### Swift (if hermit-native/ changed)
+```bash
+make gomobile-build      # rebuild xcframework if Go changed
+make native-build-macos  # full macOS app build
+```
+
+## Step 3 — Final pre-PR verification
 
 ```bash
-git log --oneline --decorate -10
-git diff main...HEAD
+git status                          # no unexpected local changes
+git log --oneline origin/main..HEAD # review commit scope
+git diff --stat origin/main...HEAD  # confirm what's in the PR
 ```
 
-4. Ensure no secrets or local-only files are included.
+## Gate
 
-## Verification
+- [ ] Branch is not `main`
+- [ ] `go test ./...` passes with exit 0
+- [ ] OpenAPI lint passes
+- [ ] UI builds successfully
+- [ ] No unexpected files in the diff
+- [ ] Commit scope is coherent and reviewable
 
-- Branch is clean and push-ready.
-- Validation/tests for changed areas are complete.
+## Continue with
+
+`pr-lifecycle` when all checks pass.

@@ -306,10 +306,13 @@ private struct AddAccountSheet: View {
                             Text(p.rawValue).tag(p)
                         }
                     }
-                    .onChange(of: preset) { _, newPreset in
-                        // Pre-fill name when switching presets (don't clobber
-                        // something the user already typed for "Other").
-                        if name.isEmpty || name == preset.defaultName {
+                    .onChange(of: preset) { oldPreset, newPreset in
+                        // Use oldPreset to check whether the name was the default
+                        // for the previous selection — at this point `preset` has
+                        // already been updated to newPreset so comparing against
+                        // `preset.defaultName` would always compare against the
+                        // NEW preset's default, never prefilling correctly.
+                        if name.isEmpty || name == oldPreset.defaultName {
                             name = newPreset.defaultName
                         }
                         // Clear the custom endpoint field when switching away

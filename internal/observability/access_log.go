@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -21,10 +22,12 @@ const accessLogDatabaseFilename = "hermit-observability.db"
 // a buffered channel and consumed by a single background goroutine, keeping
 // middleware hot-path non-blocking and eliminating SQLITE_BUSY contention.
 type AccessLogStore struct {
-	db      *sql.DB
-	writeCh chan LogEntry
-	flushCh chan chan struct{} // used by Sync() to drain pending writes
-	stopCh  chan struct{}
+	db       *sql.DB
+	writeCh  chan LogEntry
+	flushCh  chan chan struct{} // used by Sync() to drain pending writes
+	stopCh   chan struct{}
+	loopDone chan struct{} // closed by writeLoop when it exits
+	stopped  sync.Once    // guards Close() against double-close panics
 }
 
 type LogEntry struct {
@@ -69,10 +72,11 @@ func OpenAccessLog(dataDir string) (*AccessLogStore, error) {
 		return nil, err
 	}
 	store := &AccessLogStore{
-		db:      db,
-		writeCh: make(chan LogEntry, 2048),
-		flushCh: make(chan chan struct{}, 8),
-		stopCh:  make(chan struct{}),
+		db:       db,
+		writeCh:  make(chan LogEntry, 2048),
+		flushCh:  make(chan chan struct{}, 8),
+		stopCh:   make(chan struct{}),
+		loopDone: make(chan struct{}),
 	}
 	if err := store.migrate(context.Background()); err != nil {
 		_ = db.Close()
@@ -91,6 +95,7 @@ func (s *AccessLogStore) Sync() {
 }
 
 func (s *AccessLogStore) writeLoop() {
+	defer close(s.loopDone)
 	for {
 		select {
 		case entry := <-s.writeCh:
@@ -135,8 +140,20 @@ func (s *AccessLogStore) Close() error {
 	if s == nil || s.db == nil {
 		return nil
 	}
-	close(s.stopCh)
-	return s.db.Close()
+	// stopped.Do ensures Close() is idempotent — closing stopCh twice panics.
+	// We also wait for writeLoop to drain and exit before closing the DB so
+	// no in-flight insert races against db.Close().
+	var dbErr error
+	s.stopped.Do(func() {
+		done := make(chan struct{})
+		// Signal writeLoop to stop and tell it to notify us when it exits.
+		s.flushCh <- done // drain first
+		<-done
+		close(s.stopCh)   // then stop
+		<-s.loopDone      // wait for writeLoop to fully exit before closing DB
+		dbErr = s.db.Close()
+	})
+	return dbErr
 }
 
 func (s *AccessLogStore) migrate(ctx context.Context) error {
@@ -175,6 +192,13 @@ func (s *AccessLogStore) migrate(ctx context.Context) error {
 func (s *AccessLogStore) Insert(_ context.Context, entry LogEntry) error {
 	if s == nil || s.db == nil {
 		return nil
+	}
+	// Become a no-op once the store is closed so callers that race with
+	// Close() don't enqueue entries that will never be written.
+	select {
+	case <-s.stopCh:
+		return nil
+	default:
 	}
 	if entry.Kind == "" {
 		entry.Kind = "access"

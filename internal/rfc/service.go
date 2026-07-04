@@ -716,7 +716,7 @@ func (s *Service) AcceptRFC(ctx context.Context, repositoryID string, prNumber i
 	if s.repoResolver == nil {
 		return AcceptRFCResult{}, fmt.Errorf("repository resolver is not configured")
 	}
-	owner, name, registry, repoBaseURL, _, docsPath, rfcLabel, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
+	owner, name, registry, repoBaseURL, _, docsPath, _, token, ok := s.repoResolver.ResolveRepositoryAccess(repositoryID)
 	if !ok {
 		return AcceptRFCResult{}, fmt.Errorf("repository not found")
 	}
@@ -767,14 +767,14 @@ func (s *Service) AcceptRFC(ctx context.Context, repositoryID string, prNumber i
 	// 4a. Dismiss any pending bot reviews (e.g. copilot) so they don't block the merge.
 	if err := client.DismissBotReviews(ctx, baseURL, owner, name, prNumber, token); err != nil {
 		// Non-fatal: log and continue. A failed dismissal should not abort the accept flow.
-		_ = fmt.Errorf("dismiss bot reviews (non-fatal): %w", err)
+		slog.Warn("dismiss bot reviews (non-fatal)", "error", err)
 	}
 
 	// 4b. Dismiss any outstanding human REQUEST_CHANGES reviews — the RFC has been formally
 	// accepted so reviewer objections are considered resolved by the accept decision.
 	if err := client.DismissHumanRequestChangesReviews(ctx, baseURL, owner, name, prNumber, token); err != nil {
 		// Non-fatal: same reasoning as bot dismissal above.
-		_ = fmt.Errorf("dismiss human request-changes reviews (non-fatal): %w", err)
+		slog.Warn("dismiss human request-changes reviews (non-fatal)", "error", err)
 	}
 
 	// 4c. Resolve all open review threads so branch-protection "require
@@ -789,12 +789,6 @@ func (s *Service) AcceptRFC(ctx context.Context, repositoryID string, prNumber i
 	merged, blockedByCI, err := s.mergeWithRetry(ctx, client, baseURL, owner, name, prNumber, token, repositoryID)
 	if err != nil {
 		return AcceptRFCResult{}, fmt.Errorf("merge PR: %w", err)
-	}
-
-	// Remove any legacy rfcLabel so the PR drops out
-	// of the review queue immediately after a successful merge.
-	if merged && rfcLabel != "" {
-		_ = client.RemoveLabel(ctx, baseURL, owner, name, prNumber, rfcLabel, token)
 	}
 
 	return AcceptRFCResult{Merged: merged, BlockedByCI: blockedByCI, CommitSHA: sha}, nil

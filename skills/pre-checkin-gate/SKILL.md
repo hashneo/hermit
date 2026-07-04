@@ -1,12 +1,12 @@
 ---
 name: pre-checkin-gate
-description: Compatibility alias for ci-precheck-commit workflow.
+description: Alias for ci-precheck-commit (backward compatibility).
 ---
 
-# Pre-Checkin Gate
+# pre-checkin-gate
 
-This is a compatibility alias for `ci-precheck-commit`.
+This is a backward-compatibility alias.
 
-Use:
+**Canonical skill:** `ci-precheck-commit`
 
-- `skills/ci-precheck-commit/SKILL.md`
+Use: load the `ci-precheck-commit` skill instead.

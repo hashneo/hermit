@@ -59,7 +59,15 @@ final class KeychainHelper {
             // only accessible after first unlock.
             var add = query
             add[kSecValueData] = data
-#if os(macOS)
+#if os(macOS) && DEBUG
+            // In DEBUG builds the app is ad-hoc signed ("Sign to Run Locally"),
+            // which changes the binary signature on every rebuild.  An open ACL
+            // (nil trusted-app list) prevents the login-keychain password prompt
+            // that would otherwise appear when the new binary tries to read an
+            // item created by the old one.
+            //
+            // Release builds use a stable Developer ID signature, so the default
+            // per-app ACL is correct and secure — no override needed.
             var secAccess: SecAccess?
             if SecAccessCreate(service as CFString, nil as CFArray?, &secAccess) == errSecSuccess,
                let access = secAccess {
