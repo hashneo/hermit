@@ -668,6 +668,7 @@ private struct MenuBarSpeechBubbleShape: InsettableShape {
     }
 }
 
+#if os(macOS)
 private struct MenuBarBubbleAnchor: Equatable {
     let screenX: CGFloat
 
@@ -785,6 +786,7 @@ private enum MenuBarBubbleWindowController {
             abs(lhs.size.height - rhs.size.height) < 0.5
     }
 }
+#endif // os(macOS)
 
 // MARK: - Repo Dashboard Views
 
