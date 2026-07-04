@@ -148,9 +148,9 @@ enum GiteaAutoConfig {
 
         // 4. Well-known developer paths
         let knownPaths = [
-            "~/Development/github/hashicorp/hermit",
-            "~/code/hashicorp/hermit",
-            "~/projects/hashicorp/hermit",
+            "~/Development/hermit",
+            "~/code/hermit",
+            "~/projects/hermit",
         ]
         for rawPath in knownPaths {
             let expanded = URL(fileURLWithPath: (rawPath as NSString).expandingTildeInPath)

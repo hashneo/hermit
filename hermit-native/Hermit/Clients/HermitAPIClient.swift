@@ -10,14 +10,14 @@ import os.log
 // MARK: - Shared logger
 //
 // Uses OSLog so output appears in Console.app and via:
-//   log stream --predicate 'subsystem == "com.hashicorp.hermit"' --level debug
+//   log stream --predicate 'subsystem == "me.steven.hermit"' --level debug
 //
 // Debug/info messages require the subsystem logging config to be enabled — see
-// Resources/com.hashicorp.hermit.plist (installed by make dev).
+// Resources/me.steven.hermit.plist (installed by make dev).
 // Error/fault messages are always captured without any config.
 
-private let _apiLog   = OSLog(subsystem: "com.hashicorp.hermit", category: "APIClient")
-private let _mergeLog = OSLog(subsystem: "com.hashicorp.hermit", category: "Merge")
+private let _apiLog   = OSLog(subsystem: "me.steven.hermit", category: "APIClient")
+private let _mergeLog = OSLog(subsystem: "me.steven.hermit", category: "Merge")
 
 private func hLog(_ msg: String, log: OSLog = _apiLog, type: OSLogType = .debug) {
     os_log("%{public}@", log: log, type: type, msg)

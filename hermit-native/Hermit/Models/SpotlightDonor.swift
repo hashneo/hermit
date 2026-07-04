@@ -15,7 +15,7 @@ final class SpotlightDonor {
     static let shared = SpotlightDonor()
 
     private let index = CSSearchableIndex.default()
-    private let domainIdentifier = "com.hashicorp.hermit.rfcs"
+    private let domainIdentifier = "me.steven.hermit.rfcs"
 
     /// Donate an RFC to Spotlight / Siri so it appears in search results.
     func donate(rfc: RFC) {
