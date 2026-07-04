@@ -618,6 +618,7 @@
 				INFOPLIST_FILE = Hermit/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Hermit Desktop";
 				INFOPLIST_KEY_CFBundleIconName = AppIcon;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Hermit uses Bluetooth to discover and pair with nearby Macs.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Hermit uses the local network to discover and connect to the Hermit server on your Mac.";
@@ -678,6 +679,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Hermit Desktop";
 				INFOPLIST_KEY_CFBundleIconName = AppIcon;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Hermit uses Bluetooth to discover and pair with nearby Macs.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Hermit uses the local network to discover and connect to the Hermit server on your Mac.";
