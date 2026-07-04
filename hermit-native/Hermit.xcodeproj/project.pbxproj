@@ -60,11 +60,12 @@
 		B001D004 /* HermitActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D001 /* HermitActivity.swift */; };
 		B001D005 /* BookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D006 /* BookmarkStore.swift */; };
 		B001D007 /* DevConfig in Resources */ = {isa = PBXBuildFile; fileRef = B001D008 /* DevConfig */; };
+		B001A101 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B001A100 /* Assets.xcassets */; };
 		B001D009 /* ThreadPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D00A /* ThreadPopoverView.swift */; };
 		B001D010 /* ConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D011 /* ConfigStore.swift */; };
 		B001FF10 /* LiveVoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001FF11 /* LiveVoiceSession.swift */; };
 		B001FF12 /* PRReviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001FF13 /* PRReviewSheet.swift */; };
-		B001LOG1 /* com.hashicorp.hermit.plist in Resources */ = {isa = PBXBuildFile; fileRef = B001LOG2 /* com.hashicorp.hermit.plist */; };
+		B001LOG1 /* me.steven.hermit.plist in Resources */ = {isa = PBXBuildFile; fileRef = B001LOG2 /* me.steven.hermit.plist */; };
 		B001RR01 /* RecentRFCStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001RR00 /* RecentRFCStore.swift */; };
 		F51CA0CA0595C036D8E2D00B /* CommentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 702547F1AF611276712EA42C /* CommentStore.swift */; };
 /* End PBXBuildFile section */
@@ -106,6 +107,7 @@
 		B001002D /* WebViewRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewRenderer.swift; sourceTree = "<group>"; };
 		B001002F /* MarkdownRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRenderer.swift; sourceTree = "<group>"; };
 		B0010031 /* BundledAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledAssets.swift; sourceTree = "<group>"; };
+		B001A100 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B0010033 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
 		B0010035 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		B0010037 /* RFCBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCBrowserView.swift; sourceTree = "<group>"; };
@@ -143,7 +145,7 @@
 		B001D011 /* ConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigStore.swift; sourceTree = "<group>"; };
 		B001FF11 /* LiveVoiceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVoiceSession.swift; sourceTree = "<group>"; };
 		B001FF13 /* PRReviewSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRReviewSheet.swift; sourceTree = "<group>"; };
-		B001LOG2 /* com.hashicorp.hermit.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = com.hashicorp.hermit.plist; sourceTree = "<group>"; };
+		B001LOG2 /* me.steven.hermit.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = me.steven.hermit.plist; sourceTree = "<group>"; };
 		B001RR00 /* RecentRFCStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentRFCStore.swift; sourceTree = "<group>"; };
 		HERMIT0001 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -309,7 +311,8 @@
 		B001009B /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				B001LOG2 /* com.hashicorp.hermit.plist */,
+				B001A100 /* Assets.xcassets */,
+				B001LOG2 /* me.steven.hermit.plist */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -391,8 +394,9 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B001A101 /* Assets.xcassets in Resources */,
 				B001D007 /* DevConfig in Resources */,
-				B001LOG1 /* com.hashicorp.hermit.plist in Resources */,
+				B001LOG1 /* me.steven.hermit.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -613,6 +617,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Hermit/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Hermit Desktop";
+				INFOPLIST_KEY_CFBundleIconName = AppIcon;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Hermit uses Bluetooth to discover and pair with nearby Macs.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Hermit uses the local network to discover and connect to the Hermit server on your Mac.";
@@ -620,6 +625,8 @@
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Hermit uses on-device speech recognition to transcribe your voice into RFC text.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportsDocumentBrowser = NO;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -670,6 +677,7 @@
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Hermit Desktop";
+				INFOPLIST_KEY_CFBundleIconName = AppIcon;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Hermit uses Bluetooth to discover and pair with nearby Macs.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Hermit uses the local network to discover and connect to the Hermit server on your Mac.";
@@ -677,6 +685,8 @@
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Hermit uses on-device speech recognition to transcribe your voice into RFC text.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportsDocumentBrowser = NO;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

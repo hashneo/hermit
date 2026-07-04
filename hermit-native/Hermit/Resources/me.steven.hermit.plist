@@ -2,12 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <!--
-  Unified Logging configuration for the com.hashicorp.hermit subsystem.
+  Unified Logging configuration for the me.steven.hermit subsystem.
   Enables Debug and Info level messages so they are captured by the OS log
   store and visible via:
 
-    log stream --predicate 'subsystem == "com.hashicorp.hermit"' --level debug
-    log show   --predicate 'subsystem == "com.hashicorp.hermit"' --last 5m --info --debug
+    log stream --predicate 'subsystem == "me.steven.hermit"' --level debug
+    log show   --predicate 'subsystem == "me.steven.hermit"' --last 5m --info --debug
 
   Without this file, Debug/Info messages are generated but not stored.
   Error and Fault are always stored regardless.
@@ -15,7 +15,7 @@
 <dict>
     <key>Subsystems</key>
     <dict>
-        <key>com.hashicorp.hermit</key>
+        <key>me.steven.hermit</key>
         <dict>
             <key>Level</key>
             <dict>

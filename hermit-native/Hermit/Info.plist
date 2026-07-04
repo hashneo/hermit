@@ -6,7 +6,7 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.hashicorp.hermit</string>
+			<string>me.steven.hermit</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>hermit</string>
@@ -15,6 +15,8 @@
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.developer-tools</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_hermit-pair._tcp</string>
@@ -23,8 +25,8 @@
 	</array>
 	<key>NSUserActivityTypes</key>
 	<array>
-		<string>com.hashicorp.hermit.view-rfc</string>
-		<string>com.hashicorp.hermit.handoff</string>
+		<string>me.steven.hermit.view-rfc</string>
+		<string>me.steven.hermit.handoff</string>
 	</array>
 </dict>
 </plist>

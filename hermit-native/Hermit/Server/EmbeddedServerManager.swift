@@ -10,7 +10,7 @@ import HermitServer
 
 // MARK: - hermit-nnn: Debug logging helpers
 
-private let hermitLog = OSLog(subsystem: "com.hashicorp.hermit", category: "EmbeddedServer")
+private let hermitLog = OSLog(subsystem: "me.steven.hermit", category: "EmbeddedServer")
 
 /// Resolve a writable log path that works under both sandboxed and non-sandboxed builds.
 private let hermitLogPath: String = {

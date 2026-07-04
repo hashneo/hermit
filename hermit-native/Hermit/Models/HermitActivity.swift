@@ -4,9 +4,9 @@ import Foundation
 
 enum HermitActivity {
     /// Activity type for Handoff between Mac and iPad (registered in Info.plist).
-    static let handoff = "com.hashicorp.hermit.handoff"
+    static let handoff = "me.steven.hermit.handoff"
     /// Activity type for scene restoration on relaunch (registered in Info.plist).
-    static let viewRFC = "com.hashicorp.hermit.view-rfc"
+    static let viewRFC = "me.steven.hermit.view-rfc"
 
     // MARK: Payload keys
     static let keyRFCID        = "rfcID"
