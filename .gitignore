@@ -22,14 +22,15 @@ bin/hermit
 /.tmp/gitea-token.env
 
 # Embedded dev config (copied by make native-embed-config, contains secrets)
-/hermit-native/HermitNative/DevConfig/hermit.yaml
-/hermit-native/HermitNative/DevConfig/gitea-token-export.sh
+/hermit-native/Hermit/DevConfig/hermit.yaml
+/hermit-native/Hermit/DevConfig/gitea-token-export.sh
 
 # Native app build output
+Hermit.app/
 HermitNative.app/
 hermit-native/build/
-hermit-native/HermitNative.xcodeproj/project.xcworkspace/xcuserdata/
-hermit-native/HermitNative.xcodeproj/xcuserdata/
+hermit-native/Hermit.xcodeproj/project.xcworkspace/xcuserdata/
+hermit-native/Hermit.xcodeproj/xcuserdata/
 hermit-native/**/*.xcuserstate
 hermit-native/DerivedData/
 
@@ -37,7 +38,6 @@ hermit-native/DerivedData/
 /config/hermit-repos.*.json
 
 # gomobile build artifacts
-hermit-native/HermitNative/HermitServer.xcframework/
-HermitNative.app/
+hermit-native/Hermit/HermitServer.xcframework/
 .idea/
 scripts/__pycache__/

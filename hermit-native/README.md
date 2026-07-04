@@ -13,8 +13,8 @@ No Hermit Go backend is required. See `docs-cms/rfcs/rfc-006-native-swift-app-vi
 ## Directory layout
 
 ```
-HermitNative/
-├── HermitNativeApp.swift     # @main entry point; platform-conditional scenes
+Hermit/
+├── HermitApp.swift     # @main entry point; platform-conditional scenes
 ├── Models/                   # AppState and domain types
 ├── Auth/                     # KeychainHelper
 ├── Views/                    # SwiftUI views (platform-adaptive)
@@ -29,10 +29,10 @@ HermitNative/
 ## Open in Xcode
 
 ```
-open hermit-native/HermitNative.xcodeproj
+open hermit-native/Hermit.xcodeproj
 ```
 
-Select the **HermitNative** scheme and choose a macOS or iPad simulator destination.
+Select the **Hermit** scheme and choose a macOS or iPad simulator destination.
 
 ## Pending work
 

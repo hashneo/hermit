@@ -7,7 +7,7 @@ import Combine
 // MARK: - hermit-y9x: Wire EmbeddedServerManager at app launch (macOS)
 
 @main
-struct HermitNativeApp: App {
+struct HermitApp: App {
 #if os(macOS)
     @NSApplicationDelegateAdaptor(HermitAppDelegate.self) var appDelegate
     @ObservedObject private var advertiser = PairingAdvertiser.shared
@@ -127,12 +127,12 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
             // are set up yet.  Repository and account config is handled entirely
             // through Settings; the old GiteaAutoConfig folder-picker gate is no
             // longer needed and was blocking startup after a config wipe.
-            HermitNativeApp.startEmbeddedServer(appState: appState)
+            HermitApp.startEmbeddedServer(appState: appState)
         }
     }
 }
 
-extension HermitNativeApp {
+extension HermitApp {
     @MainActor
     static func startEmbeddedServer(appState: AppState) {
         let _logPath = FileManager.default.temporaryDirectory.appendingPathComponent("hermit-native-debug.log").path

@@ -14,7 +14,7 @@ final class KeychainHelper {
         migrateAccessibility()
     }
 
-    private let service = "HermitNative"
+    private let service = "Hermit"
 
     // MARK: - Generic low-level helpers
 
@@ -80,8 +80,9 @@ final class KeychainHelper {
 
     // MARK: - Accessibility migration
 
-    /// Re-writes all HermitNative Keychain items with an open ACL so that
-    /// ad-hoc binary rebuilds never trigger the login-keychain password prompt.
+    /// Re-writes all Hermit Keychain items to kSecAttrAccessibleAfterFirstUnlock.
+    /// Items written by older builds used the default (kSecAttrAccessibleWhenUnlocked)
+    /// which triggers an unlock prompt when the Settings pane reads them.
     private func migrateAccessibility() {
         let query: [CFString: Any] = [
             kSecClass:             kSecClassGenericPassword,

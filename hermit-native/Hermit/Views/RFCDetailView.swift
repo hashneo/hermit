@@ -25,7 +25,7 @@ struct RFCDetailView: View {
 
     // hermit-d42: only show the reading-mode toolbar button when this view is
     // embedded in a NavigationSplitView that has a sidebar to hide.
-    // Standalone NSWindow usage (HermitNativeApp, iPad) sets this to false.
+    // Standalone NSWindow usage (HermitApp, iPad) sets this to false.
     var hasSidebar: Bool = false
 
     @EnvironmentObject private var appState: AppState
