@@ -1,4 +1,4 @@
-.PHONY: build run debug clean test test-native-config ui-build validate-config validate-config-structure validate-config-access gitea-up gitea-down gitea-logs gitea-reset gitea-seed-pr native-build native-build-macos native-build-ipad native-test native-clean native-open gomobile-build setup-xcconfig dev ipad-deploy ipad-sim-deploy reset
+.PHONY: build run debug clean test test-native-config ui-build validate-config validate-config-structure validate-config-access gitea-up gitea-down gitea-logs gitea-reset gitea-seed-pr native-build native-build-macos native-build-ipad native-test native-clean native-open gomobile-build setup-xcconfig dev ipad-deploy ipad-sim-deploy reset help
 
 # Include machine-local overrides (device IDs, etc.) — gitignored.
 -include .local.mk
@@ -18,13 +18,21 @@ GITEA_TOKEN_SCRIPT := ./scripts/gitea-token.sh
 HERMIT_ENABLE_GITEA ?= 0
 HERMIT_NATIVE_REPOS_JSON ?=
 
-.DEFAULT_GOAL := build
+.DEFAULT_GOAL := help
 
-build:
+help: ## Show this help message
+	@printf '\033[1mHermit Desktop — available targets\033[0m\n\n'
+	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ { printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@printf '\n\033[2mFlags (set via environment or .local.mk):\033[0m\n'
+	@printf '  \033[36m%-26s\033[0m %s\n' 'HERMIT_ENABLE_GITEA' '0 (default) = GitHub only; 1 = also start local Gitea'
+	@printf '  \033[36m%-26s\033[0m %s\n' 'HERMIT_NATIVE_REPOS_JSON' 'Path to a hermit-repos.*.json for multi-repo dev setup'
+	@printf '\n'
+
+build: ## Build the Go server binary
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_PATH) ./cmd/hermit
 
-test: test-native-config
+test: test-native-config ## Run all tests (Go + native config)
 	go test ./...
 
 test-native-config: ## Validate native repo seed config and Settings/default merge behavior
@@ -305,13 +313,13 @@ wipe-config: ## Wipe all persisted Hermit config: UserDefaults, Keychain PATs, c
 		echo "Wiping Keychain PATs..."; \
 		security dump-keychain 2>/dev/null | awk -F'"' '/acct.*hermit\.account\./{print $$4}' | \
 			while read acct; do \
-				security delete-generic-password -a "$$acct" -s "HermitNative" 2>/dev/null \
+				security delete-generic-password -a "$$acct" -s "Hermit" 2>/dev/null \
 					&& echo "  removed: $$acct" || true; \
 			done; \
 	fi
 	@echo "Removing cached token files..."
 	@rm -f .tmp/gitea-token.env .tmp/gitea-token-export.sh
-	@rm -f hermit-native/HermitNative/DevConfig/gitea-token-export.sh
+	@rm -f hermit-native/Hermit/DevConfig/gitea-token-export.sh
 	@echo "Wipe complete."
 
 reset: ## Full reset: kill app, destroy Gitea container + data, remove keychain entries, wipe build artifacts

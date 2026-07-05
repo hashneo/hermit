@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install-keychain-pat.sh
 #
-# Bootstraps HermitNative for a local dev session:
+# Bootstraps Hermit Desktop for a local dev session:
 #
 #   UserDefaults → all config including PAT (debug builds store token in UserDefaults)
 #   Keychain     → PAT also written for release builds (skipped with --no-keychain)
@@ -199,7 +199,7 @@ if [ -z "${BUNDLE_ID}" ] || echo "${BUNDLE_ID}" | grep -q "yourname"; then
     exit 0
 fi
 
-# ── 1. Write PAT to Keychain (service=HermitNative account=hermit.account.<UUID>) ─
+# ── 1. Write PAT to Keychain (service=Hermit account=hermit.account.<UUID>) ─
 
 if [ "${SKIP_KEYCHAIN}" = true ]; then
     printf 'Skipping Keychain (--no-keychain).\n'
@@ -207,11 +207,11 @@ else
     printf 'Installing PAT into Keychain...\n'
     security delete-generic-password \
         -a "hermit.account.00000000-0000-0000-0000-000000000001" \
-        -s "HermitNative" 2>/dev/null || true
+        -s "Hermit" 2>/dev/null || true
 
     security add-generic-password \
         -a "hermit.account.00000000-0000-0000-0000-000000000001" \
-        -s "HermitNative" \
+        -s "Hermit" \
         -w "${PAT}" \
         -T "" \
         -U

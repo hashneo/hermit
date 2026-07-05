@@ -145,7 +145,7 @@ def main():
     # Try to read the token from the DevConfig gitea-token-export.sh
     token = token_override or ""
     if not token:
-        token_path = "hermit-native/HermitNative/DevConfig/gitea-token-export.sh"
+        token_path = "hermit-native/Hermit/DevConfig/gitea-token-export.sh"
         if os.path.exists(token_path):
             m = re.search(r"GITEA_TOKEN=(\S+)", open(token_path).read())
             if m:
@@ -271,10 +271,18 @@ def main():
                 merged_accounts.insert(0, dev_account)
             accounts = merged_accounts
 
-        # Seed the default repo only when no repos are stored yet.
+        # Seed the default repo only when no repos are stored yet AND Gitea
+        # is enabled.  When --no-gitea is set we must NOT fall back to the
+        # Gitea sentinel repo (DEV_REPO_ID / DEV_ACCOUNT_ID) because there
+        # is no matching account, which leaves the app with an orphaned repo.
         existing_repositories = decode_existing_json("hermit.repositories")
         if existing_repositories:
             repositories = existing_repositories
+        elif no_gitea:
+            # No existing repos and Gitea is disabled: seed nothing so the
+            # app prompts the user to connect their own account/repo.
+            repositories = []
+            print("  --no-gitea: leaving hermit.repositories empty (no Gitea sentinel repo)")
         else:
             repositories = [
                 {
