@@ -1285,13 +1285,14 @@ private struct ServerSettingsTab: View {
 #if os(macOS)
             case .embeddedLocal:
                 embeddedSection
+#else
+            case .embeddedLocal:
+                EmptyView()
 #endif
             case .localNetwork:
                 localNetworkSection
             case .remote:
                 remoteSection
-            default:
-                EmptyView()
             }
         }
         .formStyle(.grouped)
@@ -1365,6 +1366,9 @@ private struct ServerSettingsTab: View {
                 appState.serverBaseURL = url
                 ConfigStore.shared.serverBaseURL = url
             }
+#else
+        case .embeddedLocal:
+            break
 #endif
         case .localNetwork:
             // serverBaseURL will be set when user selects a discovered server
@@ -1372,8 +1376,6 @@ private struct ServerSettingsTab: View {
         case .remote(let url):
             appState.serverBaseURL = url
             ConfigStore.shared.serverBaseURL = url
-        default:
-            break
         }
     }
 
