@@ -36,7 +36,9 @@ gomobile init 2>/dev/null || true
 
 echo "Running gomobile bind..."
 cd "$REPO_ROOT"
-gomobile bind \
+# Set MACOSX_DEPLOYMENT_TARGET so the xcframework object files match the
+# project's deployment target and suppress the ld version mismatch warning.
+MACOSX_DEPLOYMENT_TARGET=15.2 gomobile bind \
     -target macos \
     -o "$XCFRAMEWORK_OUT" \
     hermit/mobile

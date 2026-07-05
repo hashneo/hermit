@@ -199,6 +199,15 @@ struct SelectableTextView: UIViewRepresentable {
             self.onLinkTapped = onLinkTapped
         }
 
+        func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
+            if case .link(let url) = textItem.content, let handler = onLinkTapped {
+                return UIAction { _ in handler(url) }
+            }
+            return defaultAction
+        }
+
+        // Fallback for iOS 16
+        @available(iOS, deprecated: 17.0)
         func textView(_ textView: UITextView, shouldInteractWith url: URL, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
             if let handler = onLinkTapped {
                 handler(url)

@@ -278,7 +278,7 @@ enum MarkdownParser {
 
     static func parseInline(_ input: String) -> [MarkdownInline] {
         var result: [MarkdownInline] = []
-        var chars = Array(input) // work on character array to avoid index hell
+        let chars = Array(input) // work on character array to avoid index hell
         var i = 0
 
         // Append a plain text character, merging with previous text run if possible

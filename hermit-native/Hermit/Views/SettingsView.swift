@@ -1290,8 +1290,6 @@ private struct ServerSettingsTab: View {
                 localNetworkSection
             case .remote:
                 remoteSection
-            default:
-                EmptyView()
             }
         }
         .formStyle(.grouped)
@@ -1372,8 +1370,6 @@ private struct ServerSettingsTab: View {
         case .remote(let url):
             appState.serverBaseURL = url
             ConfigStore.shared.serverBaseURL = url
-        default:
-            break
         }
     }
 

@@ -26,14 +26,7 @@ struct RFCPreviewView: View {
                         .font(.system(.body, design: .monospaced))
                         .padding(8)
                 } else {
-                    WebViewRenderer(
-                        html: MarkdownRenderer.htmlString(
-                            from: markdown,
-                            css: BundledAssets.readerCSS,
-                            mermaidScript: BundledAssets.mermaidScript,
-                            prefersDarkMode: colorScheme == .dark
-                        )
-                    )
+                    MarkdownRendererView(markdown: markdown)
                 }
             }
             .navigationTitle("RFC Preview")
