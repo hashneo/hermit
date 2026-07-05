@@ -1285,6 +1285,9 @@ private struct ServerSettingsTab: View {
 #if os(macOS)
             case .embeddedLocal:
                 embeddedSection
+#else
+            case .embeddedLocal:
+                EmptyView()
 #endif
             case .localNetwork:
                 localNetworkSection
@@ -1363,6 +1366,9 @@ private struct ServerSettingsTab: View {
                 appState.serverBaseURL = url
                 ConfigStore.shared.serverBaseURL = url
             }
+#else
+        case .embeddedLocal:
+            break
 #endif
         case .localNetwork:
             // serverBaseURL will be set when user selects a discovered server

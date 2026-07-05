@@ -26,7 +26,7 @@ struct RFCPreviewView: View {
                         .font(.system(.body, design: .monospaced))
                         .padding(8)
                 } else {
-                    MarkdownRendererView(markdown: markdown)
+                    MarkdownRendererView(blocks: MarkdownParser.parse(markdown))
                 }
             }
             .navigationTitle("RFC Preview")
