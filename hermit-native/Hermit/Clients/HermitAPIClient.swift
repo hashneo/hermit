@@ -141,7 +141,11 @@ actor HermitAPIClient: HermitClientProtocol {
     init(config: Config) {
         self.config = config
         let cfg = URLSessionConfiguration.default
-        cfg.timeoutIntervalForRequest = 30
+        // The Go server may need 5–15 s on a cold cache (N+1 GitHub API calls
+        // to read RFC frontmatter).  25 s for first-byte covers that while still
+        // failing fast for genuine offline scenarios after our offline-error retry.
+        cfg.timeoutIntervalForRequest  = 25
+        cfg.timeoutIntervalForResource = 60
         self.session = URLSession(configuration: cfg)
     }
 
@@ -218,6 +222,7 @@ actor HermitAPIClient: HermitClientProtocol {
                     mergeableState: item.mergeable_state,
                     documentType: item.document_type ?? "rfc",
                     documentPath: item.path,
+                    lifecycleStatus: item.lifecycle_status,
                     catalogID: item.id,
                     labels: item.labels ?? [],
                     changedFiles: item.changed_files ?? 0,
@@ -634,7 +639,8 @@ actor HermitAPIClient: HermitClientProtocol {
                               htmlURL: pr.htmlURL, state: pr.state,
                               draft: pr.draft, mergeable: nil,
                               mergeableState: nil, documentType: "rfc",
-                              documentPath: "", catalogID: "pr-\(pr.number)",
+                              documentPath: "", lifecycleStatus: nil,
+                              catalogID: "pr-\(pr.number)",
                               labels: pr.labels, changedFiles: 0,
                               additions: 0, deletions: 0,
                               issueCommentCount: 0, reviewCommentCount: 0)
