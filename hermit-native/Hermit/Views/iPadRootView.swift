@@ -12,12 +12,18 @@ final class RFCStore: ObservableObject {
     @Published var newlyPublishedID: String? = nil  // hermit-80m: highlight after publish
 
     private var client: (any HermitClientProtocol)?
+    private var loadTask: Task<Void, Never>?
+    private var cacheKey: String = ""   // owner/name — used to namespace the cache
     // docsPath retained for the resolvePRPath fallback that needs the path prefix
     private var docsPath: String = "docs-cms/rfcs"
 
-    func configure(client: any HermitClientProtocol, docsPath: String) {
+    func configure(client: any HermitClientProtocol, docsPath: String, cacheKey: String = "") {
         self.client   = client
         self.docsPath = docsPath
+        if !cacheKey.isEmpty { self.cacheKey = cacheKey }
+        // Warm the list from the persisted cache so the UI is populated
+        // immediately while the network refresh runs in the background.
+        if rfcs.isEmpty { rfcs = Self.loadCache(key: self.cacheKey) }
     }
 
     func load() async {
@@ -31,24 +37,85 @@ final class RFCStore: ObservableObject {
                     path: $0.path, sha: $0.sha, source: .mainBranch,
                     lifecycleStatus: $0.lifecycleStatus, htmlURL: $0.htmlURL)
             }
-            for pr in prs {
-                result.append(RFC(id: pr.catalogID, title: pr.title,
+            // Apply the same deduplication + filtering as the Mac native menu:
+            // one primary RFC per PR, genuine RFC files only, non-terminal status preferred.
+            for pr in primaryPRDocuments(from: prs) {
+                result.append(RFC(id: pr.catalogID,
+                                  title: pr.prTitle.isEmpty ? pr.title : pr.prTitle,
                                   path: pr.documentPath,
                                   sha: pr.headSHA,
                                   source: .pullRequest(pr),
-                                  lifecycleStatus: nil, htmlURL: pr.htmlURL))
+                                  lifecycleStatus: pr.lifecycleStatus, htmlURL: pr.htmlURL))
             }
             rfcs = result.sorted {
-                // In-review (PR) RFCs sort before main-branch RFCs, then alphabetically within each group.
                 let aIsPR = if case .pullRequest = $0.source { true } else { false }
                 let bIsPR = if case .pullRequest = $1.source { true } else { false }
                 if aIsPR != bIsPR { return aIsPR }
                 return $0.title < $1.title
             }
+            // Persist the fresh list so the next launch renders instantly.
+            Self.saveCache(rfcs, key: cacheKey)
+        } catch is CancellationError {
+            // Task was cancelled by a concurrent reload (e.g. pull-to-refresh
+            // over a background retry).  Silently exit — the new load will
+            // provide fresh results without surfacing a spurious error.
+            isLoading = false
+            return
         } catch {
-            errorMessage = error.localizedDescription
+            let nsErr = error as NSError
+            if nsErr.domain == NSURLErrorDomain && nsErr.code == NSURLErrorCancelled {
+                // URLSession cancelled because the Swift Task was cancelled.
+                isLoading = false
+                return
+            }
+            if case HermitAPIError.httpError(let code, _) = error, code == 401 {
+#if os(iOS)
+                ConfigStore.shared.localNetworkToken = nil
+                AppState.shared.localNetworkToken    = ""
+                NotificationCenter.default.post(name: .hermitResetPairing, object: nil)
+#endif
+                errorMessage = "Pairing revoked — please pair again."
+            } else if isOfflineError(error) {
+                errorMessage = "Mac appears to be offline.\nMake sure Hermit is running on your Mac."
+            } else {
+                errorMessage = error.localizedDescription
+            }
         }
         isLoading = false
+    }
+
+    /// Cancels any in-flight load and starts a fresh one with retry.
+    func reload() {
+        loadTask?.cancel()
+        loadTask = Task { await loadWithRetry() }
+    }
+
+    /// Cancels any in-flight background load, then performs a single load
+    /// and awaits its completion.  Used by pull-to-refresh so the refreshable
+    /// indicator stays visible until the request finishes and then dismisses
+    /// cleanly — no contention with a background retry loop.
+    func refreshNow() async {
+        loadTask?.cancel()
+        loadTask = nil
+        await load()
+    }
+
+    /// Loads with exponential backoff on offline errors. Respects task cancellation.
+    func loadWithRetry() async {
+        let delays: [Duration] = [.seconds(1), .seconds(2), .seconds(4)]
+        for (attempt, delay) in delays.enumerated() {
+            guard !Task.isCancelled else { return }
+            await load()
+            // Stop retrying if load succeeded or it's a non-network error.
+            if errorMessage == nil { return }
+            guard let msg = errorMessage, msg.contains("offline") else { return }
+            // Don't wait after the last attempt.
+            if attempt < delays.count - 1 {
+                errorMessage = nil       // clear while retrying so UI shows loader
+                isLoading = true
+                try? await Task.sleep(for: delay)
+            }
+        }
     }
 
     /// Returns the RFC .md path for a PR: prefers the file the PR actually changed,
@@ -77,7 +144,100 @@ final class RFCStore: ObservableObject {
         name
             .replacingOccurrences(of: ".md", with: "")
             .replacingOccurrences(of: "-", with: " ")
-            .capitalized
+             .capitalized
+    }
+
+    // MARK: - Persistent RFC cache (survives app launches)
+
+    /// Persists the RFC list to UserDefaults keyed by repo so the next launch
+    /// renders the stale list immediately while a background refresh runs.
+    private static func cacheDefaultsKey(_ key: String) -> String {
+        "hermit.ipad.rfcCache.\(key)"
+    }
+
+    private static func saveCache(_ rfcs: [RFC], key: String) {
+        guard !key.isEmpty, !rfcs.isEmpty else { return }
+        let encodable = rfcs.compactMap { rfc -> [String: Any]? in
+            var d: [String: Any] = [
+                "id": rfc.id, "title": rfc.title, "path": rfc.path,
+                "sha": rfc.sha, "htmlURL": rfc.htmlURL,
+            ]
+            if let s = rfc.lifecycleStatus { d["lifecycleStatus"] = s }
+            switch rfc.source {
+            case .mainBranch:
+                d["sourceType"] = "mainBranch"
+            case .pullRequest(let pr):
+                d["sourceType"] = "pullRequest"
+                d["prNumber"] = pr.number; d["prTitle"] = pr.prTitle
+                d["headSHA"] = pr.headSHA; d["headRef"] = pr.headRef
+                d["htmlURL"] = pr.htmlURL; d["documentPath"] = pr.documentPath
+                d["documentType"] = pr.documentType
+            }
+            return d
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: encodable) {
+            UserDefaults.standard.set(data, forKey: cacheDefaultsKey(key))
+        }
+    }
+
+    private static func loadCache(key: String) -> [RFC] {
+        guard !key.isEmpty,
+              let data = UserDefaults.standard.data(forKey: cacheDefaultsKey(key)),
+              let raw = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { return [] }
+        return raw.compactMap { d -> RFC? in
+            guard let id    = d["id"]    as? String,
+                  let title = d["title"] as? String,
+                  let path  = d["path"]  as? String,
+                  let sha   = d["sha"]   as? String,
+                  let html  = d["htmlURL"] as? String,
+                  let type  = d["sourceType"] as? String
+            else { return nil }
+            let lcs = d["lifecycleStatus"] as? String
+            let source: RFC.RFCSource
+            if type == "pullRequest",
+               let num  = d["prNumber"] as? Int,
+               let pt   = d["prTitle"]  as? String,
+               let hSHA = d["headSHA"]  as? String,
+               let hRef = d["headRef"]  as? String,
+               let docPath = d["documentPath"] as? String,
+               let docType = d["documentType"] as? String {
+                let pr = RFCPullRequest(
+                    id: num, number: num, title: pt, prTitle: pt,
+                    prState: "open", prMerged: false, body: "",
+                    headSHA: hSHA, headRef: hRef, htmlURL: html, state: "open",
+                    draft: false, mergeable: nil, mergeableState: nil,
+                    documentType: docType, documentPath: docPath,
+                    lifecycleStatus: lcs, catalogID: "\(num)",
+                    labels: [], changedFiles: 0, additions: 0, deletions: 0,
+                    issueCommentCount: 0, reviewCommentCount: 0)
+                source = .pullRequest(pr)
+            } else {
+                source = .mainBranch
+            }
+            return RFC(id: id, title: title, path: path, sha: sha,
+                       source: source, lifecycleStatus: lcs, htmlURL: html)
+        }
+    }
+}
+
+/// Returns true when the error is a network-level failure meaning the server
+/// is unreachable — timeout, connection refused, no route to host, etc.
+/// These are shown as "Mac appears to be offline" rather than a raw URL error.
+private func isOfflineError(_ error: Error) -> Bool {
+    let nsError = error as NSError
+    guard nsError.domain == NSURLErrorDomain else { return false }
+    switch nsError.code {
+    case NSURLErrorTimedOut,
+         NSURLErrorCannotConnectToHost,
+         NSURLErrorNetworkConnectionLost,
+         NSURLErrorNotConnectedToInternet,
+         NSURLErrorCannotFindHost,
+         NSURLErrorDNSLookupFailed,
+         NSURLErrorResourceUnavailable:
+        return true
+    default:
+        return false
     }
 }
 
@@ -123,20 +283,23 @@ struct iPadRootView: View {
                 store.errorMessage = "No API client — check pairing or configuration."
                 return
             }
-            store.configure(client: client, docsPath: appState.docsPath)
-            await store.load()
+            store.configure(client: client, docsPath: appState.docsPath, cacheKey: "(appState.repoOwner)/(appState.repoName)")
+            store.reload()
         }
-        .onChange(of: appState.serverBaseURL) { _, _ in
+        .onChange(of: appState.serverBaseURL) { _, newURL in
+            guard !newURL.isEmpty else { return }
+            // Cancel any in-flight load before reconfiguring — prevents stacked
+            // retry chains when the Mac restarts and the URL changes rapidly.
             if let client = appState.makeAPIClient() {
-                store.configure(client: client, docsPath: appState.docsPath)
-                Task { await store.load() }
+                store.configure(client: client, docsPath: appState.docsPath, cacheKey: "(appState.repoOwner)/(appState.repoName)")
             }
+            store.reload()
         }
         .onChange(of: appState.localNetworkToken) { _, _ in
             // Token arrives after URL in some flows (e.g. re-pair after reinstall)
             if let client = appState.makeAPIClient() {
-                store.configure(client: client, docsPath: appState.docsPath)
-                Task { await store.load() }
+                store.configure(client: client, docsPath: appState.docsPath, cacheKey: "(appState.repoOwner)/(appState.repoName)")
+                store.reload()
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -209,9 +372,11 @@ struct iPadRootView: View {
 
     private var landscapeLayout: some View {
         NavigationSplitView {
-            RFCListView(rfcs: store.rfcs, selectedRFC: $appState.selectedRFC) {
-                await store.load()
-            }
+            RFCListView(rfcs: store.rfcs,
+                        selectedRFC: $appState.selectedRFC,
+                        onRefresh: { await store.refreshNow() },
+                        suppressEmptyState: store.errorMessage != nil,
+                        isLoading: store.isLoading)
             .navigationTitle("Hermit")
             .overlay { listOverlay }
             .toolbar { listToolbarItems }
@@ -249,7 +414,7 @@ struct iPadRootView: View {
                                 isLoading: store.isLoading,
                                 selectedRFC: $appState.selectedRFC,
                                 isPresented: $showRFCPicker,
-                                onRefresh: { Task { await store.load() } }
+                                onRefresh: { store.reload() }
                             )
                             .environmentObject(appState)
                         }
@@ -294,13 +459,27 @@ struct iPadRootView: View {
 
     @ViewBuilder
     private var listOverlay: some View {
-        if let err = store.errorMessage {
-            ContentUnavailableView("Could not load RFCs",
-                systemImage: "exclamationmark.triangle",
-                description: Text(err))
-        } else if store.rfcs.isEmpty && !store.isLoading {
-            ContentUnavailableView("No RFCs", systemImage: "doc.text")
+        // Only show the full error overlay when there's no stale data to display.
+        // When cached RFCs are visible, the error would obscure them — the toolbar
+        // spinner already signals that a refresh is in progress or failed.
+        if let err = store.errorMessage, store.rfcs.isEmpty {
+            ContentUnavailableView {
+                Label("Could not load RFCs", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text(err)
+            } actions: {
+                Button("Try Again") {
+                    Task {
+                        if let client = appState.makeAPIClient() {
+                            store.configure(client: client, docsPath: appState.docsPath, cacheKey: "\(appState.repoOwner)/\(appState.repoName)")
+                            await store.refreshNow()
+                        }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+            }
         }
+        // "No RFCs" empty state is handled by RFCListView directly.
     }
 
     @ToolbarContentBuilder
@@ -329,7 +508,7 @@ struct iPadRootView: View {
         guard let client = appState.makeAPIClient() else { return }
         store.configure(client: client, docsPath: repo.docsPath)
         appState.selectedRFC = nil
-        Task { await store.load() }
+        store.reload()
     }
 
     /// A Menu that lists all repos and lets the user switch between them.
@@ -376,7 +555,7 @@ struct iPadRootView: View {
                     appState.selectedLineEnd = lineEnd
                 }, onMerged: {
                     appState.selectedRFC = nil
-                    Task { await store.load() }
+                    store.reload()
                 })
                 if showInlineThread, case .pullRequest(let pr) = rfc.source {
                     Divider()
@@ -422,17 +601,19 @@ private struct ConnectionStatusBar: View {
     }
 
     private var statusColor: Color {
+        if pairingBrowser.isPaired { return .green }
         if appState.serverBaseURL.isEmpty { return .red }
-        if !appState.localNetworkToken.isEmpty { return .green }
         return .orange
     }
 
     private var statusText: String {
-        if appState.serverBaseURL.isEmpty {
-            return pairingBrowser.discoveredMacs.isEmpty ? "Searching…" : "Mac found — not paired"
+        if pairingBrowser.isPaired {
+            return appState.serverBaseURL.isEmpty ? "Paired — reconnecting…" : "Connected"
         }
-        if appState.localNetworkToken.isEmpty { return "Connected — not paired" }
-        return "Connected"
+        if appState.serverBaseURL.isEmpty {
+            return pairingBrowser.discoveredMacs.isEmpty ? "Searching…" : "Mac found — tap gear to pair"
+        }
+        return "Connected — not paired"
     }
 }
 

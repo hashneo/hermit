@@ -36,6 +36,8 @@ struct SettingsView: View {
 
             TabView {
 #if os(macOS)
+                GeneralSettingsTab()
+                    .tabItem { Label("General", systemImage: "gearshape") }
                 AccountSettingsTab()
                     .tabItem { Label("Account", systemImage: "person.circle") }
                 RepositorySettingsTab()
@@ -68,6 +70,38 @@ struct SettingsView: View {
 #endif
     }
 }
+
+// MARK: - General tab
+
+#if os(macOS)
+private struct GeneralSettingsTab: View {
+    @AppStorage("hermit.menuBarStyle") private var menuBarStyle = MenuBarStyle.nativeMenu.rawValue
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("Menu bar style", selection: $menuBarStyle) {
+                    Text("Native menu").tag(MenuBarStyle.nativeMenu.rawValue)
+                    Text("Dashboard popup").tag(MenuBarStyle.popup.rawValue)
+                }
+                .pickerStyle(.radioGroup)
+                Group {
+                    if MenuBarStyle(rawValue: menuBarStyle) == .popup {
+                        Text("Opens a full review dashboard panel when you click the menu bar icon.")
+                    } else {
+                        Text("Shows RFCs as a standard macOS dropdown menu with per-repo submenus. Open Dashboard… is available in the menu to access the full review panel.")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } header: {
+                Text("Menu bar")
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+#endif
 
 // MARK: - Account tab
 
@@ -819,9 +853,14 @@ private struct RepositorySettingsTab: View {
             Table(repoStore.repositories, selection: $selection) {
                 TableColumn("Account") { repo in
                     let acct = accountStore.connections.first { $0.id == repo.accountID }
-                    HStack(spacing: 6) {
-                        Text(acct?.name ?? "—")
-                            .foregroundStyle(acct == nil ? .secondary : .primary)
+                    HStack(spacing: 4) {
+                        if acct == nil {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .help("No account is assigned to this repository. Use Edit… to assign one.")
+                        }
+                        Text(acct?.name ?? "No account")
+                            .foregroundStyle(acct == nil ? .orange : .primary)
                     }
                 }
                 .width(min: 120, ideal: 160)
@@ -840,7 +879,12 @@ private struct RepositorySettingsTab: View {
                 .width(min: 110, ideal: 140)
 
                 TableColumn("Actions") { repo in
+                    let isOrphaned = !accountStore.connections.contains { $0.id == repo.accountID }
                     Menu {
+                        if isOrphaned {
+                            Button("Assign Account…") { editTarget = repo }
+                            Divider()
+                        }
                         Button("Set Active") {
                             Task { await validateAndActivate(repo) }
                         }
@@ -851,6 +895,9 @@ private struct RepositorySettingsTab: View {
                     } label: {
                         if validating == repo.id {
                             ProgressView().controlSize(.small)
+                        } else if isOrphaned {
+                            Image(systemName: "exclamationmark.circle")
+                                .foregroundStyle(.orange)
                         } else {
                             Image(systemName: "ellipsis.circle")
                                 .foregroundStyle(.secondary)
@@ -1294,6 +1341,10 @@ private struct ServerSettingsTab: View {
             case .remote:
                 remoteSection
             }
+
+#if os(iOS)
+            iPadResetSection
+#endif
         }
         .formStyle(.grouped)
         .onChange(of: cacheReadTTLSeconds) { _, value in
@@ -1312,9 +1363,13 @@ private struct ServerSettingsTab: View {
         Picker("Connectivity", selection: $appState.serverMode) {
 #if os(macOS)
             Text("Embedded (this Mac)").tag(ServerMode.embeddedLocal)
-#endif
+            // Local Network and Remote are hidden on macOS for now — out of scope.
+            // Text("Local Network").tag(ServerMode.localNetwork)
+            // Text("Remote").tag(ServerMode.remote(url: appState.remoteURL))
+#else
             Text("Local Network").tag(ServerMode.localNetwork)
             Text("Remote").tag(ServerMode.remote(url: appState.remoteURL))
+#endif
         }
         .pickerStyle(.segmented)
         .onChange(of: appState.serverMode) { _, new in
@@ -1386,12 +1441,13 @@ private struct ServerSettingsTab: View {
     private var embeddedSection: some View {
         Section("Embedded Server") {
             if let port = EmbeddedServerManager.shared.port {
+                let portStr = String(port)
                 LabeledContent("Status") {
-                    Label("Running on port \(port)", systemImage: "checkmark.circle.fill")
+                    Label("Running on port \(portStr)", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                 }
                 LabeledContent("URL") {
-                    Text("http://127.0.0.1:\(port)")
+                    Text("http://127.0.0.1:\(portStr)")
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
@@ -1407,7 +1463,6 @@ private struct ServerSettingsTab: View {
                 }
             }
 
-            RepositoryLocationRow()
         }
 
         Section("Paired Devices") {
@@ -1429,6 +1484,62 @@ private struct ServerSettingsTab: View {
     private var remoteSection: some View {
         RemoteServerSection()
     }
+
+#if os(iOS)
+    // MARK: - iPad reset section
+
+    @State private var showResetConfirm = false
+
+    @ViewBuilder
+    private var iPadResetSection: some View {
+        Section {
+            Button("Reset Configuration", role: .destructive) {
+                showResetConfirm = true
+            }
+            .confirmationDialog(
+                "Reset all Hermit configuration?",
+                isPresented: $showResetConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Reset", role: .destructive) { resetiPadConfig() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This clears the server URL, pairing token, account and repository settings. You will need to re-pair with your Mac.")
+            }
+        } header: {
+            Text("Reset")
+        }
+    }
+
+    private func resetiPadConfig() {
+        // Clear all persisted config
+        ConfigStore.shared.deleteAll()
+        UserDefaults.standard.removeObject(forKey: "hermit.accounts")
+        UserDefaults.standard.removeObject(forKey: "hermit.repositories")
+        UserDefaults.standard.removeObject(forKey: "hermit.restore.rfcID")
+        UserDefaults.standard.removeObject(forKey: "hermit.restore.rfcPath")
+        KeychainHelper.shared.deleteAll()
+
+        // Reset live AppState
+        let appState = AppState.shared
+        appState.serverBaseURL     = ""
+        appState.localNetworkToken = ""
+        appState.serverMode        = .localNetwork
+        appState.isAuthenticated   = false
+        appState.pat               = ""
+
+        // Clear stores
+        for repo in RepositoryStore.shared.repositories {
+            RepositoryStore.shared.remove(repo)
+        }
+        for conn in AccountStore.shared.connections {
+            AccountStore.shared.remove(conn)
+        }
+
+        // Reset pairing state so the browser shows "Pair with Mac" again
+        NotificationCenter.default.post(name: .hermitResetPairing, object: nil)
+    }
+#endif
 }
 
 // MARK: - Local Network section
@@ -1635,50 +1746,62 @@ private struct RepositoryLocationRow: View {
 
 #if os(macOS)
 private struct PairedDevicesSection: View {
-    @StateObject private var store = PairedTokenStore.shared
-    @StateObject private var advertiser = PairingAdvertiser()
-    @State private var showAdvertising = false
+    @StateObject private var store      = PairedTokenStore.shared
+    @StateObject private var advertiser = PairingAdvertiser.shared
+    @State private var revokeTarget: String? = nil
 
     var body: some View {
-        if store.pairedDevices.isEmpty {
-            Text("No paired devices").foregroundStyle(.secondary)
-        } else {
-            ForEach(Array(store.pairedDevices.keys), id: \.self) { name in
-                HStack {
-                    Label(name, systemImage: "ipad")
-                    Spacer()
-                    Button("Revoke", role: .destructive) {
-                        store.revoke(peerName: name)
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(.red)
-                }
-            }
-        }
-
-        Button(showAdvertising ? "Stop Advertising" : "Pair New Device…") {
-            if showAdvertising {
-                advertiser.stop()
-                showAdvertising = false
-            } else {
-                advertiser.start()
-                showAdvertising = true
-            }
-        }
-
-        if showAdvertising {
+        Group {
+            // Pending pairing request
             if let invite = advertiser.pendingInvitation {
                 HStack {
                     Image(systemName: "ipad.badge.plus")
-                    Text("\(invite.peerName) wants to connect")
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(invite.peerName).fontWeight(.medium)
+                        Text("Wants to pair").font(.caption).foregroundStyle(.secondary)
+                    }
                     Spacer()
-                    Button("Accept") { invite.accept() }.buttonStyle(.borderedProminent)
                     Button("Decline", role: .destructive) { invite.decline() }
+                        .buttonStyle(.borderless)
+                    Button("Accept") { invite.accept() }
+                        .buttonStyle(.borderedProminent)
                 }
-                .padding(.vertical, 4)
-            } else if !advertiser.pairingStatus.isEmpty {
+                .padding(.vertical, 2)
+            }
+
+            // Already-paired devices
+            if store.pairedDevices.isEmpty && advertiser.pendingInvitation == nil {
+                Text("No paired devices").foregroundStyle(.secondary)
+            } else {
+                ForEach(Array(store.pairedDevices.keys.sorted()), id: \.self) { name in
+                    HStack {
+                        Label(name, systemImage: "ipad")
+                        Spacer()
+                        Button("Revoke", role: .destructive) { revokeTarget = name }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+
+            // Status line
+            if !advertiser.pairingStatus.isEmpty && advertiser.pendingInvitation == nil {
                 Text(advertiser.pairingStatus).font(.caption).foregroundStyle(.secondary)
             }
+        }
+        .confirmationDialog(
+            "Revoke \"\(revokeTarget ?? "")\"?",
+            isPresented: Binding(get: { revokeTarget != nil }, set: { if !$0 { revokeTarget = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Revoke", role: .destructive) {
+                if let name = revokeTarget { store.revoke(peerName: name) }
+                revokeTarget = nil
+            }
+            Button("Cancel", role: .cancel) { revokeTarget = nil }
+        } message: {
+            Text("The paired iPad will no longer be able to connect and will need to pair again.")
         }
     }
 }

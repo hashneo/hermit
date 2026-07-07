@@ -36,6 +36,7 @@
 		B001003A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001003B /* SettingsView.swift */; };
 		B001003C /* macOSViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001003D /* macOSViews.swift */; };
 		B001003E /* iPadRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001003F /* iPadRootView.swift */; };
+		B001003E2 /* iPadPairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001003E3 /* iPadPairingView.swift */; };
 		B0010040 /* RFCDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010041 /* RFCDetailView.swift */; };
 		B0010042 /* RFCInterviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010043 /* RFCInterviewView.swift */; };
 		B0010044 /* RFCListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010045 /* RFCListView.swift */; };
@@ -115,6 +116,7 @@
 		B001003B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		B001003D /* macOSViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = macOSViews.swift; sourceTree = "<group>"; };
 		B001003F /* iPadRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadRootView.swift; sourceTree = "<group>"; };
+		B001003E3 /* iPadPairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadPairingView.swift; sourceTree = "<group>"; };
 		B0010041 /* RFCDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCDetailView.swift; sourceTree = "<group>"; };
 		B0010043 /* RFCInterviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCInterviewView.swift; sourceTree = "<group>"; };
 		B0010045 /* RFCListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCListView.swift; sourceTree = "<group>"; };
@@ -292,6 +294,7 @@
 				B001003B /* SettingsView.swift */,
 				B001003D /* macOSViews.swift */,
 				B001003F /* iPadRootView.swift */,
+				B001003E3 /* iPadPairingView.swift */,
 				B0010041 /* RFCDetailView.swift */,
 				B00100C1 /* RFCToolbar.swift */,
 				B0010043 /* RFCInterviewView.swift */,
@@ -449,6 +452,7 @@
 				B001003A /* SettingsView.swift in Sources */,
 				B001003C /* macOSViews.swift in Sources */,
 				B001003E /* iPadRootView.swift in Sources */,
+				B001003E2 /* iPadPairingView.swift in Sources */,
 				B0010040 /* RFCDetailView.swift in Sources */,
 				B00100C0 /* RFCToolbar.swift in Sources */,
 				B0010042 /* RFCInterviewView.swift in Sources */,
