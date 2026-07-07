@@ -168,8 +168,8 @@ def main():
                 "name": account.get("name") or account_key,
                 "endpoint": endpoint,
             }
-            if account_token:
-                next_account["token"] = account_token
+            # Tokens are stored exclusively in the Keychain by the app.
+            # Never write them into the plist.
             accounts.append(next_account)
 
         for repo in repo_cfg.get("repositories", []):
@@ -254,11 +254,13 @@ def main():
             for a in existing_accounts:
                 if a.get("id") == DEV_ACCOUNT_ID:
                     a = dict(a)
-                    if token:
-                        a["token"] = token
+                    # Strip any plaintext token — tokens live in Keychain only.
+                    a.pop("token", None)
                     dev_found = True
                     merged_accounts.append(a)
                 else:
+                    a = dict(a)
+                    a.pop("token", None)
                     merged_accounts.append(a)
             if not dev_found:
                 dev_account = {
@@ -266,8 +268,7 @@ def main():
                     "name":     "Default (Gitea)",
                     "endpoint": account_endpoint,
                 }
-                if token:
-                    dev_account["token"] = token
+                # No token written — app reads it from Keychain.
                 merged_accounts.insert(0, dev_account)
             accounts = merged_accounts
 
@@ -276,13 +277,20 @@ def main():
         # Gitea sentinel repo (DEV_REPO_ID / DEV_ACCOUNT_ID) because there
         # is no matching account, which leaves the app with an orphaned repo.
         existing_repositories = decode_existing_json("hermit.repositories")
-        if existing_repositories:
+        if no_gitea:
+            # Filter out dev-sentinel repos that reference the Gitea dev account
+            # (DEV_ACCOUNT_ID) — those have no matching account when --no-gitea
+            # is active and would appear as orphaned in the UI.  Preserve any
+            # repos the user added themselves (non-DEV_ACCOUNT_ID).
+            non_sentinel = [r for r in existing_repositories if r.get("accountID") != DEV_ACCOUNT_ID]
+            repositories = non_sentinel
+            if len(non_sentinel) < len(existing_repositories):
+                removed = len(existing_repositories) - len(non_sentinel)
+                print(f"  --no-gitea: removed {removed} dev Gitea sentinel repo(s) (no matching account)")
+            elif not non_sentinel:
+                print("  --no-gitea: leaving hermit.repositories empty (no Gitea sentinel repo)")
+        elif existing_repositories:
             repositories = existing_repositories
-        elif no_gitea:
-            # No existing repos and Gitea is disabled: seed nothing so the
-            # app prompts the user to connect their own account/repo.
-            repositories = []
-            print("  --no-gitea: leaving hermit.repositories empty (no Gitea sentinel repo)")
         else:
             repositories = [
                 {
@@ -313,6 +321,13 @@ def main():
         "hermit.rfcLabel":      "",
         "hermit.serverMode":    '{"type":"embeddedLocal"}',
     }
+    if not repositories:
+        # No repos seeded: blank out the legacy migration keys so that
+        # RepositoryStore.init()'s migration guard (!owner.isEmpty, !name.isEmpty)
+        # does not fire and recreate an orphaned sentinel repo from stale values.
+        non_secret["hermit.repoOwner"] = ""
+        non_secret["hermit.repoName"]  = ""
+        non_secret["hermit.docsPath"]  = ""
     if not no_gitea:
         # Only write the Gitea API base URL when Gitea is enabled; writing it
         # when disabled causes GiteaAutoConfig to treat the app as Gitea-backed.

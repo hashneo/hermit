@@ -1,34 +1,55 @@
 import Foundation
 import Security
 
-/// Stores only secrets in the system Keychain:
-///   - PAT (Gitea personal access token)
+/// Stores secrets in the system Keychain:
+///   - PAT (GitHub / Gitea personal access token) — per account UUID
 ///   - OpenAI API key
 ///   - Per-peer pairing tokens (service "hermit.paired")
 ///
-/// All non-secret config (URLs, owner, repo, etc.) lives in UserDefaults
-/// via ConfigStore so it survives rebuilds without Keychain prompts.
+/// All items are scoped to the `keychain-access-groups` declared in the app
+/// entitlements (`$(AppIdentifierPrefix)$(HERMIT_BUNDLE_ID)`, e.g.
+/// `KCM5F3ZYT3.me.steven.hermit`).  Because the group is keyed to the Apple
+/// Developer Team ID rather than the binary's code signature, items survive:
+///   • Every `make dev` rebuild
+///   • Debug → Release builds
+///   • Certificate rotation / renewal
+///   • Any app update
+///
+/// The access group is read from Info.plist at runtime (key: `KeychainAccessGroup`)
+/// so no Team ID is hardcoded in source.
+///
+/// Non-secret config (URLs, repo owner/name, etc.) lives in UserDefaults via
+/// ConfigStore so it remains readable without Keychain queries.
 final class KeychainHelper {
     static let shared = KeychainHelper()
+
+    /// The Keychain access group for all Hermit items.
+    /// Set in Info.plist as `$(DEVELOPMENT_TEAM).$(PRODUCT_BUNDLE_IDENTIFIER)`.
+    /// Falls back to an empty string on iOS simulator / unit tests where the
+    /// Info.plist key may be absent — queries without a group still work there.
+    static let accessGroup: String =
+        Bundle.main.infoDictionary?["KeychainAccessGroup"] as? String ?? ""
+
     private init() {
-        migrateAccessibility()
+        migrateToAccessGroup()
     }
 
-    private let service = "Hermit"
+    private let service       = "Hermit"
+    private let pairedService = "hermit.paired"
 
     // MARK: - Generic low-level helpers
 
     private func readString(account: String) -> String? {
-        // NOTE: kSecAttrAccessible must NOT be included in read queries — it
-        // filters by accessibility class and silently misses items written
-        // with a different value.
-        let query: [CFString: Any] = [
+        var query: [CFString: Any] = [
             kSecClass:       kSecClassGenericPassword,
             kSecAttrService: service as CFString,
             kSecAttrAccount: account as CFString,
             kSecReturnData:  true,
             kSecMatchLimit:  kSecMatchLimitOne,
         ]
+        if !Self.accessGroup.isEmpty {
+            query[kSecAttrAccessGroup] = Self.accessGroup as CFString
+        }
         var result: AnyObject?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
               let data = result as? Data else { return nil }
@@ -36,12 +57,15 @@ final class KeychainHelper {
     }
 
     private func writeString(_ value: String?, account: String) {
-        let query: [CFString: Any] = [
+        var query: [CFString: Any] = [
             kSecClass:          kSecClassGenericPassword,
             kSecAttrService:    service as CFString,
             kSecAttrAccount:    account as CFString,
             kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlock,
         ]
+        if !Self.accessGroup.isEmpty {
+            query[kSecAttrAccessGroup] = Self.accessGroup as CFString
+        }
         guard let value, let data = value.data(using: .utf8) else {
             SecItemDelete(query as CFDictionary)
             return
@@ -51,45 +75,37 @@ final class KeychainHelper {
             kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlock,
         ]
         if SecItemUpdate(query as CFDictionary, attrs as CFDictionary) == errSecItemNotFound {
-            // Create the item with an open ACL (nil trusted-app list) so that
-            // any rebuild of the app binary — with a new ad-hoc code signature
-            // — can read it without triggering the login-keychain password
-            // prompt.  A nil trusted list means "any application may access
-            // this item"; the item is still confined to the login keychain and
-            // only accessible after first unlock.
             var add = query
             add[kSecValueData] = data
-#if os(macOS) && DEBUG
-            // In DEBUG builds the app is ad-hoc signed ("Sign to Run Locally"),
-            // which changes the binary signature on every rebuild.  An open ACL
-            // (nil trusted-app list) prevents the login-keychain password prompt
-            // that would otherwise appear when the new binary tries to read an
-            // item created by the old one.
-            //
-            // Release builds use a stable Developer ID signature, so the default
-            // per-app ACL is correct and secure — no override needed.
-            var secAccess: SecAccess?
-            if SecAccessCreate(service as CFString, nil as CFArray?, &secAccess) == errSecSuccess,
-               let access = secAccess {
-                add[kSecAttrAccess] = access
-            }
-#endif
             SecItemAdd(add as CFDictionary, nil)
         }
     }
 
-    // MARK: - Accessibility migration
+    // MARK: - Migration: move old items (no access group) into the declared group
 
-    /// Re-writes all Hermit Keychain items to kSecAttrAccessibleAfterFirstUnlock.
-    /// Items written by older builds used the default (kSecAttrAccessibleWhenUnlocked)
-    /// which triggers an unlock prompt when the Settings pane reads them.
-    private func migrateAccessibility() {
+    /// On the first launch after the keychain-access-groups entitlement is added,
+    /// existing items written by old builds have no explicit access group.  This
+    /// migration reads them via a group-less query (which still matches items in
+    /// the app's legacy sandbox partition), then re-writes them into the new
+    /// named group so all future builds can read them regardless of code signature.
+    ///
+    /// Items that are unreadable (locked to an old per-binary ACL from a different
+    /// binary) are silently skipped — the user re-enters them once, then they are
+    /// permanently fixed on the next write.
+    private func migrateToAccessGroup() {
+        guard !Self.accessGroup.isEmpty else { return }
+        migrateService(service)
+        migrateService(pairedService)
+    }
+
+    private func migrateService(_ svc: String) {
+        // Query WITHOUT access group to catch items in the legacy sandbox partition.
         let query: [CFString: Any] = [
-            kSecClass:             kSecClassGenericPassword,
-            kSecAttrService:       service as CFString,
-            kSecReturnAttributes:  true,
-            kSecReturnData:        true,
-            kSecMatchLimit:        kSecMatchLimitAll,
+            kSecClass:            kSecClassGenericPassword,
+            kSecAttrService:      svc as CFString,
+            kSecReturnAttributes: true,
+            kSecReturnData:       true,
+            kSecMatchLimit:       kSecMatchLimitAll,
         ]
         var result: AnyObject?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
@@ -97,16 +113,24 @@ final class KeychainHelper {
 
         for item in items {
             guard let account = item[kSecAttrAccount] as? String,
-                  let data    = item[kSecValueData]   as? Data else { continue }
-            // Delete the old item (which has a per-binary ACL) and re-create
-            // it with writeString, which sets a nil-trusted-list ACL.
+                  let data    = item[kSecValueData]   as? Data,
+                  let value   = String(data: data, encoding: .utf8) else { continue }
+
+            // Check whether the item is already in the correct access group.
+            let existingGroup = item[kSecAttrAccessGroup] as? String ?? ""
+            if existingGroup == Self.accessGroup { continue }
+
+            // Delete the old item and re-create it in the named access group.
             let find: [CFString: Any] = [
                 kSecClass:       kSecClassGenericPassword,
-                kSecAttrService: service as CFString,
+                kSecAttrService: svc as CFString,
                 kSecAttrAccount: account as CFString,
             ]
             SecItemDelete(find as CFDictionary)
-            if let value = String(data: data, encoding: .utf8) {
+
+            if svc == pairedService {
+                savePairedToken(peerName: account, token: value)
+            } else {
                 writeString(value, account: account)
             }
         }
@@ -139,16 +163,46 @@ final class KeychainHelper {
         writeString(nil, account: key)
     }
 
-    // MARK: - Paired device token store
+    // MARK: - Local network token (iOS — survives app container wipes)
+
+    /// The pairing token used by the iPad to authenticate with the Mac server.
+    /// Stored in Keychain (not UserDefaults) so it persists across `make dev`
+    /// installs which recreate the iOS app container and wipe UserDefaults.
+    var localNetworkToken: String? {
+        get { readString(account: "hermit.localNetworkToken") }
+        set { writeString(newValue, account: "hermit.localNetworkToken") }
+    }
+
+    // MARK: - Paired device token store (macOS)
 
     func loadPairedTokens() -> [String: String] {
-        let query: [CFString: Any] = [
+        var query: [CFString: Any] = [
             kSecClass:            kSecClassGenericPassword,
-            kSecAttrService:      "hermit.paired" as CFString,
+            kSecAttrService:      pairedService as CFString,
             kSecReturnAttributes: true,
             kSecReturnData:       true,
             kSecMatchLimit:       kSecMatchLimitAll,
         ]
+        if !Self.accessGroup.isEmpty {
+            query[kSecAttrAccessGroup] = Self.accessGroup as CFString
+        }
+        return keychainMap(for: query)
+    }
+
+    /// Queries WITHOUT access group restriction — used once during migration to
+    /// find legacy paired tokens that were stored before the access group was added.
+    func loadLegacyPairedTokens() -> [String: String] {
+        let query: [CFString: Any] = [
+            kSecClass:            kSecClassGenericPassword,
+            kSecAttrService:      pairedService as CFString,
+            kSecReturnAttributes: true,
+            kSecReturnData:       true,
+            kSecMatchLimit:       kSecMatchLimitAll,
+        ]
+        return keychainMap(for: query)
+    }
+
+    private func keychainMap(for query: [CFString: Any]) -> [String: String] {
         var result: AnyObject?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
               let items = result as? [[CFString: Any]] else { return [:] }
@@ -165,26 +219,44 @@ final class KeychainHelper {
 
     func savePairedToken(peerName: String, token: String) {
         guard let data = token.data(using: .utf8) else { return }
-        let query: [CFString: Any] = [
+        var query: [CFString: Any] = [
             kSecClass:          kSecClassGenericPassword,
-            kSecAttrService:    "hermit.paired" as CFString,
+            kSecAttrService:    pairedService as CFString,
             kSecAttrAccount:    peerName as CFString,
             kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlock,
         ]
-        let attrs: [CFString: Any] = [kSecValueData: data]
-        if SecItemUpdate(query as CFDictionary, attrs as CFDictionary) == errSecItemNotFound {
-            var add = query
-            add[kSecValueData] = data
-            SecItemAdd(add as CFDictionary, nil)
+        if !Self.accessGroup.isEmpty {
+            query[kSecAttrAccessGroup] = Self.accessGroup as CFString
         }
+        let attrs: [CFString: Any] = [kSecValueData: data]
+        if SecItemUpdate(query as CFDictionary, attrs as CFDictionary) == errSecSuccess {
+            return
+        }
+        var add = query
+        add[kSecValueData] = data
+        SecItemAdd(add as CFDictionary, nil)
     }
 
     func deletePairedToken(peerName: String) {
-        let query: [CFString: Any] = [
+        var query: [CFString: Any] = [
             kSecClass:       kSecClassGenericPassword,
-            kSecAttrService: "hermit.paired" as CFString,
+            kSecAttrService: pairedService as CFString,
             kSecAttrAccount: peerName as CFString,
         ]
+        if !Self.accessGroup.isEmpty {
+            query[kSecAttrAccessGroup] = Self.accessGroup as CFString
+        }
+        SecItemDelete(query as CFDictionary)
+    }
+
+    func deleteAllPairedTokens() {
+        var query: [CFString: Any] = [
+            kSecClass:       kSecClassGenericPassword,
+            kSecAttrService: pairedService as CFString,
+        ]
+        if !Self.accessGroup.isEmpty {
+            query[kSecAttrAccessGroup] = Self.accessGroup as CFString
+        }
         SecItemDelete(query as CFDictionary)
     }
 }
