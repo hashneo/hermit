@@ -34,26 +34,75 @@ import SystemConfiguration
 private let pairingServiceType = "hermit-pair"
 
 // MARK: - Shared token store (Mac side — Go server bridge)
+//
+// Paired device tokens are LAN session tokens — short-lived, rotatable, and
+// only useful on the local network.  They are stored in UserDefaults (the plist)
+// rather than the Keychain so they are:
+//   • Transparent: visible in the plist alongside other config
+//   • Resilient:   survive any code-signing change or Keychain ACL migration
+//   • Clearable:   correctly wiped by `make wipe-config` (defaults delete)
+//
+// Key: "hermit.pairedDevices"  Value: JSON { "peerName": "hexToken", … }
 
 @MainActor
 final class PairedTokenStore: ObservableObject {
     static let shared = PairedTokenStore()
+    private static let defaultsKey = "hermit.pairedDevices"
     private init() {}
 
     @Published private(set) var pairedDevices: [String: String] = [:]
 
     func load() {
-        pairedDevices = KeychainHelper.shared.loadPairedTokens()
+        // Load from UserDefaults, migrating any legacy Keychain entries on first run.
+        var map = Self.loadFromDefaults()
+        // Use the legacy (no-access-group) query to find pre-migration Keychain items.
+        let legacy = KeychainHelper.shared.loadLegacyPairedTokens()
+        if !legacy.isEmpty {
+            // Migrate Keychain → UserDefaults and clear the Keychain entries
+            for (name, token) in legacy where map[name] == nil {
+                map[name] = token
+            }
+            Self.saveToDefaults(map)
+            KeychainHelper.shared.deleteAllPairedTokens()
+            NSLog("[PairedTokenStore] migrated %d paired token(s) from Keychain → UserDefaults", legacy.count)
+        }
+        pairedDevices = map
     }
 
     func add(peerName: String, token: String) {
         pairedDevices[peerName] = token
-        KeychainHelper.shared.savePairedToken(peerName: peerName, token: token)
+        Self.saveToDefaults(pairedDevices)
+#if os(macOS)
+        // Register with the running Go server so LAN requests are accepted immediately.
+        EmbeddedServerManager.registerPairedToken(token)
+#endif
     }
 
     func revoke(peerName: String) {
+        if let token = pairedDevices[peerName] {
+#if os(macOS)
+            // Remove from the running Go server so the iPad gets 401 immediately.
+            EmbeddedServerManager.revokePairedToken(token)
+#endif
+        }
         pairedDevices.removeValue(forKey: peerName)
-        KeychainHelper.shared.deletePairedToken(peerName: peerName)
+        Self.saveToDefaults(pairedDevices)
+    }
+
+    // MARK: - Persistence helpers
+
+    private static func loadFromDefaults() -> [String: String] {
+        guard let data = UserDefaults.standard.data(forKey: defaultsKey) ??
+              UserDefaults.standard.string(forKey: defaultsKey)?.data(using: .utf8),
+              let map = try? JSONDecoder().decode([String: String].self, from: data)
+        else { return [:] }
+        return map
+    }
+
+    private static func saveToDefaults(_ map: [String: String]) {
+        if let data = try? JSONEncoder().encode(map) {
+            UserDefaults.standard.set(data, forKey: defaultsKey)
+        }
     }
 }
 
@@ -226,11 +275,15 @@ final class PairingBrowser: NSObject, ObservableObject {
 
     @Published var discoveredMacs: [MCPeerID] = []
     @Published var pairingStatus: String = ""
-    @Published var isPaired: Bool = false
+    /// True when a valid pairing token is on hand — either freshly received
+    /// or restored from UserDefaults after a relaunch / Mac rebuild.
+    @Published var isPaired: Bool = !(ConfigStore.shared.localNetworkToken ?? "").isEmpty
 
     private var browser: MCNearbyServiceBrowser?
     private var session: MCSession?
     private let myPeerID = MCPeerID(displayName: UIDevice.current.name)
+    /// Last repos JSON seen in discoveryInfo — applied immediately after pairing.
+    private var lastReposJSON: String? = nil
 
     func start() {
         guard browser == nil else { return }
@@ -238,6 +291,14 @@ final class PairingBrowser: NSObject, ObservableObject {
         b.delegate = self
         b.startBrowsingForPeers()
         browser = b
+
+        // Listen for config reset so isPaired is cleared immediately.
+        NotificationCenter.default.addObserver(
+            forName: .hermitResetPairing, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.isPaired = false
+            self?.lastReposJSON = nil
+        }
     }
 
     func stop() {
@@ -255,6 +316,23 @@ final class PairingBrowser: NSObject, ObservableObject {
         session = sess
         browser?.invitePeer(peer, to: sess, withContext: nil, timeout: 30)
         pairingStatus = "Waiting for \(peer.displayName) to accept…"
+    }
+
+    /// Applies cached repo list from the last mDNS discovery.
+    /// Called after a successful token exchange so repos populate without
+    /// needing to wait for the next foundPeer cycle.
+    private func applyLastReposIfPaired() {
+        guard isPaired, let json = lastReposJSON,
+              let data = json.data(using: .utf8) else { return }
+        struct RepoEntry: Decodable {
+            let o: String; let n: String; let d: String; let l: String
+        }
+        if let entries = try? JSONDecoder().decode([RepoEntry].self, from: data), !entries.isEmpty {
+            RepositoryStore.shared.replaceAll(fromMDNS: entries.map {
+                Repository(accountID: UUID(), owner: $0.o, name: $0.n,
+                           docsPath: $0.d, rfcLabel: $0.l)
+            })
+        }
     }
 }
 
@@ -291,22 +369,22 @@ extension PairingBrowser: MCNearbyServiceBrowserDelegate {
             ConfigStore.shared.docsPath      = docsPath
             ConfigStore.shared.rfcLabel      = rfcLabel
 
-            // Populate RepositoryStore from the full repo list broadcast by the Mac.
-            // This drives the repo switcher in the iPad's left pane.
-            if let reposJSON = info?["repos"],
-               let data = reposJSON.data(using: .utf8) {
-                struct RepoEntry: Decodable {
-                    let o: String   // owner
-                    let n: String   // name
-                    let d: String   // docsPath
-                    let l: String   // rfcLabel
-                }
-                if let entries = try? JSONDecoder().decode([RepoEntry].self, from: data), !entries.isEmpty {
-                    RepositoryStore.shared.replaceAll(fromMDNS: entries.map {
-                        Repository(accountID: UUID(), owner: $0.o, name: $0.n,
-                                   docsPath: $0.d, rfcLabel: $0.l)
-                    })
-                }
+            // If we already have a pairing token, we're still paired — no need
+            // to go through the MCSession handshake again just because the Mac
+            // rebuilt or changed port.  Restore isPaired so the UI stays correct.
+            if !(ConfigStore.shared.localNetworkToken ?? "").isEmpty {
+                self.isPaired = true
+            }
+
+            // Cache the repo list from discoveryInfo so it can be applied
+            // immediately after pairing completes (see applyLastReposIfPaired).
+            self.lastReposJSON = info?["repos"]
+
+            // Only repopulate the RepositoryStore if already paired.
+            // After a config reset isPaired is false, so repos stay empty
+            // until the user pairs again — preventing stale data on restart.
+            if self.isPaired {
+                self.applyLastReposIfPaired()
             }
         }
     }
@@ -344,6 +422,9 @@ extension PairingBrowser: MCSessionDelegate {
             self.isPaired = true
             self.pairingStatus = "Paired with \(peerID.displayName)"
             session.disconnect()
+            // Immediately populate repos from the last seen discoveryInfo so
+            // the repo switcher is ready without waiting for the next foundPeer.
+            self.applyLastReposIfPaired()
         }
     }
 
