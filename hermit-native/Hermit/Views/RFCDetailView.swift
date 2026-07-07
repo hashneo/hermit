@@ -59,6 +59,9 @@ struct RFCDetailView: View {
     @State private var pendingReviewCount: Int = 0
     @State private var currentUserLogin: String = ""
     @State private var prAuthorLogin: String = ""
+#if os(iOS)
+    @State private var showSettings = false
+#endif
 
     private struct ReviewSheetContext: Identifiable {
         let id = UUID()
@@ -101,6 +104,15 @@ struct RFCDetailView: View {
         }
         .navigationTitle(currentRFC.title)
         .toolbar {
+#if os(iOS)
+            // Always-accessible Settings entry point on iPad — guaranteed visible
+            // even when the sidebar is collapsed or in reading mode.
+            ToolbarItem(placement: .topBarLeading) {
+                Button { showSettings = true } label: {
+                    Image(systemName: "gear")
+                }
+            }
+#endif
             ToolbarItem(placement: .automatic) {
                 HStack(spacing: 4) {
                     Button { scrollToPrev() } label: { Image(systemName: "chevron.up") }
@@ -227,6 +239,21 @@ struct RFCDetailView: View {
                 markdownSource: markdown
             )
         }
+#if os(iOS)
+        .sheet(isPresented: $showSettings) {
+            NavigationStack {
+                SettingsView()
+                    .environmentObject(appState)
+                    .navigationTitle("Settings")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showSettings = false }
+                        }
+                    }
+            }
+        }
+#endif
         .sheet(item: $reviewSheetContext) { ctx in
             PRReviewSheet(
                 rfcTitle: currentRFC.title,

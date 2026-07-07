@@ -15,6 +15,7 @@ struct MenuBarContentView: View {
     private let allowsDetach: Bool
     private let onOpenReview: () -> Void
     private let onDetach: () -> Void
+    private let onClose: () -> Void
     @ObservedObject private var serverMgr = EmbeddedServerManager.shared
     @ObservedObject private var repoStore = RepositoryStore.shared
     @ObservedObject private var accountStore = AccountStore.shared
@@ -32,14 +33,18 @@ struct MenuBarContentView: View {
         anchorScreenX: CGFloat? = nil,
         managesWindowPresentation: Bool = true,
         allowsDetach: Bool = true,
+        openToSettings: Bool = false,
         onOpenReview: @escaping () -> Void = {},
-        onDetach: @escaping () -> Void = {}
+        onDetach: @escaping () -> Void = {},
+        onClose: @escaping () -> Void = {}
     ) {
         self.initialAnchorScreenX = anchorScreenX
         self.managesWindowPresentation = managesWindowPresentation
         self.allowsDetach = allowsDetach
         self.onOpenReview = onOpenReview
         self.onDetach = onDetach
+        self.onClose = onClose
+        _selectedView = State(initialValue: openToSettings ? .settings : .dashboard)
         _menuAnchor = State(initialValue: MenuBarBubbleAnchor.capture(anchorScreenX))
         _pointerX = State(initialValue: managesWindowPresentation ? MenuBarBubbleWindowController.fallbackPointerX : 280)
     }
@@ -376,8 +381,8 @@ struct MenuBarContentView: View {
         HStack {
             Spacer()
 
-            Button("Quit Hermit") {
-                NSApplication.shared.terminate(nil)
+            Button("Close Dashboard") {
+                onClose()
             }
             .keyboardShortcut("q")
         }
@@ -1269,7 +1274,7 @@ private struct PendingPRGroup: Identifiable {
             prState: "open", prMerged: false, body: "",
             headSHA: "", headRef: "", htmlURL: "", state: "",
             draft: false, mergeable: nil, mergeableState: nil,
-            documentType: "rfc", documentPath: "", catalogID: "",
+            documentType: "rfc", documentPath: "", lifecycleStatus: nil, catalogID: "",
             labels: [], changedFiles: 0,
             additions: 0, deletions: 0,
             issueCommentCount: 0, reviewCommentCount: 0
@@ -2709,7 +2714,7 @@ private struct PRSummaryRow: View {
             prState: "open", prMerged: false, body: "",
             headSHA: "", headRef: "", htmlURL: "", state: "",
             draft: false, mergeable: nil, mergeableState: nil,
-            documentType: "rfc", documentPath: "", catalogID: "",
+            documentType: "rfc", documentPath: "", lifecycleStatus: nil, catalogID: "",
             labels: [], changedFiles: 0,
             additions: 0, deletions: 0,
             issueCommentCount: 0, reviewCommentCount: 0
@@ -3700,9 +3705,13 @@ private final class MenuBarDashboardStore: ObservableObject {
                     source: .mainBranch, lifecycleStatus: $0.lifecycleStatus,
                     htmlURL: $0.htmlURL)
             }.sorted { $0.title < $1.title }
-            let prRFCs = prs.map {
-                RFC(id: $0.catalogID, title: $0.title, path: $0.documentPath, sha: $0.headSHA,
-                    source: .pullRequest($0), lifecycleStatus: nil,
+            // One entry per PR: filter to the primary RFC document using the
+            // same deduplication logic as the native menu (documentType == "rfc",
+            // rfc-NNN path, non-terminal lifecycle status, highest RFC number wins).
+            let prRFCs = primaryPRDocuments(from: prs).map {
+                RFC(id: $0.catalogID, title: $0.prTitle.isEmpty ? $0.title : $0.prTitle,
+                    path: $0.documentPath, sha: $0.headSHA,
+                    source: .pullRequest($0), lifecycleStatus: $0.lifecycleStatus,
                     htmlURL: $0.htmlURL)
             }.sorted { lhs, rhs in
                 let lhsNumber = if case .pullRequest(let pr) = lhs.source { pr.number } else { 0 }
@@ -3995,6 +4004,12 @@ final class RepoRFCCache {
     }
 
     fileprivate func sections(for id: UUID) -> RepoRFCLoader.RFCSections? { cache[id] }
+    /// Internal accessor for the native AppKit menu (HermitRepoSubMenu in HermitApp.swift).
+    /// Returns mainBranch and pullRequests as a plain tuple to avoid exposing the private RepoRFCLoader type.
+    func nativeSections(for id: UUID) -> (mainBranch: [RFC], pullRequests: [RFC])? {
+        guard let s = cache[id] else { return nil }
+        return (s.mainBranch, s.pullRequests)
+    }
     fileprivate func store(_ s: RepoRFCLoader.RFCSections, for id: UUID) {
         cache[id] = s
         persist()
@@ -4156,57 +4171,26 @@ final class RepoRFCCache {
         let deletions: Int
         let issueCommentCount: Int
         let reviewCommentCount: Int
+        let lifecycleStatus: String?
 
         enum CodingKeys: String, CodingKey {
-            case id
-            case number
-            case title
-            case prTitle
-            case prState
-            case prMerged
-            case body
-            case headSHA
-            case headRef
-            case htmlURL
-            case state
-            case draft
-            case mergeable
-            case mergeableState
-            case documentType
-            case documentPath
-            case catalogID
-            case labels
-            case changedFiles
-            case additions
-            case deletions
-            case issueCommentCount
-            case reviewCommentCount
+            case id, number, title, prTitle, prState, prMerged, body
+            case headSHA, headRef, htmlURL, state, draft, mergeable, mergeableState
+            case documentType, documentPath, catalogID, labels
+            case changedFiles, additions, deletions, issueCommentCount, reviewCommentCount
+            case lifecycleStatus
         }
 
         init(_ pr: RFCPullRequest) {
-            id = pr.id
-            number = pr.number
-            title = pr.title
-            prTitle = pr.prTitle
-            prState = pr.prState
-            prMerged = pr.prMerged
-            body = pr.body
-            headSHA = pr.headSHA
-            headRef = pr.headRef
-            htmlURL = pr.htmlURL
-            state = pr.state
-            draft = pr.draft
-            mergeable = pr.mergeable
-            mergeableState = pr.mergeableState
-            documentType = pr.documentType
-            documentPath = pr.documentPath
-            catalogID = pr.catalogID
-            labels = pr.labels
-            changedFiles = pr.changedFiles
-            additions = pr.additions
-            deletions = pr.deletions
-            issueCommentCount = pr.issueCommentCount
-            reviewCommentCount = pr.reviewCommentCount
+            id = pr.id; number = pr.number; title = pr.title; prTitle = pr.prTitle
+            prState = pr.prState; prMerged = pr.prMerged; body = pr.body
+            headSHA = pr.headSHA; headRef = pr.headRef; htmlURL = pr.htmlURL
+            state = pr.state; draft = pr.draft; mergeable = pr.mergeable
+            mergeableState = pr.mergeableState; documentType = pr.documentType
+            documentPath = pr.documentPath; catalogID = pr.catalogID; labels = pr.labels
+            changedFiles = pr.changedFiles; additions = pr.additions; deletions = pr.deletions
+            issueCommentCount = pr.issueCommentCount; reviewCommentCount = pr.reviewCommentCount
+            lifecycleStatus = pr.lifecycleStatus
         }
 
         init(from decoder: Decoder) throws {
@@ -4234,33 +4218,20 @@ final class RepoRFCCache {
             deletions = try container.decode(Int.self, forKey: .deletions)
             issueCommentCount = try container.decodeIfPresent(Int.self, forKey: .issueCommentCount) ?? 0
             reviewCommentCount = try container.decodeIfPresent(Int.self, forKey: .reviewCommentCount) ?? 0
+            lifecycleStatus = try container.decodeIfPresent(String.self, forKey: .lifecycleStatus)
         }
 
         var pullRequest: RFCPullRequest {
             RFCPullRequest(
-                id: id,
-                number: number,
-                title: title,
-                prTitle: prTitle,
-                prState: prState,
-                prMerged: prMerged,
-                body: body,
-                headSHA: headSHA,
-                headRef: headRef,
-                htmlURL: htmlURL,
-                state: state,
-                draft: draft,
-                mergeable: mergeable,
-                mergeableState: mergeableState,
-                documentType: documentType,
-                documentPath: documentPath,
-                catalogID: catalogID,
-                labels: labels,
-                changedFiles: changedFiles,
-                additions: additions,
-                deletions: deletions,
-                issueCommentCount: issueCommentCount,
-                reviewCommentCount: reviewCommentCount
+                id: id, number: number, title: title, prTitle: prTitle,
+                prState: prState, prMerged: prMerged, body: body,
+                headSHA: headSHA, headRef: headRef, htmlURL: htmlURL, state: state,
+                draft: draft, mergeable: mergeable, mergeableState: mergeableState,
+                documentType: documentType, documentPath: documentPath,
+                lifecycleStatus: lifecycleStatus,
+                catalogID: catalogID, labels: labels, changedFiles: changedFiles,
+                additions: additions, deletions: deletions,
+                issueCommentCount: issueCommentCount, reviewCommentCount: reviewCommentCount
             )
         }
     }
@@ -4270,8 +4241,9 @@ final class RepoRFCCache {
 private enum RepoRFCLoader {
     struct RFCSections {
         let mainBranch: [RFC]
-        let pullRequests: [RFC]
-        let summary: RepositoryRFCSummary
-        let loadedAt: Date
-    }
-}
+         let pullRequests: [RFC]
+         let summary: RepositoryRFCSummary
+         let loadedAt: Date
+     }
+ }
+

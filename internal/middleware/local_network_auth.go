@@ -2,18 +2,18 @@
 package middleware
 
 import (
+	"net"
 	"net/http"
 	"strings"
 	"sync"
 )
 
 // LocalNetworkAuth is a middleware that validates Bearer tokens for local-network
-// mode requests. Tokens are registered at app launch (loaded from Keychain) and
+// mode requests. Tokens are registered at app launch (loaded from UserDefaults) and
 // when a new iPad completes the Multipeer Connectivity pairing handshake.
 //
-// In embedded-local mode (Mac hitting localhost) this middleware is bypassed
-// because the connection is loopback-only. It is only active when the server
-// accepts connections from the local network interface.
+// Loopback requests (127.0.0.1, ::1) are always allowed — they come from the Mac
+// app itself.  All other requests (iPad on LAN) must supply a valid Bearer token.
 type LocalNetworkAuth struct {
 	mu     sync.RWMutex
 	tokens map[string]struct{} // set of valid tokens
@@ -54,6 +54,30 @@ func (a *LocalNetworkAuth) Middleware(next http.Handler, enforce bool) http.Hand
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := extractBearer(r)
+		if token == "" || !a.valid(token) {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// Handler returns an http.Handler that automatically enforces token auth for
+// non-loopback requests and bypasses auth for loopback (Mac app itself).
+// This is the preferred entry point for the embedded server.
+func (a *LocalNetworkAuth) Handler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			host = r.RemoteAddr
+		}
+		// Allow loopback — these are the Mac app's own requests.
+		if host == "127.0.0.1" || host == "::1" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Enforce bearer token for LAN clients (iPad).
 		token := extractBearer(r)
 		if token == "" || !a.valid(token) {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)

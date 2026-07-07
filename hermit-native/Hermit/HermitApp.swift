@@ -25,8 +25,11 @@ struct HermitApp: App {
 
     var body: some Scene {
 #if os(macOS)
+        // The Settings window is used by both modes:
+        // - native menu mode: opened via ⌘, or the "Settings…" menu item
+        // - popup mode: Settings is also accessible inline inside the dashboard panel
         Settings {
-            EmptyView()
+            SettingsView()
         }
 #else
         WindowGroup {
@@ -56,12 +59,32 @@ struct HermitApp: App {
 final class HermitAppDelegate: NSObject, NSApplicationDelegate {
     private var serverStarted = false
     private var restartObserver: NSObjectProtocol?
+    private var menuBarStyleObserver: NSObjectProtocol?
     private var menuBarController: MenuBarStatusItemController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Start the menu bar controller in whichever style the user has configured.
+        // Defaults to .nativeMenu on a clean install.
         let menuBarController = MenuBarStatusItemController()
         self.menuBarController = menuBarController
         menuBarController.start()
+
+        // Watch for preference changes and switch modes immediately without a restart.
+        menuBarStyleObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            // One run-loop hop so any in-flight UI updates settle first.
+            DispatchQueue.main.async {
+                Task { @MainActor [weak self] in
+                    guard let self, let controller = self.menuBarController else { return }
+                    let newStyle = ConfigStore.shared.menuBarStyle
+                    controller.switchMode(to: newStyle)
+                }
+            }
+        }
+
         // hermit-9ds: live-restart the embedded server when credentials/repos change.
         restartObserver = NotificationCenter.default.addObserver(
             forName: .hermitRestartRequired,
@@ -143,11 +166,14 @@ extension HermitApp {
             if let d = m.data(using: .utf8), let fh = FileHandle(forWritingAtPath: _logPath) { fh.seekToEndOfFile(); fh.write(d); try? fh.close() }
             return
         }
+        // Load paired tokens BEFORE starting the server so buildConfigJSON
+        // includes them and the Go server's LocalNetworkAuth is populated
+        // from the first request — iPad doesn't get a spurious 401 on startup.
+        PairedTokenStore.shared.load()
         EmbeddedServerManager.shared.start(appState: appState)
         if let port = EmbeddedServerManager.shared.port {
             ConfigStore.shared.serverBaseURL = "http://127.0.0.1:\(port)"
         }
-        PairedTokenStore.shared.load()
     }
 }
 
@@ -258,17 +284,36 @@ final class MenuBarStatusItemController: NSObject {
     private var outsideClickMonitor: Any?
     private var localClickMonitor: Any?
     private var cancellables: Set<AnyCancellable> = []
+    private var nativeMenu: HermitNativeMenu?
+    private var currentMode: MenuBarStyle = .nativeMenu
 
     func start() {
-        guard let button = statusItem.button else { return }
-        button.isEnabled = true
-        button.target = self
-        button.action = #selector(togglePanel(_:))
-        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        button.toolTip = "Hermit"
-        updateIcon(hasPendingInvitation: PairingAdvertiser.shared.pendingInvitation != nil)
-        Self.log("status item started; buttonFrame=\(button.frame)")
+        currentMode = ConfigStore.shared.menuBarStyle
+        setupIcon()
+        configureForMode(currentMode)
+        Self.log("status item started in mode=\(currentMode.rawValue)")
+    }
 
+    /// Tears down the current mode and switches to the new one immediately.
+    func switchMode(to style: MenuBarStyle) {
+        guard style != currentMode else { return }
+        Self.log("switching mode \(currentMode.rawValue) → \(style.rawValue)")
+        tearDownCurrentMode()
+        currentMode = style
+        configureForMode(style)
+    }
+
+    func stop() {
+        tearDownCurrentMode()
+        cancellables.removeAll()
+        NSStatusBar.system.removeStatusItem(statusItem)
+    }
+
+    // MARK: - Private
+
+    private func setupIcon() {
+        statusItem.button?.toolTip = "Hermit"
+        updateIcon(hasPendingInvitation: PairingAdvertiser.shared.pendingInvitation != nil)
         PairingAdvertiser.shared.$pendingInvitation
             .receive(on: RunLoop.main)
             .sink { [weak self] invite in
@@ -277,7 +322,30 @@ final class MenuBarStatusItemController: NSObject {
             .store(in: &cancellables)
     }
 
-    func stop() {
+    private func configureForMode(_ mode: MenuBarStyle) {
+        guard let button = statusItem.button else { return }
+        switch mode {
+        case .nativeMenu:
+            // Attach a real NSMenu — macOS handles click-to-show automatically.
+            button.action = nil
+            button.target = nil
+            button.sendAction(on: [])
+            let menu = HermitNativeMenu()
+            nativeMenu = menu
+            statusItem.menu = menu
+        case .popup:
+            // Remove any attached NSMenu so clicks reach our action handler.
+            statusItem.menu = nil
+            nativeMenu = nil
+            button.isEnabled = true
+            button.target = self
+            button.action = #selector(togglePanel(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            installClickMonitors()
+        }
+    }
+
+    private func tearDownCurrentMode() {
         closePanel()
         if let outsideClickMonitor {
             NSEvent.removeMonitor(outsideClickMonitor)
@@ -287,9 +355,15 @@ final class MenuBarStatusItemController: NSObject {
             NSEvent.removeMonitor(localClickMonitor)
             self.localClickMonitor = nil
         }
-        cancellables.removeAll()
-        NSStatusBar.system.removeStatusItem(statusItem)
+        statusItem.menu = nil
+        nativeMenu = nil
+        guard let button = statusItem.button else { return }
+        button.action = nil
+        button.target = nil
+        button.sendAction(on: [])
     }
+
+    // MARK: - Popup panel
 
     @objc private func togglePanel(_ sender: Any?) {
         Self.log("status item clicked; visible=\(panel?.isVisible == true)")
@@ -313,6 +387,9 @@ final class MenuBarStatusItemController: NSObject {
             },
             onDetach: { [weak self] in
                 DashboardFloatingWindowManager.shared.open(appState: AppState.shared)
+                self?.closePanel()
+            },
+            onClose: { [weak self] in
                 self?.closePanel()
             }
         )
@@ -409,29 +486,284 @@ final class MenuBarStatusItemController: NSObject {
     }
 }
 
-// MARK: - Dashboard Floating Window Manager (macOS)
+// MARK: - Native NSMenu (native menu mode)
 
+/// Builds the top-level NSMenu shown when menuBarStyle == .nativeMenu.
+/// Uses NSMenuDelegate.menuNeedsUpdate to rebuild items before each display,
+/// keeping server status and repo list current without polling.
 @MainActor
+final class HermitNativeMenu: NSMenu, NSMenuDelegate {
+    private var repoSubmenus: [UUID: HermitRepoSubMenu] = [:]
+
+    override init(title: String = "") {
+        super.init(title: title)
+        self.delegate = self
+        self.autoenablesItems = false
+    }
+
+    required init(coder: NSCoder) { fatalError("not implemented") }
+
+    // Called just before the menu is displayed.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        buildItems()
+    }
+
+    private func buildItems() {
+        removeAllItems()
+
+        // ── Pairing invitation ─────────────────────────────────────────
+        if let invite = PairingAdvertiser.shared.pendingInvitation {
+            addDisabledItem("\(invite.peerName) wants to pair")
+            addItem(makeItem("Allow", action: #selector(allowPairing)))
+            addItem(makeItem("Deny",  action: #selector(denyPairing)))
+            addItem(.separator())
+        }
+
+        // ── Server status ──────────────────────────────────────────────
+        let serverMgr = EmbeddedServerManager.shared
+        let statusText: String
+        if let port = serverMgr.port        { statusText = "Server running · port \(port)" }
+        else if serverMgr.errorMessage != nil { statusText = "Server error — check Settings" }
+        else                                   { statusText = "Server starting…" }
+        addDisabledItem(statusText)
+        addItem(.separator())
+
+        // ── Per-repo submenus ──────────────────────────────────────────
+        let repos = RepositoryStore.shared.repositories
+        if repos.isEmpty {
+            addDisabledItem("No repositories configured")
+        } else {
+            for repo in repos {
+                let item = NSMenuItem(title: repo.fullName, action: nil, keyEquivalent: "")
+                item.submenu = cachedSubmenu(for: repo)
+                addItem(item)
+            }
+        }
+        addItem(.separator())
+
+        // ── Actions ───────────────────────────────────────────────────
+        addItem(makeItem("Open Dashboard…", action: #selector(openDashboard)))
+        addItem(makeItem("Refresh All",     action: #selector(refreshAll)))
+        addItem(.separator())
+        let settings = makeItem("Settings…", action: #selector(openSettings), key: ",")
+        settings.keyEquivalentModifierMask = .command
+        addItem(settings)
+        let quit = NSMenuItem(title: "Quit Hermit",
+                              action: #selector(NSApplication.terminate(_:)),
+                              keyEquivalent: "q")
+        quit.keyEquivalentModifierMask = .command
+        quit.target = NSApp
+        addItem(quit)
+    }
+
+    // MARK: - Helpers
+
+    private func addDisabledItem(_ title: String) {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        addItem(item)
+    }
+
+    private func makeItem(_ title: String, action: Selector, key: String = "") -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.target = self
+        return item
+    }
+
+    private func cachedSubmenu(for repo: Repository) -> HermitRepoSubMenu {
+        if let existing = repoSubmenus[repo.id] { return existing }
+        let sub = HermitRepoSubMenu(repo: repo)
+        repoSubmenus[repo.id] = sub
+        return sub
+    }
+
+    // MARK: - Actions
+
+    @objc private func openDashboard() {
+        DashboardFloatingWindowManager.shared.open(appState: AppState.shared)
+    }
+
+    @objc private func refreshAll() {
+        RepoRFCCache.shared.invalidateAll()
+        repoSubmenus.removeAll()
+    }
+
+    @objc private func openSettings() {
+        DashboardFloatingWindowManager.shared.open(appState: AppState.shared, openToSettings: true)
+    }
+
+    @objc private func allowPairing() {
+        PairingAdvertiser.shared.pendingInvitation?.accept()
+    }
+
+    @objc private func denyPairing() {
+        PairingAdvertiser.shared.pendingInvitation?.decline()
+    }
+}
+
+// MARK: - Per-repo submenu
+
+/// Lazy-loading submenu for a single repository.
+/// Shows "Loading…" on first open, then populates from cache or a fresh fetch.
+/// Updates in-place if the menu is visible when the async load completes.
+@MainActor
+final class HermitRepoSubMenu: NSMenu, NSMenuDelegate {
+    let repo: Repository
+    private enum LoadState { case idle, loading, loaded([RFC], [RFC]), failed(String) }
+    private var loadState: LoadState = .idle
+    private var loadTask: Task<Void, Never>?
+
+    init(repo: Repository) {
+        self.repo = repo
+        super.init(title: repo.fullName)
+        self.delegate = self
+        self.autoenablesItems = false
+        showLoading()
+    }
+
+    required init(coder: NSCoder) { fatalError("not implemented") }
+
+    // Called just before the submenu is displayed.
+    func menuWillOpen(_ menu: NSMenu) {
+        // Serve from the shared cache if available.
+        if let cached = RepoRFCCache.shared.nativeSections(for: repo.id) {
+            if case .loaded = loadState {} else {
+                loadState = .loaded(cached.mainBranch, cached.pullRequests)
+            }
+        }
+        switch loadState {
+        case .idle:    showLoading(); startLoad()
+        case .loading: break
+        case .loaded(let main, let prs): populate(main: main, prs: prs)
+        case .failed(let msg):           showError(msg)
+        }
+    }
+
+    // MARK: - Display states
+
+    private func showLoading() {
+        removeAllItems()
+        addDisabledItem("Loading…")
+    }
+
+    private func populate(main: [RFC], prs: [RFC]) {
+        removeAllItems()
+        if main.isEmpty && prs.isEmpty {
+            addDisabledItem("No RFCs")
+        } else {
+            // ── In Review first ────────────────────────────────────────
+            if !prs.isEmpty {
+                addDisabledItem("In Review")
+                for rfc in prs { addItem(rfcItem(rfc, systemImage: "arrow.triangle.pull")) }
+                if !main.isEmpty { addItem(.separator()) }
+            }
+            // ── Main branch: grouped by lifecycle status ───────────────
+            let groups = RFCStatusGroup.group(main)
+            let nonEmpty = groups.filter { !$0.rfcs.isEmpty }
+            for (i, group) in nonEmpty.enumerated() {
+                if i > 0 { addItem(.separator()) }
+                addDisabledItem(group.header)
+                for rfc in group.rfcs { addItem(rfcItem(rfc, systemImage: group.systemImage)) }
+            }
+        }
+        addItem(.separator())
+        addItem(makeItem("Refresh", action: #selector(refreshRepo)))
+    }
+
+    private func showError(_ msg: String) {
+        removeAllItems()
+        addDisabledItem("Failed to load")
+        addDisabledItem(msg)
+        addItem(.separator())
+        addItem(makeItem("Retry", action: #selector(refreshRepo)))
+    }
+
+    // MARK: - Loading
+
+    private func startLoad() {
+        loadState = .loading
+        loadTask?.cancel()
+        loadTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let client = AppState.shared.makeAPIClient(for: self.repo) else {
+                self.loadState = .failed("No API client")
+                self.showError("No API client")
+                return
+            }
+            do {
+                let (mainFiles, prs, _) = try await client.discoverRFCs()
+                let mainRFCs = mainFiles.map {
+                    RFC(id: $0.id, title: $0.name, path: $0.path,
+                        sha: $0.sha, source: .mainBranch,
+                        lifecycleStatus: $0.lifecycleStatus, htmlURL: $0.htmlURL)
+                }.sorted { $0.title < $1.title }
+
+                // One entry per PR: deduplicate to the primary RFC document.
+                let primaryPRs = primaryPRDocuments(from: prs)
+
+                let prRFCs = primaryPRs.map {
+                    RFC(id: "pr-\($0.number)", title: $0.prTitle.isEmpty ? $0.title : $0.prTitle,
+                        path: $0.documentPath, sha: $0.headSHA, source: .pullRequest($0),
+                        lifecycleStatus: nil, htmlURL: $0.htmlURL)
+                }.sorted { $0.title < $1.title }
+                guard !Task.isCancelled else { return }
+                self.loadState = .loaded(mainRFCs, prRFCs)
+                self.populate(main: mainRFCs, prs: prRFCs)
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.loadState = .failed(error.localizedDescription)
+                self.showError(error.localizedDescription)
+            }
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func rfcItem(_ rfc: RFC, systemImage: String = "doc.text") -> NSMenuItem {
+        let item = NSMenuItem(title: rfc.title, action: #selector(openRFC(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = rfc
+        item.image = NSImage(systemSymbolName: systemImage, accessibilityDescription: nil)
+        return item
+    }
+
+    private func addDisabledItem(_ title: String) {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        addItem(item)
+    }
+
+    private func makeItem(_ title: String, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        return item
+    }
+
+    @objc private func openRFC(_ sender: NSMenuItem) {
+        guard let rfc = sender.representedObject as? RFC else { return }
+        RecentRFCStore.shared.record(rfc, repoID: repo.id)
+        RFCViewerWindowManager.shared.open(rfc: rfc, repo: repo, appState: AppState.shared)
+    }
+
+    @objc private func refreshRepo() {
+        loadState = .idle
+        loadTask?.cancel()
+        RepoRFCCache.shared.invalidateAll()
+        showLoading()
+        startLoad()
+    }
+}
+
 final class DashboardFloatingWindowManager {
     static let shared = DashboardFloatingWindowManager()
     private var controller: NSWindowController?
 
-    func open(appState: AppState) {
+    func open(appState: AppState, openToSettings: Bool = false) {
         if let existing = controller?.window, existing.isVisible {
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
-
-        let content = MenuBarContentView(
-            managesWindowPresentation: false,
-            allowsDetach: false,
-            onOpenReview: {}
-        )
-            .environmentObject(appState)
-
-        let hosting = NSHostingController(rootView: content)
-        hosting.sizingOptions = []
 
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 780, height: 580),
@@ -439,7 +771,6 @@ final class DashboardFloatingWindowManager {
             backing: .buffered,
             defer: false
         )
-        panel.contentViewController = hosting
         panel.title = "Hermit Dashboard"
         panel.isFloatingPanel = true
         panel.level = .floating
@@ -448,6 +779,19 @@ final class DashboardFloatingWindowManager {
         panel.isReleasedWhenClosed = false
         panel.minSize = NSSize(width: 780, height: 580)
         panel.center()
+
+        let content = MenuBarContentView(
+            managesWindowPresentation: false,
+            allowsDetach: false,
+            openToSettings: openToSettings,
+            onOpenReview: {},
+            onClose: { [weak panel] in panel?.close() }
+        )
+            .environmentObject(appState)
+
+        let hosting = NSHostingController(rootView: content)
+        hosting.sizingOptions = []
+        panel.contentViewController = hosting
 
         let controller = NSWindowController(window: panel)
         self.controller = controller
@@ -517,3 +861,52 @@ final class NewRFCWindowManager {
     }
 }
 #endif
+
+// MARK: - Shared PR document filtering (all platforms)
+
+/// Returns the single primary `RFCPullRequest` for each PR in `prs`.
+/// Filters to genuine RFC documents (documentType == "rfc", rfc-NNN path),
+/// prefers actionable (non-terminal) lifecycle status, and uses the highest
+/// RFC number as a tiebreaker so superseded/updated files are not picked over
+/// the newly proposed one.
+func primaryPRDocuments(from prs: [RFCPullRequest]) -> [RFCPullRequest] {
+    Dictionary(grouping: prs, by: { $0.number })
+        .values
+        .compactMap { group -> RFCPullRequest? in
+            let rfcs = group.filter { $0.documentType == "rfc" && isRFCDocumentPath($0.documentPath) }
+            guard !rfcs.isEmpty else { return nil }
+            let actionable = rfcs.filter { !isTerminalStatus($0.lifecycleStatus) }
+            return (actionable.isEmpty ? rfcs : actionable)
+                .max(by: { rfcNumberFromPath($0.documentPath) < rfcNumberFromPath($1.documentPath) })
+        }
+        .sorted { $0.number < $1.number }
+}
+
+/// Returns true when `path` points to a genuine RFC document.
+/// Matches filenames like `rfc-001-title.md` but rejects index files
+/// (`rfc-index.md`), ADRs, PRDs, and any file without a numeric suffix
+/// immediately following the `rfc-` prefix.
+func isRFCDocumentPath(_ path: String) -> Bool {
+    guard let filename = path.split(separator: "/").last.map(String.init) else { return false }
+    let lower = filename.lowercased()
+    guard lower.hasSuffix(".md"), lower.hasPrefix("rfc-") else { return false }
+    return lower.dropFirst(4).first?.isNumber == true
+}
+
+/// Extracts the RFC sequence number from a path like `docs-cms/rfcs/rfc-076-title.md` → 76.
+func rfcNumberFromPath(_ path: String) -> Int {
+    guard let filename = path.split(separator: "/").last.map(String.init) else { return 0 }
+    let lower = filename.lowercased()
+    guard lower.hasPrefix("rfc-") else { return 0 }
+    let digits = lower.dropFirst(4).prefix(while: { $0.isNumber })
+    return Int(digits) ?? 0
+}
+
+/// Returns true for lifecycle statuses that mean the RFC is no longer actively
+/// being proposed — superseded, implemented, or rejected.
+func isTerminalStatus(_ status: String?) -> Bool {
+    switch status?.lowercased() {
+    case "superseded", "implemented", "rejected": return true
+    default: return false
+    }
+}

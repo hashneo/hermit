@@ -105,7 +105,9 @@ def test_preserves_settings_added_repository():
             if account["endpoint"] == "https://api.github.com"
         ]
         assert len(github_accounts) == 1, github_accounts
-        assert github_accounts[0]["token"] == "github-token", github_accounts[0]
+        # Tokens must NOT appear in the plist — they live in Keychain only.
+        assert "token" not in github_accounts[0], \
+            f"plaintext token found in plist: {github_accounts[0]}"
 
 
 def main():

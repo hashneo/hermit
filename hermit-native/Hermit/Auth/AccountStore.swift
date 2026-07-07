@@ -4,19 +4,13 @@ import Combine
 // MARK: - Connection
 
 /// A named server connection with its own endpoint and PAT.
-///
-/// In DEBUG builds the PAT is stored directly on this struct so it round-trips
-/// through UserDefaults alongside the other connection fields — no Keychain
-/// involved, no password prompts during development.
-/// In Release builds `token` is excluded from Codable; the PAT lives
-/// exclusively in the Keychain keyed by `hermit.account.<UUID>`.
+/// The PAT lives exclusively in the Keychain (via KeychainHelper), keyed by
+/// `hermit.account.<UUID>`, scoped to the app's keychain-access-group so it
+/// survives every rebuild, cert rotation, and app update.
 struct Connection: Identifiable, Equatable {
     var id:       UUID   = UUID()
     var name:     String          // e.g. "GitHub"
     var endpoint: String          // e.g. "https://api.github.com"
-#if DEBUG
-    var token:    String? = nil   // stored in UserDefaults in DEBUG builds only
-#endif
 
     var keychainKey: String { "hermit.account.\(id.uuidString)" }
 }
@@ -26,9 +20,6 @@ struct Connection: Identifiable, Equatable {
 extension Connection: Codable {
     enum CodingKeys: String, CodingKey {
         case id, name, endpoint
-#if DEBUG
-        case token
-#endif
     }
 
     init(from decoder: Decoder) throws {
@@ -36,9 +27,6 @@ extension Connection: Codable {
         id       = try c.decode(UUID.self,   forKey: .id)
         name     = try c.decode(String.self, forKey: .name)
         endpoint = try c.decode(String.self, forKey: .endpoint)
-#if DEBUG
-        token    = try c.decodeIfPresent(String.self, forKey: .token)
-#endif
     }
 
     func encode(to encoder: Encoder) throws {
@@ -46,9 +34,6 @@ extension Connection: Codable {
         try c.encode(id,       forKey: .id)
         try c.encode(name,     forKey: .name)
         try c.encode(endpoint, forKey: .endpoint)
-#if DEBUG
-        try c.encodeIfPresent(token, forKey: .token)
-#endif
     }
 }
 
@@ -94,7 +79,11 @@ final class AccountStore: ObservableObject {
             if let endpoint = UserDefaults.standard.string(forKey: "hermit.serverBaseURL"),
                !endpoint.isEmpty,
                !Self.isLoopbackEndpoint(endpoint) {
-                let conn = Connection(name: "Default", endpoint: endpoint)
+                // Use the same stable UUID that RepositoryStore's migration hardcodes so
+                // the migrated account and repo share a consistent accountID foreign key.
+                let migratedID = UUID(uuidString: "00000000-0000-0000-0000-000000000001") ?? UUID()
+                var conn = Connection(name: "Default", endpoint: endpoint)
+                conn.id  = migratedID
                 let legacyToken = KeychainHelper.shared.readAccountToken(key: "hermit.pat") ?? ""
                 if !legacyToken.isEmpty {
                     KeychainHelper.shared.writeAccountToken(legacyToken, key: conn.keychainKey)
@@ -105,19 +94,21 @@ final class AccountStore: ObservableObject {
         }
 
         self.connections = conns
+
+        // Repair repos whose accountID no longer matches any known connection
+        // (e.g. after a migration UUID mismatch or a deleted account).
+        // When exactly one account exists the mapping is unambiguous, so we
+        // silently re-assign.  Otherwise the user must fix via Edit Repository.
+        RepositoryStore.shared.healOrphanedRepos(connections: conns)
     }
 
     // MARK: - Public API
 
     func add(name: String, endpoint: String, token: String) {
-        var conn = Connection(name: name, endpoint: endpoint)
-#if DEBUG
-        conn.token = token.isEmpty ? nil : token
-#else
+        let conn = Connection(name: name, endpoint: endpoint)
         if !token.isEmpty {
             KeychainHelper.shared.writeAccountToken(token, key: conn.keychainKey)
         }
-#endif
         connections.append(conn)
         save()
         NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
@@ -144,32 +135,22 @@ final class AccountStore: ObservableObject {
 
     private func updateInPlace(_ connection: Connection, token: String?) {
         guard let idx = connections.firstIndex(where: { $0.id == connection.id }) else { return }
-        var updated = connection
+        let updated = connection
         if let token {
-#if DEBUG
-            updated.token = token.isEmpty ? nil : token
-#else
             KeychainHelper.shared.writeAccountToken(token, key: connection.keychainKey)
-#endif
         }
         connections[idx] = updated
     }
 
     func remove(_ connection: Connection) {
-#if !DEBUG
         KeychainHelper.shared.deleteAccountToken(key: connection.keychainKey)
-#endif
         connections.removeAll { $0.id == connection.id }
         save()
         NotificationCenter.default.post(name: .hermitRestartRequired, object: nil)
     }
 
     func token(for connection: Connection) -> String? {
-#if DEBUG
-        return connection.token
-#else
-        return KeychainHelper.shared.readAccountToken(key: connection.keychainKey)
-#endif
+        KeychainHelper.shared.readAccountToken(key: connection.keychainKey)
     }
 
     // MARK: - SSO URL reporting
@@ -374,7 +355,33 @@ final class AccountStore: ObservableObject {
         var conns: [Connection] = []
         if let data = rawData ?? rawString?.data(using: .utf8) {
             do {
-                conns = try JSONDecoder().decode([Connection].self, from: data)
+                // Decode using a token-aware intermediate to migrate any plaintext
+                // token that was stored by an older DEBUG build into the Keychain,
+                // then save without the token field so it never hits disk again.
+                struct RawConnection: Decodable {
+                    let id: UUID
+                    let name: String
+                    let endpoint: String
+                    let token: String?
+                }
+                let raw = try JSONDecoder().decode([RawConnection].self, from: data)
+                var needsResave = false
+                for r in raw {
+                    let conn = Connection(id: r.id, name: r.name, endpoint: r.endpoint)
+                    conns.append(conn)
+                    if let t = r.token, !t.isEmpty,
+                       KeychainHelper.shared.readAccountToken(key: conn.keychainKey) == nil {
+                        // Migrate plaintext token from plist → Keychain
+                        KeychainHelper.shared.writeAccountToken(t, key: conn.keychainKey)
+                        NSLog("[AccountStore] migrated plaintext token for '%@' → Keychain", r.name)
+                        needsResave = true
+                    }
+                }
+                if needsResave {
+                    // Re-save without the token field so it's scrubbed from disk
+                    saveToDefaults(connections: conns)
+                    NSLog("[AccountStore] plist re-saved without plaintext tokens")
+                }
                 NSLog("[AccountStore] decoded %d connection(s): %@",
                       conns.count, conns.map(\.name).joined(separator: ", "))
             } catch {
@@ -509,6 +516,26 @@ final class RepositoryStore: ObservableObject {
         }
     }
 
+    /// Re-assigns orphaned repos (whose `accountID` has no matching connection)
+    /// to the sole available account when exactly one account exists.
+    /// This repairs installs that hit the migration UUID mismatch or that had
+    /// an account deleted without updating the associated repositories.
+    ///
+    /// Safe no-op when zero or multiple accounts exist — those cases require
+    /// the user to choose explicitly via Edit Repository.
+    func healOrphanedRepos(connections: [Connection]) {
+        guard connections.count == 1, let sole = connections.first else { return }
+        let knownIDs = Set(connections.map(\.id))
+        let orphanIndices = repositories.indices.filter { !knownIDs.contains(repositories[$0].accountID) }
+        guard !orphanIndices.isEmpty else { return }
+        for idx in orphanIndices {
+            repositories[idx].accountID = sole.id
+        }
+        save()
+        NSLog("[RepositoryStore] healed %d orphaned repo(s) → account '%@'",
+              orphanIndices.count, sole.name)
+    }
+
     private func save() {
         if let data = try? JSONEncoder().encode(repositories) {
             UserDefaults.standard.set(data, forKey: "hermit.repositories")
@@ -525,4 +552,6 @@ extension Notification.Name {
     static let hermitRestartRequired = Notification.Name("me.steven.hermit.restartRequired")
     /// Posted by "Refresh All" in the menu bar to force all RepoSubmenu loaders to reload.
     static let hermitRefreshAll = Notification.Name("me.steven.hermit.refreshAll")
+    /// Posted on iPad when config is reset — PairingBrowser observes this to clear isPaired.
+    static let hermitResetPairing = Notification.Name("me.steven.hermit.resetPairing")
 }

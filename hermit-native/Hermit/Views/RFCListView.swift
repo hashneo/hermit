@@ -7,6 +7,11 @@ struct RFCListView: View {
     @Binding var selectedRFC: RFC?
     var client: (any HermitClientProtocol)? = nil
     var onRefresh: (() async -> Void)? = nil
+    /// When true the empty-state "No RFCs" view is suppressed — used when
+    /// an error overlay is shown on top and we want a clean blank background.
+    var suppressEmptyState: Bool = false
+    /// When true a loading indicator is shown instead of the empty state.
+    var isLoading: Bool = false
 
     enum Filter: String, CaseIterable {
         case all = "All"
@@ -67,32 +72,41 @@ struct RFCListView: View {
             }
             Divider()
 
-            if filtered.isEmpty {
-                ContentUnavailableView(
-                    searchText.isEmpty ? "No RFCs" : "No Results",
-                    systemImage: "doc.text",
-                    description: Text(searchText.isEmpty ? "No RFCs found." : "Try a different search term.")
-                )
+            if filtered.isEmpty && !suppressEmptyState {
+                if isLoading {
+                    ProgressView("Loading RFCs…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ContentUnavailableView(
+                        searchText.isEmpty ? "No RFCs" : "No Results",
+                        systemImage: "doc.text",
+                        description: Text(searchText.isEmpty ? "No RFCs found." : "Try a different search term.")
+                    )
+                }
             } else {
                 List(selection: $selectedRFC) {
                     if !pullRequestRFCs.isEmpty {
-                        Section("In Review") {
+                        Section {
                             ForEach(pullRequestRFCs) { rfc in
                                 RFCRow(rfc: rfc, canSubmit: client != nil && rfc.lifecycleStatus == "draft") {
                                     submitTarget = rfc
                                 }
                                 .tag(rfc)
                             }
+                        } header: {
+                            sectionHeader("In Review")
                         }
                     }
                     ForEach(statusGroups.filter { !$0.rfcs.isEmpty }, id: \.header) { group in
-                        Section(group.header) {
+                        Section {
                             ForEach(group.rfcs) { rfc in
                                 RFCRow(rfc: rfc, canSubmit: client != nil && rfc.lifecycleStatus == "draft") {
                                     submitTarget = rfc
                                 }
                                 .tag(rfc)
                             }
+                        } header: {
+                            sectionHeader(group.header)
                         }
                     }
                 }
@@ -107,13 +121,29 @@ struct RFCListView: View {
         }
         .frame(minWidth: 280)
         .sheet(item: $submitTarget) { rfc in
-            if let client {
+             if let client {
                 SubmitForReviewSheet(rfc: rfc, client: client) {
                     submitTarget = nil
                     Task { await onRefresh?() }
                 }
             }
         }
+    }
+
+    /// Section header with a solid opaque background so it doesn't bleed
+    /// through list rows when scrolling.
+    @ViewBuilder
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.subheadline)
+            .fontWeight(.semibold)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 4)
+#if os(iOS)
+            .background(Color(UIColor.systemGroupedBackground).opacity(0))
+            .background(.background)
+#endif
     }
 }
 

@@ -360,11 +360,11 @@ ipad-deploy: ## Build and push to connected iPad (requires Developer Mode enable
 		echo "To enable iPad deploy:"; \
 		echo "  1. Copy the example local config:"; \
 		echo "       cp .local.mk.example .local.mk"; \
-		echo "  2. Find your iPad UDID:"; \
-		echo "       Connect your iPad, then run: xcrun xctrace list devices"; \
+		echo "  2. Find your iPad UDID (connect iPad first):"; \
+		echo "       DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun xctrace list devices"; \
 		echo "       Copy the UDID from the iPad line (e.g. 00006031-001C69120E23001C)"; \
 		echo "  3. Find your iPad device ID (for devicectl):"; \
-		echo "       Run: xcrun devicectl list devices"; \
+		echo "       DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl list devices"; \
 		echo "       Copy the 'identifier' value for your iPad"; \
 		echo "  4. Set IPAD_UDID and IPAD_DEVICE_ID in .local.mk"; \
 		exit 0; \

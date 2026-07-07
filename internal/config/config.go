@@ -76,6 +76,10 @@ type Config struct {
 	// When the server is embedded in a macOS app via gomobile, this is set to
 	// the app sandbox Application Support directory.
 	DataDir string `yaml:"data_dir"`
+	// PairedTokens is the set of valid Bearer tokens for LAN (iPad) clients.
+	// Loopback requests are always allowed regardless of this list.
+	// Populated from UserDefaults (hermit.pairedDevices) at server startup.
+	PairedTokens []string `yaml:"-"`
 }
 
 // Load builds config from a JSON config file.

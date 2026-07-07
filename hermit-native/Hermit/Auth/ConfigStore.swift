@@ -1,5 +1,15 @@
 import Foundation
 
+// MARK: - MenuBarStyle
+
+/// Controls how Hermit presents itself in the macOS menu bar.
+enum MenuBarStyle: String {
+    /// Native macOS dropdown menu with per-repo RFC submenus (default).
+    case nativeMenu = "native"
+    /// Popup dashboard panel with full review workflow UI.
+    case popup = "popup"
+}
+
 /// Persists non-secret application config in UserDefaults.
 ///
 /// UserDefaults are keyed by bundle ID and survive app rebuilds, so values
@@ -25,6 +35,7 @@ final class ConfigStore {
         case localNetworkToken = "hermit.localNetworkToken"
         case cacheReadTTLSeconds = "hermit.cache.readTTLSeconds"
         case cacheJitterSeconds  = "hermit.cache.jitterSeconds"
+        case menuBarStyle        = "hermit.menuBarStyle"
     }
 
     // MARK: - Properties
@@ -64,13 +75,41 @@ final class ConfigStore {
         set { defaults.set(newValue, forKey: Key.aiProvider.rawValue) }
     }
 
-    /// localNetworkToken is not a secret in the Keychain sense — it is a
-    /// short-lived session bearer issued by the paired Mac and rotates on
-    /// every pairing. Store it in UserDefaults so it doesn't trigger
-    /// Keychain prompts; the Mac will re-pair if it expires.
+    /// The pairing token used by the iPad to authenticate with the Mac's server.
+    ///
+    /// On iOS the token is stored in the Keychain (via KeychainHelper) so it
+    /// survives `make dev` installs that recreate the app container and wipe
+    /// UserDefaults.  A UserDefaults shadow copy is kept for fast synchronous
+    /// reads (e.g. PairingBrowser.isPaired init) and is refreshed on every write.
+    ///
+    /// On macOS this key is unused — the Mac never sends its own token.
     var localNetworkToken: String? {
-        get { defaults.string(forKey: Key.localNetworkToken.rawValue) }
-        set { defaults.set(newValue, forKey: Key.localNetworkToken.rawValue) }
+        get {
+#if os(iOS)
+            // Keychain is authoritative; fall back to legacy UserDefaults value
+            // so existing installs don't lose their token on the first upgrade.
+            if let kc = KeychainHelper.shared.localNetworkToken, !kc.isEmpty { return kc }
+            let ud = defaults.string(forKey: Key.localNetworkToken.rawValue)
+            if let ud, !ud.isEmpty {
+                // Migrate: write to Keychain and clear UserDefaults copy.
+                KeychainHelper.shared.localNetworkToken = ud
+                defaults.removeObject(forKey: Key.localNetworkToken.rawValue)
+                return ud
+            }
+            return nil
+#else
+            return defaults.string(forKey: Key.localNetworkToken.rawValue)
+#endif
+        }
+        set {
+#if os(iOS)
+            KeychainHelper.shared.localNetworkToken = newValue
+            // Keep UserDefaults in sync for synchronous init-time reads.
+            defaults.set(newValue, forKey: Key.localNetworkToken.rawValue)
+#else
+            defaults.set(newValue, forKey: Key.localNetworkToken.rawValue)
+#endif
+        }
     }
 
     var serverMode: ServerMode? {
@@ -106,6 +145,14 @@ final class ConfigStore {
         set { defaults.set(max(0, newValue), forKey: Key.cacheJitterSeconds.rawValue) }
     }
 
+    var menuBarStyle: MenuBarStyle {
+        get {
+            MenuBarStyle(rawValue: defaults.string(forKey: Key.menuBarStyle.rawValue) ?? "")
+                ?? .nativeMenu
+        }
+        set { defaults.set(newValue.rawValue, forKey: Key.menuBarStyle.rawValue) }
+    }
+
     // MARK: - Convenience
 
     /// True when the minimum fields needed to connect are present.
@@ -137,8 +184,14 @@ final class ConfigStore {
     func deleteAll() {
         for key in [Key.baseURL, .serverBaseURL, .repoOwner, .repoName,
                     .docsPath, .rfcLabel, .aiProvider, .serverMode, .localNetworkToken,
-                    .cacheReadTTLSeconds, .cacheJitterSeconds] {
+                    .cacheReadTTLSeconds, .cacheJitterSeconds, .menuBarStyle] {
             defaults.removeObject(forKey: key.rawValue)
         }
+        // Paired device tokens are stored in UserDefaults (not Keychain).
+        defaults.removeObject(forKey: "hermit.pairedDevices")
+#if os(iOS)
+        // Clear Keychain copy of the pairing token so reset is complete.
+        KeychainHelper.shared.localNetworkToken = nil
+#endif
     }
 }

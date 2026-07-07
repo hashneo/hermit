@@ -198,9 +198,13 @@ final class EmbeddedServerManager: ObservableObject {
             ])
         }
 
+        // Paired token values (not peer names) — the Go server validates these.
+        let pairedTokens = Array(PairedTokenStore.shared.pairedDevices.values)
+
         let payload: [String: Any] = [
-            "repos":   repos,
-            "dataDir": dataDir,
+            "repos":         repos,
+            "dataDir":       dataDir,
+            "pairedTokens":  pairedTokens,
             "cache": [
                 "repositoryRFCListReadTTLSeconds": ConfigStore.shared.cacheReadTTLSeconds,
                 "repositoryRFCListJitterSeconds": ConfigStore.shared.cacheJitterSeconds,
@@ -230,6 +234,24 @@ final class EmbeddedServerManager: ObservableObject {
         if trimmed.hasSuffix("/api/v3") { return trimmed }
         if trimmed.hasSuffix("/api/v1") { return trimmed }
         return trimmed + "/api/v1"
+    }
+
+    /// Registers a paired device token with the running Go server.
+    /// Called immediately after a successful MCSession pairing handshake.
+    static func registerPairedToken(_ token: String) {
+        let result = MobileRegisterPairedToken(token)
+        if result != "ok" {
+            NSLog("[EmbeddedServerManager] registerPairedToken: %@", result)
+        }
+    }
+
+    /// Revokes a paired device token from the running Go server.
+    /// The iPad receives 401 on its next request and returns to the pairing screen.
+    static func revokePairedToken(_ token: String) {
+        let result = MobileRevokePairedToken(token)
+        if result != "ok" {
+            NSLog("[EmbeddedServerManager] revokePairedToken: %@", result)
+        }
     }
 }
 #endif
