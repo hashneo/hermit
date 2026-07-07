@@ -76,25 +76,26 @@ type CreatedPR struct {
 const RFCReadyLabel = ""
 
 type ReviewReadyRFCItem struct {
-	PRNumber       int
-	PRTitle        string
-	PRBody         string
-	PRState        string
-	PRMerged       bool
-	HeadSHA        string
-	HeadRef        string
-	Mergeable      *bool
-	MergeableState string
-	HTMLURL        string
-	Title          string
-	Path           string
-	DocumentType   string
-	Labels         []string
-	ChangedFiles   int
-	Additions      int
-	Deletions      int
-	IssueComments  int
-	ReviewComments int
+	PRNumber        int
+	PRTitle         string
+	PRBody          string
+	PRState         string
+	PRMerged        bool
+	HeadSHA         string
+	HeadRef         string
+	Mergeable       *bool
+	MergeableState  string
+	HTMLURL         string
+	Title           string
+	Path            string
+	DocumentType    string
+	LifecycleStatus string
+	Labels          []string
+	ChangedFiles    int
+	Additions       int
+	Deletions       int
+	IssueComments   int
+	ReviewComments  int
 }
 
 type ReviewReadyRFCResult struct {
@@ -595,8 +596,11 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 			var prItems []ReviewReadyRFCItem
 			for _, doc := range documents {
 				title := strings.TrimSuffix(path.Base(doc.Filename), ".md")
+				lifecycleStatus := ""
 				if view, err := c.GetRFC(ctx, baseURL, owner, name, pr.Head.SHA, doc.Filename, token); err == nil {
 					title = view.Title
+					meta, _ := parseFrontmatter(view.MarkdownSource)
+					lifecycleStatus = normalizeLifecycleStatus(meta["status"])
 				}
 				prItems = append(prItems, ReviewReadyRFCItem{
 					PRNumber: pr.Number, PRTitle: pr.Title, PRBody: pr.Body,
@@ -604,7 +608,8 @@ func (c *HTTPGitHubRFCClient) ListReviewReadyRFCs(ctx context.Context, baseURL, 
 					HeadSHA: pr.Head.SHA, HeadRef: pr.Head.Ref,
 					Mergeable: mergeable, MergeableState: mergeableState,
 					HTMLURL: pr.HTMLURL, Title: title, Path: doc.Filename,
-					DocumentType: doc.DocumentType, Labels: labelNames,
+					DocumentType: doc.DocumentType, LifecycleStatus: lifecycleStatus,
+					Labels: labelNames,
 					ChangedFiles: len(prFiles), Additions: prAdditions, Deletions: prDeletions,
 					IssueComments: pr.Comments, ReviewComments: pr.ReviewComments,
 				})

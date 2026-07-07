@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"hermit/internal/config"
+	"hermit/internal/middleware"
 	"hermit/internal/observability"
 	"hermit/internal/repository"
 	"hermit/internal/review"
@@ -28,10 +29,12 @@ const shutdownTimeout = 10 * time.Second
 type App struct {
 	server  *http.Server
 	closers []io.Closer
+	Auth    *middleware.LocalNetworkAuth // exposed for live token register/revoke
 }
 
 // New creates an application with baseline routing and server configuration.
 func New(cfg config.Config) *App {
+	auth := middleware.NewLocalNetworkAuth(cfg.PairedTokens)
 	mux := newMux(cfg)
 	closers := []io.Closer{}
 	accessLogStore, err := observability.OpenAccessLog(cfg.DataDir)
@@ -42,12 +45,14 @@ func New(cfg config.Config) *App {
 		mux.HandleFunc("GET /api/v1/logs", observability.NewLogHandler(accessLogStore).List)
 	}
 
+	// Wrap with auth first (loopback bypass, LAN enforcement), then access log.
+	handler := auth.Handler(mux)
+	handler = observability.MiddlewareWithAccessLog(handler, accessLogStore)
+
 	return &App{
-		server: &http.Server{
-			Addr:    cfg.ListenAddress,
-			Handler: observability.MiddlewareWithAccessLog(mux, accessLogStore),
-		},
+		server:  &http.Server{Addr: cfg.ListenAddress, Handler: handler},
 		closers: closers,
+		Auth:    auth,
 	}
 }
 

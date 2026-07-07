@@ -39,6 +39,9 @@ type StartConfig struct {
 	Repos   []RepoConfig      `json:"repos"`
 	DataDir string            `json:"dataDir"` // app sandbox Application Support dir
 	Cache   MobileCacheConfig `json:"cache"`
+	// PairedTokens is the current set of valid iPad bearer tokens.
+	// Loaded from UserDefaults (hermit.pairedDevices) at startup.
+	PairedTokens []string `json:"pairedTokens"`
 
 	// Legacy single-repo fields (promoted to Repos when Repos is empty)
 	BaseURL  string `json:"baseURL"`
@@ -65,9 +68,10 @@ type RepoConfig struct {
 }
 
 var (
-	mu         sync.Mutex
-	cancelFunc context.CancelFunc
-	doneCh     chan struct{}
+	mu           sync.Mutex
+	cancelFunc   context.CancelFunc
+	doneCh       chan struct{}
+	runningApp   *app.App // kept for live token registration/revocation
 )
 
 // SetLogFile redirects the Go server's structured logger (slog) to append to
@@ -127,6 +131,7 @@ func Start(configJSON string) string {
 	doneCh = make(chan struct{})
 
 	application := app.New(cfg)
+	runningApp = application
 
 	go func() {
 		defer close(doneCh)
@@ -147,6 +152,7 @@ func Stop() {
 	done := doneCh
 	cancelFunc = nil
 	doneCh = nil
+	runningApp = nil
 	mu.Unlock()
 
 	if cancel != nil {
@@ -155,6 +161,34 @@ func Stop() {
 	if done != nil {
 		<-done
 	}
+}
+
+// RegisterPairedToken adds a new bearer token to the running server's auth set.
+// Called from Swift immediately after a successful pairing handshake.
+// Returns "ok" or "error: server not running".
+func RegisterPairedToken(token string) string {
+	mu.Lock()
+	a := runningApp
+	mu.Unlock()
+	if a == nil {
+		return "error: server not running"
+	}
+	a.Auth.Register(token)
+	return "ok"
+}
+
+// RevokePairedToken removes a bearer token from the running server's auth set.
+// Called from Swift when the user revokes a paired device in Settings.
+// Returns "ok" or "error: server not running".
+func RevokePairedToken(token string) string {
+	mu.Lock()
+	a := runningApp
+	mu.Unlock()
+	if a == nil {
+		return "error: server not running"
+	}
+	a.Auth.Revoke(token)
+	return "ok"
 }
 
 // buildConfig constructs a hermit config.Config from a StartConfig.
@@ -239,6 +273,7 @@ func buildConfig(sc StartConfig) (config.Config, error) {
 		Registries:    registries,
 		Repositories:  repositories,
 		DataDir:       filepath.Join(dataDir, "hermit"),
+		PairedTokens:  sc.PairedTokens,
 	}
 	if sc.Cache.RepositoryRFCListReadTTLSeconds != nil && *sc.Cache.RepositoryRFCListReadTTLSeconds > 0 {
 		cfg.Cache.RepositoryRFCList.ReadTTL.Duration = time.Duration(*sc.Cache.RepositoryRFCListReadTTLSeconds) * time.Second
