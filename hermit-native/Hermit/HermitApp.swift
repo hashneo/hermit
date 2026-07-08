@@ -96,7 +96,7 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
                 RepoRFCCache.shared.invalidateAll()
                 EmbeddedServerManager.shared.restart(appState: AppState.shared)
                 if let port = EmbeddedServerManager.shared.port {
-                    ConfigStore.shared.serverBaseURL = "http://127.0.0.1:\(port)"
+                    ConfigStore.shared.serverBaseURL = EmbeddedServerManager.localServerURL(port: port)
                 }
             }
         }
@@ -172,7 +172,7 @@ extension HermitApp {
         PairedTokenStore.shared.load()
         EmbeddedServerManager.shared.start(appState: appState)
         if let port = EmbeddedServerManager.shared.port {
-            ConfigStore.shared.serverBaseURL = "http://127.0.0.1:\(port)"
+            ConfigStore.shared.serverBaseURL = EmbeddedServerManager.localServerURL(port: port)
         }
     }
 }
