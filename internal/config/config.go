@@ -80,6 +80,13 @@ type Config struct {
 	// Loopback requests are always allowed regardless of this list.
 	// Populated from UserDefaults (hermit.pairedDevices) at server startup.
 	PairedTokens []string `yaml:"-"`
+	// TLSCertFile is the path to the PEM-encoded self-signed TLS certificate.
+	// The matching private key is supplied in-memory via TLSKeyPEM (never on disk).
+	// When both are set the server listens on TLS instead of plain HTTP.
+	TLSCertFile string `yaml:"-"`
+	// TLSKeyPEM is the PEM-encoded ECDSA private key supplied by Swift from
+	// the macOS Keychain.  It is held in memory only and never written to disk.
+	TLSKeyPEM string `yaml:"-"`
 }
 
 // Load builds config from a JSON config file.
