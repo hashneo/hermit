@@ -2,10 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- outbound HTTP to Hermit server -->
+	<!-- outbound HTTPS to Hermit server -->
 	<key>com.apple.security.network.client</key>
 	<true/>
-	<!-- hermit-1ow: nearby-interaction omitted from iOS Debug builds;
-	     requires explicit App ID capability + provisioning profile to include. -->
+	<!-- keychain-sharing scoped to team+bundle so tokens survive app updates -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)$(HERMIT_BUNDLE_ID)</string>
+	</array>
 </dict>
 </plist>
