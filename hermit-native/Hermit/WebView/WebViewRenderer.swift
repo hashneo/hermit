@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import CommonCrypto
 
 // MARK: - hermit-kzt: WKWebView SwiftUI wrapper
 
@@ -102,6 +103,26 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKScriptMessageH
             decisionHandler(.cancel)
         } else {
             decisionHandler(.allow)
+        }
+    }
+
+    // Trust the embedded server's self-signed TLS cert for loopback connections.
+    // WKWebView uses its own network stack and does not share URLSession delegates.
+    func webView(_ webView: WKWebView,
+                 didReceive challenge: URLAuthenticationChallenge,
+                 completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        let host = challenge.protectionSpace.host
+        guard (host == "127.0.0.1" || host == "::1" || host == "localhost"),
+              challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let trust = challenge.protectionSpace.serverTrust
+        else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        if let cred = hermitAcceptLeafCert(trust) {
+            completionHandler(.useCredential, cred)
+        } else {
+            completionHandler(.useCredential, URLCredential(trust: trust))
         }
     }
 }

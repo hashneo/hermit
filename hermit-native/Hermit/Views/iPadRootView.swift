@@ -75,6 +75,16 @@ final class RFCStore: ObservableObject {
                 NotificationCenter.default.post(name: .hermitResetPairing, object: nil)
 #endif
                 errorMessage = "Pairing revoked — please pair again."
+            } else if isCertChangedError(error) {
+#if os(iOS)
+                // Server certificate changed — clear the pinned fingerprint and
+                // the pairing token so the user is prompted to re-pair.
+                ConfigStore.shared.tlsCertFingerprint = nil
+                ConfigStore.shared.localNetworkToken  = nil
+                AppState.shared.localNetworkToken     = ""
+                NotificationCenter.default.post(name: .hermitResetPairing, object: nil)
+#endif
+                errorMessage = "Server certificate changed — please re-pair."
             } else if isOfflineError(error) {
                 errorMessage = "Mac appears to be offline.\nMake sure Hermit is running on your Mac."
             } else {
@@ -235,6 +245,23 @@ private func isOfflineError(_ error: Error) -> Bool {
          NSURLErrorCannotFindHost,
          NSURLErrorDNSLookupFailed,
          NSURLErrorResourceUnavailable:
+        return true
+    default:
+        return false
+    }
+}
+
+/// Returns true when the TLS handshake failed because the server's certificate
+/// does not match the pinned fingerprint — i.e. the Mac regenerated its cert.
+private func isCertChangedError(_ error: Error) -> Bool {
+    let nsError = error as NSError
+    guard nsError.domain == NSURLErrorDomain else { return false }
+    switch nsError.code {
+    case NSURLErrorServerCertificateUntrusted,
+         NSURLErrorServerCertificateHasBadDate,
+         NSURLErrorServerCertificateHasUnknownRoot,
+         NSURLErrorServerCertificateNotYetValid,
+         NSURLErrorClientCertificateRejected:
         return true
     default:
         return false
