@@ -2,12 +2,15 @@ package app
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -27,9 +30,11 @@ const shutdownTimeout = 10 * time.Second
 
 // App wires foundational HTTP services for the Hermit monolith.
 type App struct {
-	server  *http.Server
-	closers []io.Closer
-	Auth    *middleware.LocalNetworkAuth // exposed for live token register/revoke
+	server     *http.Server
+	closers    []io.Closer
+	Auth       *middleware.LocalNetworkAuth // exposed for live token register/revoke
+	tlsCertFile string                      // path to cert PEM on disk (nil = plain HTTP)
+	tlsKeyPEM  []byte                       // key PEM from Keychain, in-memory only
 }
 
 // New creates an application with baseline routing and server configuration.
@@ -49,11 +54,16 @@ func New(cfg config.Config) *App {
 	handler := auth.Handler(mux)
 	handler = observability.MiddlewareWithAccessLog(handler, accessLogStore)
 
-	return &App{
+	a := &App{
 		server:  &http.Server{Addr: cfg.ListenAddress, Handler: handler},
 		closers: closers,
 		Auth:    auth,
 	}
+	if cfg.TLSCertFile != "" && cfg.TLSKeyPEM != "" {
+		a.tlsCertFile = cfg.TLSCertFile
+		a.tlsKeyPEM   = []byte(cfg.TLSKeyPEM)
+	}
+	return a
 }
 
 // Run starts the HTTP server and blocks until context cancellation or server error.
@@ -62,8 +72,35 @@ func (a *App) Run(ctx context.Context) error {
 	errCh := make(chan error, 1)
 
 	go func() {
-		if err := a.server.ListenAndServe(); err != nil {
-			errCh <- err
+		if a.tlsCertFile != "" && len(a.tlsKeyPEM) > 0 {
+			// TLS mode: key lives in-memory (from Keychain), cert on disk.
+			// Use tls.X509KeyPair so the key is never written to disk.
+			certPEM, err := os.ReadFile(a.tlsCertFile)
+			if err != nil {
+				errCh <- fmt.Errorf("read TLS cert: %w", err)
+				return
+			}
+			cert, err := tls.X509KeyPair(certPEM, a.tlsKeyPEM)
+			if err != nil {
+				errCh <- fmt.Errorf("load TLS key pair: %w", err)
+				return
+			}
+			tlsCfg := &tls.Config{
+				Certificates: []tls.Certificate{cert},
+				MinVersion:   tls.VersionTLS13,
+			}
+			ln, err := net.Listen("tcp", a.server.Addr)
+			if err != nil {
+				errCh <- fmt.Errorf("tls listen: %w", err)
+				return
+			}
+			if err := a.server.Serve(tls.NewListener(ln, tlsCfg)); err != nil {
+				errCh <- err
+			}
+		} else {
+			if err := a.server.ListenAndServe(); err != nil {
+				errCh <- err
+			}
 		}
 	}()
 

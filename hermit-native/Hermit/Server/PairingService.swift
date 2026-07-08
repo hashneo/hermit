@@ -243,8 +243,13 @@ extension PairingAdvertiser: MCSessionDelegate {
         _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
         let token = bytes.map { String(format: "%02x", $0) }.joined()
 
-        // Only the token — iPad gets server URL from mDNS discoveryInfo, not here.
-        guard let data = try? JSONSerialization.data(withJSONObject: ["token": token]) else { return }
+        // Include the TLS cert fingerprint so the iPad can pin the server cert.
+        // This is sent over an MCSession with encryptionPreference: .required (TLS).
+        var payload: [String: String] = ["token": token]
+        let fp = EmbeddedServerManager.tlsFingerprint
+        if !fp.isEmpty { payload["tlsCertFingerprint"] = fp }
+
+        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
 
         do {
             try session.send(data, toPeers: [peer], with: .reliable)
@@ -347,7 +352,7 @@ extension PairingBrowser: MCNearbyServiceBrowserDelegate {
         let docsPath  = info?["docsPath"] ?? "docs-cms/rfcs"
         let rfcLabel  = info?["rfcLabel"] ?? ""
         // peerID.displayName is the Mac's LocalHostName (e.g. Stevens-MacBook-Pro)
-        let serverURL = "http://\(peerID.displayName).local:\(port)"
+        let serverURL = "https://\(peerID.displayName).local:\(port)"
 
         Task { @MainActor in
             if !self.discoveredMacs.contains(peerID) {
@@ -416,9 +421,14 @@ extension PairingBrowser: MCSessionDelegate {
     nonisolated func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         guard let payload = try? JSONSerialization.jsonObject(with: data) as? [String: String],
               let token = payload["token"] else { return }
+        let fingerprint = payload["tlsCertFingerprint"] ?? ""
         Task { @MainActor in
             ConfigStore.shared.localNetworkToken = token
             AppState.shared.localNetworkToken = token
+            // Store the TLS fingerprint so HermitAPIClient can pin the server cert.
+            if !fingerprint.isEmpty {
+                ConfigStore.shared.tlsCertFingerprint = fingerprint
+            }
             self.isPaired = true
             self.pairingStatus = "Paired with \(peerID.displayName)"
             session.disconnect()

@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import os.log
+import CommonCrypto
 #if os(macOS)
 import AppKit
 #endif
@@ -69,6 +70,10 @@ final class EmbeddedServerManager: ObservableObject {
         guard port == nil else { return }
 
 #if HERMIT_EMBEDDED_SERVER
+        // Ensure a TLS cert+key pair exists before building the config JSON.
+        // The cert lives on disk; the private key lives exclusively in Keychain.
+        Self.ensureTLSCert()
+
         let config = buildConfigJSON(appState: appState)
 
         // hermit-nnn: log config JSON with PATs redacted, then log the raw result
@@ -100,7 +105,9 @@ final class EmbeddedServerManager: ObservableObject {
         esLog("MobileStart succeeded — port=\(p)")
         port = p
         errorMessage = nil
-        appState.serverBaseURL = "http://127.0.0.1:\(p)"
+        // Use https:// when TLS is configured (cert+key both present).
+        let scheme = (Self.currentTLSCertFile != nil) ? "https" : "http"
+        appState.serverBaseURL = "\(scheme)://127.0.0.1:\(p)"
         registerBonjour(port: p)
         PairingAdvertiser.shared.restart()
 #else
@@ -201,7 +208,7 @@ final class EmbeddedServerManager: ObservableObject {
         // Paired token values (not peer names) — the Go server validates these.
         let pairedTokens = Array(PairedTokenStore.shared.pairedDevices.values)
 
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "repos":         repos,
             "dataDir":       dataDir,
             "pairedTokens":  pairedTokens,
@@ -210,6 +217,12 @@ final class EmbeddedServerManager: ObservableObject {
                 "repositoryRFCListJitterSeconds": ConfigStore.shared.cacheJitterSeconds,
             ],
         ]
+        // Include TLS cert path + key PEM so the Go server starts in HTTPS mode.
+        if let certFile = Self.currentTLSCertFile,
+           let keyPEM   = KeychainHelper.shared.tlsPrivateKey, !keyPEM.isEmpty {
+            payload["tlsCertFile"] = certFile
+            payload["tlsKeyPEM"]   = keyPEM
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let str  = String(data: data, encoding: .utf8) else {
             return "{}"
@@ -220,6 +233,12 @@ final class EmbeddedServerManager: ObservableObject {
     private static func appSupportDirectory() -> String {
         let urls = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
         return urls.first?.appendingPathComponent("Hermit").path ?? NSHomeDirectory()
+    }
+
+    /// Returns the localhost URL for the embedded server using the correct scheme.
+    static func localServerURL(port: Int) -> String {
+        let scheme = (currentTLSCertFile != nil) ? "https" : "http"
+        return "\(scheme)://127.0.0.1:\(port)"
     }
 
     /// Returns the correct API base URL for a registry endpoint.
@@ -252,6 +271,87 @@ final class EmbeddedServerManager: ObservableObject {
         if result != "ok" {
             NSLog("[EmbeddedServerManager] revokePairedToken: %@", result)
         }
+    }
+
+    // MARK: - TLS certificate management
+
+    /// Path to the on-disk TLS certificate; nil if not yet generated.
+    private(set) static var currentTLSCertFile: String? = nil
+    /// SHA-256 hex fingerprint of the current TLS certificate.
+    private(set) static var tlsFingerprint: String = ""
+
+    /// Ensures a TLS cert+key pair exists. Generates if either is missing.
+    static func ensureTLSCert() {
+        let dataDir  = appSupportDirectory()
+        let certFile = "\(dataDir)/hermit/tls.crt"
+        let certExists = FileManager.default.fileExists(atPath: certFile)
+        let keyExists  = !(KeychainHelper.shared.tlsPrivateKey ?? "").isEmpty
+
+        if certExists && keyExists {
+            if let pem = try? String(contentsOfFile: certFile, encoding: .utf8),
+               let fp  = tlsFingerprintFromPEM(pem) {
+                // Reject certs that have no IP SANs — Apple's TLS stack rejects
+                // them at the handshake level before our delegate is called.
+                if certHasIPSANs(pem) {
+                    currentTLSCertFile = certFile
+                    tlsFingerprint = fp
+                    return
+                }
+                NSLog("[EmbeddedServerManager] TLS cert missing SANs — regenerating")
+            }
+        }
+        // Regenerate — cert missing, key missing, cert unreadable, or cert lacks SANs.
+        generateTLSCert(dataDir: dataDir)
+    }
+
+    /// Returns true when the PEM cert contains IP SANs AND a .local DNS SAN
+    /// (both required for Mac→Mac loopback and iPad→Mac mDNS connections).
+    private static func certHasIPSANs(_ pem: String) -> Bool {
+        let lines = pem.components(separatedBy: "\n")
+            .filter { !$0.hasPrefix("-----") && !$0.isEmpty }
+        guard let der = Data(base64Encoded: lines.joined()),
+              let cert = SecCertificateCreateWithData(nil, der as CFData)
+        else { return false }
+        var error: Unmanaged<CFError>?
+        guard let values = SecCertificateCopyValues(cert, [kSecOIDSubjectAltName] as CFArray, &error) as? [String: Any],
+              let sanEntry = values[kSecOIDSubjectAltName as String] as? [String: Any],
+              let sanValues = sanEntry["value"] as? [[String: Any]]
+        else { return false }
+        let hasIP  = sanValues.contains { ($0["label"] as? String) == "IP Address" }
+        let hasDotLocal = sanValues.contains {
+            ($0["label"] as? String) == "DNS Name" &&
+            ($0["value"] as? String)?.hasSuffix(".local") == true
+        }
+        return hasIP && hasDotLocal
+    }
+
+    private static func generateTLSCert(dataDir: String) {
+        let result = MobileGenerateTLSCert(dataDir)
+        guard !result.hasPrefix("error:"),
+              let data = result.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+              let certFile = json["certFile"],
+              let keyPEM   = json["keyPEM"],
+              let fp       = json["fingerprint"]
+        else {
+            NSLog("[EmbeddedServerManager] MobileGenerateTLSCert failed: %@", result)
+            return
+        }
+        KeychainHelper.shared.tlsPrivateKey = keyPEM
+        currentTLSCertFile = certFile
+        tlsFingerprint = fp
+    }
+
+    /// SHA-256 fingerprint of the first DER cert in a PEM block using CommonCrypto.
+    private static func tlsFingerprintFromPEM(_ pem: String) -> String? {
+        let lines = pem.components(separatedBy: "\n")
+            .filter { !$0.hasPrefix("-----") && !$0.isEmpty }
+        guard let der = Data(base64Encoded: lines.joined()) else { return nil }
+        var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        der.withUnsafeBytes {
+            _ = CC_SHA256($0.baseAddress, CC_LONG(der.count), &digest)
+        }
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }
 #endif

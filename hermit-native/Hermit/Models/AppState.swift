@@ -246,6 +246,16 @@ final class AppState: ObservableObject {
         // Read owner/repo/docsPath from the live RepositoryStore so that switching
         // repos is reflected immediately without waiting for applyConfig().
         let activeRepo = RepositoryStore.shared.repositories.first
+        // For the embedded local server use a TLS delegate that trusts 127.0.0.1
+        // unconditionally (loopback = our own server, no security risk).
+        // For LAN (iPad) mode the fingerprint was pinned during MCSession pairing.
+        let fingerprint: String?
+        if case .embeddedLocal = serverMode {
+            // Any non-empty string works — the delegate bypasses pinning for loopback.
+            fingerprint = "loopback"
+        } else {
+            fingerprint = ConfigStore.shared.tlsCertFingerprint
+        }
         let cfg = HermitAPIClient.Config(
             baseURL:  serverBaseURL,
             repositoryID: activeRepo?.serverID,
@@ -253,7 +263,8 @@ final class AppState: ObservableObject {
             repo:     activeRepo?.name     ?? repoName,
             docsPath: activeRepo?.docsPath ?? docsPath,
             rfcLabel: activeRepo?.rfcLabel ?? rfcLabel,
-            pat:      bearer
+            pat:      bearer,
+            tlsCertFingerprint: fingerprint
         )
         return HermitAPIClient(config: cfg)
     }
@@ -282,7 +293,8 @@ final class AppState: ObservableObject {
             repo:     repo.name,
             docsPath: repo.docsPath,
             rfcLabel: repo.rfcLabel,
-            pat:      bearer
+            pat:      bearer,
+            tlsCertFingerprint: (serverMode == .embeddedLocal) ? "loopback" : ConfigStore.shared.tlsCertFingerprint
         )
         return HermitAPIClient(config: cfg)
     }

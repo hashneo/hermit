@@ -13,14 +13,23 @@ package mobile
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,19 +38,17 @@ import (
 )
 
 // StartConfig is the JSON structure accepted by Start.
-// All fields map directly to hermit config concepts.
-//
-// Repos is the preferred multi-repo field. The legacy single-repo fields
-// (BaseURL/PAT/Owner/Repo/DocsPath/RFCLabel) are still accepted for
-// backwards compatibility and are promoted into Repos when Repos is empty.
 type StartConfig struct {
 	// Multi-repo (preferred)
 	Repos   []RepoConfig      `json:"repos"`
-	DataDir string            `json:"dataDir"` // app sandbox Application Support dir
+	DataDir string            `json:"dataDir"`
 	Cache   MobileCacheConfig `json:"cache"`
 	// PairedTokens is the current set of valid iPad bearer tokens.
-	// Loaded from UserDefaults (hermit.pairedDevices) at startup.
 	PairedTokens []string `json:"pairedTokens"`
+	// TLS — cert file path (on disk) + key PEM (from Keychain, in-memory only).
+	// When both are present the server listens on TLS/1.3 instead of plain HTTP.
+	TLSCertFile string `json:"tlsCertFile"`
+	TLSKeyPEM   string `json:"tlsKeyPEM"`
 
 	// Legacy single-repo fields (promoted to Repos when Repos is empty)
 	BaseURL  string `json:"baseURL"`
@@ -68,10 +75,11 @@ type RepoConfig struct {
 }
 
 var (
-	mu           sync.Mutex
-	cancelFunc   context.CancelFunc
-	doneCh       chan struct{}
-	runningApp   *app.App // kept for live token registration/revocation
+	mu             sync.Mutex
+	cancelFunc     context.CancelFunc
+	doneCh         chan struct{}
+	runningApp     *app.App // kept for live token registration/revocation
+	tlsFingerprint string   // SHA-256 hex of current TLS cert DER
 )
 
 // SetLogFile redirects the Go server's structured logger (slog) to append to
@@ -191,6 +199,101 @@ func RevokePairedToken(token string) string {
 	return "ok"
 }
 
+// GetTLSFingerprint returns the SHA-256 hex fingerprint of the current TLS
+// certificate.  Returns an empty string if TLS is not configured or the
+// server has not been started yet.
+func GetTLSFingerprint() string {
+	mu.Lock()
+	defer mu.Unlock()
+	return tlsFingerprint
+}
+
+// GenerateTLSCert generates a new ECDSA P-256 self-signed TLS certificate,
+// writes the certificate PEM to <dataDir>/hermit/tls.crt, and returns a JSON
+// string:
+//
+//	{"certFile":"<path>","keyPEM":"<pem>","fingerprint":"<sha256-hex>"}
+//
+// The private key is NEVER written to disk — it is returned as a PEM string
+// for the caller (Swift) to store in the Keychain.  Call this once and store
+// the key; on subsequent launches pass both back via StartConfig.
+//
+// Returns "error: <message>" on failure (gomobile-safe single string return).
+func GenerateTLSCert(dataDir string) string {
+	hermitDir := filepath.Join(dataDir, "hermit")
+	if err := os.MkdirAll(hermitDir, 0o700); err != nil {
+		return fmt.Sprintf("error: mkdir: %s", err)
+	}
+
+	// Generate ECDSA P-256 key.
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return fmt.Sprintf("error: generate key: %s", err)
+	}
+
+	// Self-signed certificate — 20-year validity.
+	// SANs covering loopback AND the Mac's mDNS hostname (e.g. Stevens-MacBook-Air.local)
+	// so standard TLS hostname verification passes for both Mac→Mac and iPad→Mac paths.
+	// os.Hostname() returns the short name; append ".local" for mDNS.
+	dnsNames := []string{"localhost"}
+	if h, err := os.Hostname(); err == nil && h != "" {
+		// os.Hostname may or may not include the .local suffix depending on
+		// the macOS network configuration.  Normalise to always add one entry
+		// with and one without — deduplicating if the suffix is already present.
+		bare := strings.TrimSuffix(h, ".local")
+		dnsNames = append(dnsNames, bare, bare+".local")
+	}
+	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	template := &x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: "Hermit Local Server"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(20 * 365 * 24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
+		DNSNames:     dnsNames,
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &priv.PublicKey, priv)
+	if err != nil {
+		return fmt.Sprintf("error: create cert: %s", err)
+	}
+
+	// Write cert PEM to disk (public — not secret).
+	certFile := filepath.Join(hermitDir, "tls.crt")
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	if err := os.WriteFile(certFile, certPEM, 0o644); err != nil {
+		return fmt.Sprintf("error: write cert: %s", err)
+	}
+
+	// Encode key PEM — returned to Swift for Keychain storage, never written to disk.
+	keyDER, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return fmt.Sprintf("error: marshal key: %s", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+
+	fp := certPEMFingerprint(certPEM)
+
+	result, _ := json.Marshal(map[string]string{
+		"certFile":    certFile,
+		"keyPEM":      string(keyPEM),
+		"fingerprint": fp,
+	})
+	return string(result)
+}
+
+// certPEMFingerprint returns the hex-encoded SHA-256 digest of the first
+// DER-encoded certificate in a PEM block.
+func certPEMFingerprint(certPEM []byte) string {
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return ""
+	}
+	sum := sha256.Sum256(block.Bytes)
+	return fmt.Sprintf("%x", sum)
+}
+
 // buildConfig constructs a hermit config.Config from a StartConfig.
 func buildConfig(sc StartConfig) (config.Config, error) {
 	// Promote legacy single-repo fields when Repos is empty.
@@ -274,6 +377,8 @@ func buildConfig(sc StartConfig) (config.Config, error) {
 		Repositories:  repositories,
 		DataDir:       filepath.Join(dataDir, "hermit"),
 		PairedTokens:  sc.PairedTokens,
+		TLSCertFile:   sc.TLSCertFile,
+		TLSKeyPEM:     sc.TLSKeyPEM,
 	}
 	if sc.Cache.RepositoryRFCListReadTTLSeconds != nil && *sc.Cache.RepositoryRFCListReadTTLSeconds > 0 {
 		cfg.Cache.RepositoryRFCList.ReadTTL.Duration = time.Duration(*sc.Cache.RepositoryRFCListReadTTLSeconds) * time.Second
@@ -281,5 +386,13 @@ func buildConfig(sc StartConfig) (config.Config, error) {
 	if sc.Cache.RepositoryRFCListJitterSeconds != nil && *sc.Cache.RepositoryRFCListJitterSeconds >= 0 {
 		cfg.Cache.RepositoryRFCList.Jitter.Duration = time.Duration(*sc.Cache.RepositoryRFCListJitterSeconds) * time.Second
 	}
+
+	// Compute and cache TLS fingerprint if cert is provided.
+	if sc.TLSCertFile != "" {
+		if certPEM, err := os.ReadFile(sc.TLSCertFile); err == nil {
+			tlsFingerprint = certPEMFingerprint(certPEM)
+		}
+	}
+
 	return cfg, nil
 }

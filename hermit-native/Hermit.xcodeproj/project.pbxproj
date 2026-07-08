@@ -602,6 +602,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Hermit/Hermit-Debug.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "Hermit/Hermit-iOS.entitlements";
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -670,6 +671,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Hermit/Hermit.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "Hermit/Hermit-iOS.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;

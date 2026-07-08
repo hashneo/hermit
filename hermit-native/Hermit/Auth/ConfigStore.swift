@@ -36,6 +36,7 @@ final class ConfigStore {
         case cacheReadTTLSeconds = "hermit.cache.readTTLSeconds"
         case cacheJitterSeconds  = "hermit.cache.jitterSeconds"
         case menuBarStyle        = "hermit.menuBarStyle"
+        case tlsCertFingerprint  = "hermit.tlsCertFingerprint"
     }
 
     // MARK: - Properties
@@ -153,6 +154,13 @@ final class ConfigStore {
         set { defaults.set(newValue.rawValue, forKey: Key.menuBarStyle.rawValue) }
     }
 
+    /// SHA-256 hex fingerprint of the Mac's TLS certificate, pinned on the iPad
+    /// during pairing so all subsequent HTTPS requests are verified against it.
+    var tlsCertFingerprint: String? {
+        get { defaults.string(forKey: Key.tlsCertFingerprint.rawValue) }
+        set { defaults.set(newValue, forKey: Key.tlsCertFingerprint.rawValue) }
+    }
+
     // MARK: - Convenience
 
     /// True when the minimum fields needed to connect are present.
@@ -184,7 +192,8 @@ final class ConfigStore {
     func deleteAll() {
         for key in [Key.baseURL, .serverBaseURL, .repoOwner, .repoName,
                     .docsPath, .rfcLabel, .aiProvider, .serverMode, .localNetworkToken,
-                    .cacheReadTTLSeconds, .cacheJitterSeconds, .menuBarStyle] {
+                    .cacheReadTTLSeconds, .cacheJitterSeconds, .menuBarStyle,
+                    .tlsCertFingerprint] {
             defaults.removeObject(forKey: key.rawValue)
         }
         // Paired device tokens are stored in UserDefaults (not Keychain).

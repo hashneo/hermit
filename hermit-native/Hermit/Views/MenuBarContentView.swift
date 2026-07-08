@@ -3549,12 +3549,14 @@ private final class ServerRepositoryMenuStore: ObservableObject {
     }
 
     func refresh(port: Int?, accountID: UUID?) async {
-        guard let port,
-              let url = URL(string: "http://127.0.0.1:\(port)/api/v1/repositories") else { return }
+        guard let port else { return }
+        // Use the correct scheme — https when TLS is active, http otherwise.
+        let scheme = AppState.shared.serverBaseURL.hasPrefix("https") ? "https" : "http"
+        guard let repoURL = URL(string: "\(scheme)://127.0.0.1:\(port)/api/v1/repositories") else { return }
         stats.recordAttempt()
         menuBarDebugLog("[ServerRepositoryMenuStore] refresh start port=\(port)")
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
+            let (data, response) = try await LoopbackSession.shared.data(from: repoURL)
             guard let http = response as? HTTPURLResponse,
                   (200..<300).contains(http.statusCode) else {
                 stats.recordFailure()
@@ -4246,4 +4248,38 @@ private enum RepoRFCLoader {
          let loadedAt: Date
      }
  }
+
+// MARK: - Loopback URLSession (trusts self-signed cert on 127.0.0.1)
+
+/// A shared URLSession that trusts any TLS certificate presented by 127.0.0.1.
+final class LoopbackTLSDelegate: NSObject, URLSessionDelegate {
+    func urlSession(_ session: URLSession,
+                    didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        let host = challenge.protectionSpace.host
+        guard (host == "127.0.0.1" || host == "::1" || host == "localhost"),
+              challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let trust = challenge.protectionSpace.serverTrust
+        else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        // Use the shared anchor-pinning helper so SecTrust evaluates cleanly.
+        if let cred = hermitAcceptLeafCert(trust) {
+            completionHandler(.useCredential, cred)
+        } else {
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        }
+    }
+}
+
+enum LoopbackSession {
+    private static let delegate = LoopbackTLSDelegate()
+    static let shared: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        cfg.timeoutIntervalForRequest  = 25
+        cfg.timeoutIntervalForResource = 60
+        return URLSession(configuration: cfg, delegate: delegate, delegateQueue: nil)
+    }()
+}
 

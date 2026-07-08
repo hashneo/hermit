@@ -1,5 +1,6 @@
 import Foundation
 import os.log
+import CommonCrypto
 
 // MARK: - hermit-u1k: HermitAPIClient — consumes the Hermit REST API
 //
@@ -125,18 +126,22 @@ protocol HermitClientProtocol: Actor {
 actor HermitAPIClient: HermitClientProtocol {
 
     struct Config {
-        let baseURL: String   // e.g. "http://127.0.0.1:8765"
+        let baseURL: String   // e.g. "https://127.0.0.1:8765"
         let repositoryID: String?
         let owner:   String
         let repo:    String
         let docsPath: String
         let rfcLabel: String
         let pat:     String   // sent as Authorization: Bearer header
+        /// SHA-256 fingerprint of the server's self-signed TLS cert.
+        /// When set the client pins the cert and rejects any other.
+        var tlsCertFingerprint: String? = nil
     }
 
-    private let config: Config
+    private let config:  Config
     private let session: URLSession
-    private var resolvedRepoID: String? = nil  // cached after first /repositories lookup
+    private let tlsDelegate: HermitTLSDelegate?   // strong ref — URLSession is weak
+    private var resolvedRepoID: String? = nil
 
     init(config: Config) {
         self.config = config
@@ -146,7 +151,14 @@ actor HermitAPIClient: HermitClientProtocol {
         // failing fast for genuine offline scenarios after our offline-error retry.
         cfg.timeoutIntervalForRequest  = 25
         cfg.timeoutIntervalForResource = 60
-        self.session = URLSession(configuration: cfg)
+        if let fp = config.tlsCertFingerprint, !fp.isEmpty {
+            let delegate = HermitTLSDelegate(fingerprint: fp)
+            self.tlsDelegate = delegate
+            self.session = URLSession(configuration: cfg, delegate: delegate, delegateQueue: nil)
+        } else {
+            self.tlsDelegate = nil
+            self.session = URLSession(configuration: cfg)
+        }
     }
 
     // MARK: - discoverRFCs
@@ -865,5 +877,82 @@ private struct ServerThread: Decodable {
         let range = NSRange(body.startIndex..., in: body)
         return regex.stringByReplacingMatches(in: body, range: range, withTemplate: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+// MARK: - Shared TLS trust helper
+
+/// Pins `serverTrust` to the leaf certificate presented by the server so that
+/// `SecTrustEvaluateWithError` accepts it even though it is self-signed.
+/// Returns the evaluated `URLCredential` or nil on failure.
+func hermitAcceptLeafCert(_ serverTrust: SecTrust) -> URLCredential? {
+    guard let chain = SecTrustCopyCertificateChain(serverTrust) as? [SecCertificate],
+          let leaf = chain.first else { return nil }
+    // Anchor evaluation against only our leaf cert — makes the self-signed cert trusted.
+    SecTrustSetAnchorCertificates(serverTrust, [leaf] as CFArray)
+    SecTrustSetAnchorCertificatesOnly(serverTrust, true)
+    var cfError: CFError?
+    _ = SecTrustEvaluateWithError(serverTrust, &cfError)
+    return URLCredential(trust: serverTrust)
+}
+
+/// SHA-256 hex fingerprint of the leaf cert in `serverTrust`.
+func hermitLeafFingerprint(_ serverTrust: SecTrust) -> String? {
+    guard let chain = SecTrustCopyCertificateChain(serverTrust) as? [SecCertificate],
+          let leaf = chain.first else { return nil }
+    let derData = SecCertificateCopyData(leaf) as Data
+    var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+    derData.withUnsafeBytes { _ = CC_SHA256($0.baseAddress, CC_LONG(derData.count), &digest) }
+    return digest.map { String(format: "%02x", $0) }.joined()
+}
+
+// MARK: - TLS cert pinning delegate
+
+/// URLSession delegate for Hermit's self-signed TLS certificate.
+///
+/// Loopback (127.0.0.1, ::1, localhost): accepts the leaf cert as its own
+/// anchor — the Mac is talking to its own server, nothing to protect against.
+///
+/// LAN (iPad → Mac): requires fingerprint match against the value distributed
+/// during MCSession pairing.  Mismatch → cancel → "Server certificate changed".
+final class HermitTLSDelegate: NSObject, URLSessionDelegate {
+    private let pinnedFingerprint: String
+
+    init(fingerprint: String) {
+        self.pinnedFingerprint = fingerprint
+    }
+
+    func urlSession(_ session: URLSession,
+                    didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let serverTrust = challenge.protectionSpace.serverTrust
+        else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+
+        let host = challenge.protectionSpace.host
+
+        // Loopback — unconditionally accept our own server's cert.
+        if host == "127.0.0.1" || host == "::1" || host == "localhost" {
+            if let cred = hermitAcceptLeafCert(serverTrust) {
+                completionHandler(.useCredential, cred)
+            } else {
+                completionHandler(.useCredential, URLCredential(trust: serverTrust))
+            }
+            return
+        }
+
+        // LAN — fingerprint must match the one exchanged during pairing.
+        guard let fp = hermitLeafFingerprint(serverTrust) else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        if fp == pinnedFingerprint, let cred = hermitAcceptLeafCert(serverTrust) {
+            completionHandler(.useCredential, cred)
+        } else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+        }
     }
 }

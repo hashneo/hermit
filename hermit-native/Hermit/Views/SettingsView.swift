@@ -1010,7 +1010,7 @@ private struct RepositorySettingsTab: View {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             req.timeoutInterval = 3
 
-            guard let (data, resp) = try? await URLSession.shared.data(for: req),
+            guard let (data, resp) = try? await LoopbackSession.shared.data(for: req),
                   let http = resp as? HTTPURLResponse,
                   (200..<300).contains(http.statusCode) else { continue }
 
@@ -1185,7 +1185,7 @@ private struct AddRepoSheet: View {
         ]
         req.httpBody = try? JSONEncoder().encode(payload)
 
-        guard let (data, response) = try? await URLSession.shared.data(for: req),
+        guard let (data, response) = try? await LoopbackSession.shared.data(for: req),
               let http = response as? HTTPURLResponse else { return nil }
         if http.statusCode == 409 {
             return await findServerRepositoryID(for: repo, token: token, base: base)
@@ -1199,7 +1199,7 @@ private struct AddRepoSheet: View {
         var req = URLRequest(url: base.appendingPathComponent("api/v1/repositories"))
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.timeoutInterval = 5
-        guard let (data, response) = try? await URLSession.shared.data(for: req),
+        guard let (data, response) = try? await LoopbackSession.shared.data(for: req),
               let http = response as? HTTPURLResponse,
               (200..<300).contains(http.statusCode) else { return nil }
         struct Item: Decodable { let id: String; let owner: String; let name: String }
@@ -1417,7 +1417,7 @@ private struct ServerSettingsTab: View {
 #if os(macOS)
         case .embeddedLocal:
             if let port = EmbeddedServerManager.shared.port {
-                let url = "http://127.0.0.1:\(port)"
+                let url = EmbeddedServerManager.localServerURL(port: port)
                 appState.serverBaseURL = url
                 ConfigStore.shared.serverBaseURL = url
             }
@@ -1442,12 +1442,13 @@ private struct ServerSettingsTab: View {
         Section("Embedded Server") {
             if let port = EmbeddedServerManager.shared.port {
                 let portStr = String(port)
+                let urlStr  = EmbeddedServerManager.localServerURL(port: port)
                 LabeledContent("Status") {
                     Label("Running on port \(portStr)", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                 }
                 LabeledContent("URL") {
-                    Text("http://127.0.0.1:\(portStr)")
+                    Text(urlStr)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
@@ -1665,7 +1666,7 @@ private struct RemoteServerSection: View {
         do {
             var req = URLRequest(url: url, timeoutInterval: 10)
             req.setValue("Bearer \(appState.pat)", forHTTPHeaderField: "Authorization")
-            let (_, resp) = try await URLSession.shared.data(for: req)
+            let (_, resp) = try await LoopbackSession.shared.data(for: req)
             guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                 validationState = .failed("Server returned error")
                 return

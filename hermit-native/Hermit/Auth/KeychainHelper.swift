@@ -173,6 +173,14 @@ final class KeychainHelper {
         set { writeString(newValue, account: "hermit.localNetworkToken") }
     }
 
+    /// The TLS private key (ECDSA P-256, PEM-encoded) for the embedded server.
+    /// Stored in the Keychain so it survives app updates but never touches disk.
+    /// macOS only — the iPad does not run a server.
+    var tlsPrivateKey: String? {
+        get { readString(account: "hermit.tls.key") }
+        set { writeString(newValue, account: "hermit.tls.key") }
+    }
+
     // MARK: - Paired device token store (macOS)
 
     func loadPairedTokens() -> [String: String] {
