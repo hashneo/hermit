@@ -107,6 +107,12 @@ final class AppState: ObservableObject {
     @Published var localNetworkToken: String = ""
 
     init() {
+        // hermit-jxi / ADR-010: Load any shared account/repository catalogs from
+        // the user-facing config dir (~/Library/Application Support/Hermit/config/)
+        // first, so both DEBUG (bundled Gitea) and binary (release) builds see
+        // them. No-op when the directory is absent. Tokens are added per-user.
+        SharedConfigStore.applyToStoresIfPresent()
+
 #if DEBUG
         // Debug builds: load config directly from bundled DevConfig/ (hermit.yaml +
         // gitea-token-export.sh embedded by `make native-embed-config`).

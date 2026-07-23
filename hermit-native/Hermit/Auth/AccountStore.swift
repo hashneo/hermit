@@ -133,6 +133,24 @@ final class AccountStore: ObservableObject {
         save()
     }
 
+    /// Idempotently inserts or updates a connection derived from a shared
+    /// catalog (`SharedConfigStore`), keyed by a stable UUID. Preserves any
+    /// existing token. Does NOT post `.hermitRestartRequired` — called during
+    /// app init, before the server starts. See ADR-010.
+    func upsertShared(id: UUID, name: String, endpoint: String) {
+        if let idx = connections.firstIndex(where: { $0.id == id }) {
+            var existing = connections[idx]
+            existing.name = name
+            existing.endpoint = endpoint
+            connections[idx] = existing
+        } else {
+            var conn = Connection(name: name, endpoint: endpoint)
+            conn.id = id
+            connections.append(conn)
+        }
+        save()
+    }
+
     private func updateInPlace(_ connection: Connection, token: String?) {
         guard let idx = connections.firstIndex(where: { $0.id == connection.id }) else { return }
         let updated = connection
@@ -462,6 +480,30 @@ final class RepositoryStore: ObservableObject {
               idx != 0 else { return }
         repositories.remove(at: idx)
         repositories.insert(repo, at: 0)
+        save()
+    }
+
+    /// Idempotently inserts or updates a repository derived from a shared
+    /// catalog (`SharedConfigStore`), matched by accountID + owner + name so
+    /// the existing UUID (and any open RFC windows) stay valid. Does NOT post
+    /// `.hermitRestartRequired` — called during app init. See ADR-010.
+    func upsertShared(accountID: UUID, owner: String, name: String,
+                      docsPath: String, rfcLabel: String) {
+        if let idx = repositories.firstIndex(where: {
+            $0.accountID == accountID &&
+            $0.owner.lowercased() == owner.lowercased() &&
+            $0.name.lowercased()  == name.lowercased()
+        }) {
+            var existing = repositories[idx]
+            existing.docsPath = docsPath
+            existing.rfcLabel = rfcLabel
+            repositories[idx] = existing
+        } else {
+            repositories.append(
+                Repository(accountID: accountID, owner: owner, name: name,
+                           docsPath: docsPath, rfcLabel: rfcLabel)
+            )
+        }
         save()
     }
 
