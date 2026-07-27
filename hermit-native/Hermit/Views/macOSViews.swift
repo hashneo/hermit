@@ -25,7 +25,6 @@ struct MenuBarRFCBrowserView: View {
     /// Stable identity for the current (account, repo, server-port) triple.
     /// Changing any of these fires a new `.task`, reconfigures the client, and reloads.
     private var activeKey: String {
-        if appState.isDemoMode { return "demo" }
         let acct = accountStore.connections.first?.id.uuidString ?? "none"
         let repo = repoStore.repositories.first?.id.uuidString ?? "none"
         let port = serverMgr.port.map(String.init) ?? "down"
@@ -92,7 +91,7 @@ struct MenuBarRFCBrowserView: View {
         // }
         .task(id: activeKey) {
             selectedRFC = nil
-            guard serverMgr.port != nil || appState.isDemoMode else { return }
+            guard serverMgr.port != nil else { return }
             let docsPath = repoStore.repositories.first?.docsPath ?? appState.docsPath
             if let client = appState.makeAPIClient() {
                 store.configure(client: client, docsPath: docsPath)

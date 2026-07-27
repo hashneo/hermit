@@ -573,16 +573,6 @@ final class RepositoryStore: ObservableObject {
               orphanIndices.count, sole.name)
     }
 
-    /// Inserts a transient demo repository at index 0 without persisting it.
-    /// Called when the user activates demo mode so the RFC browser has a repo to display.
-    func injectDemoRepository() {
-        guard !repositories.contains(where: { $0.owner == "demo" }) else { return }
-        var repo = Repository(accountID: UUID(), owner: "demo", name: "sample-rfcs",
-                              docsPath: "docs", rfcLabel: "")
-        repo.id = UUID(uuidString: "CAFECAFE-CAFE-CAFE-CAFE-CAFECAFE0001") ?? UUID()
-        repositories.insert(repo, at: 0)
-    }
-
     private func save() {
         if let data = try? JSONEncoder().encode(repositories) {
             UserDefaults.standard.set(data, forKey: "hermit.repositories")

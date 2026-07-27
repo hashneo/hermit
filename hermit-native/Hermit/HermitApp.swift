@@ -559,13 +559,8 @@ final class HermitNativeMenu: NSMenu, NSMenuDelegate {
 
         // ── Per-repo submenus ──────────────────────────────────────────
         let repos = RepositoryStore.shared.repositories
-        if repos.isEmpty || AppState.shared.isDemoMode {
-            if AppState.shared.isDemoMode {
-                addDisabledItem("Demo — sample RFCs loaded")
-            } else {
-                addDisabledItem("No repositories configured")
-                addItem(makeItem("Try Demo", action: #selector(tryDemo)))
-            }
+        if repos.isEmpty {
+            addDisabledItem("No repositories configured")
         } else {
             for repo in repos {
                 let item = NSMenuItem(title: repo.fullName, action: nil, keyEquivalent: "")
@@ -615,14 +610,6 @@ final class HermitNativeMenu: NSMenu, NSMenuDelegate {
 
     @objc private func openDashboard() {
         DashboardFloatingWindowManager.shared.open(appState: AppState.shared)
-    }
-
-    @objc private func tryDemo() {
-        let appState = AppState.shared
-        appState.isDemoMode      = true
-        appState.isAuthenticated = true
-        RepositoryStore.shared.injectDemoRepository()
-        DashboardFloatingWindowManager.shared.open(appState: appState)
     }
 
     @objc private func refreshAll() {
