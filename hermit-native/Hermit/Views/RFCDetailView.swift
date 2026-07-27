@@ -74,6 +74,8 @@ struct RFCDetailView: View {
     }
     @State private var reviewSheetContext: ReviewSheetContext? = nil
 
+    @State private var pendingAnchor: String?
+
     init(rfc: RFC, repo: Repository? = nil,
          commentStore: CommentStore? = nil,
          onLineTapped: ((Int, Int) -> Void)? = nil,
@@ -300,7 +302,15 @@ struct RFCDetailView: View {
             )
         }
         .overlay(lifecycleErrorBanner, alignment: .top)
-        .task(id: rfc.id) { await loadContent() }
+        // Pick up any heading fragment left by a cross-document link tap (see
+        // AppState.pendingDeepLinkFragment / RFCDetailView.handleLinkTap) whenever
+        // rfc.id changes — covers both a brand-new window (macOS) and in-place
+        // RFC-to-RFC navigation where this view's identity/@State persists (iPadOS).
+        .task(id: rfc.id) {
+            pendingAnchor = appState.pendingDeepLinkFragment
+            appState.pendingDeepLinkFragment = nil
+            await loadContent()
+        }
         .onChange(of: reloadToken) { Task { await loadContent() } }
         .alert("Merge Failed", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
             Button("OK", role: .cancel) { actionError = nil }
@@ -389,7 +399,20 @@ struct RFCDetailView: View {
                     proxy.scrollTo("line-\(line)", anchor: .center)
                 }
             }
+            .onChange(of: markdown) { _, _ in
+                resolvePendingAnchor()
+            }
         }
+    }
+
+    /// Resolves `pendingAnchor` (a heading fragment carried from a cross-document
+    /// link) against the now-loaded document's headings and scrolls to it.
+    private func resolvePendingAnchor() {
+        guard let anchor = pendingAnchor, !markdown.isEmpty else { return }
+        if let line = MarkdownAnchors.headingLines(in: parsedBlocks)[anchor.lowercased()] {
+            scrollToLine = line
+        }
+        pendingAnchor = nil
     }
 
     // MARK: - Content loading
@@ -645,16 +668,29 @@ struct RFCDetailView: View {
     }
 
     /// Handle a link tap from the rendered RFC document.
+    /// - Same-document anchors (`#heading`, empty path): scroll to the matching heading.
     /// - Relative links (no scheme): resolve against the current RFC's directory,
-    ///   encode as a `hermit://rfc/<path>` deep link, and open within Hermit.
+    ///   encode as a `hermit://rfc/<path>` deep link, and open within Hermit. Any
+    ///   `#fragment` is carried via AppState so the destination document can scroll
+    ///   to it once it loads.
     /// - Absolute links: open in the system browser.
     private func handleLinkTap(_ url: URL) {
         if url.scheme == nil || url.scheme == "" {
-            // Relative path — resolve against current RFC directory
+            if url.path.isEmpty, let fragment = url.fragment,
+               let line = MarkdownAnchors.headingLines(in: parsedBlocks)[fragment.lowercased()] {
+                scrollToLine = line
+                return
+            }
+            // Relative path — resolve against current RFC directory, collapsing any
+            // "./" or "../" segments (standardizingPath only collapses ".." for
+            // absolute paths, so a leading "/" is added and stripped back off).
             let rfcDir = (rfc.path as NSString).deletingLastPathComponent
             let resolved = rfcDir.isEmpty ? url.path : rfcDir + "/" + url.path
-            let encoded = resolved.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? resolved
+            let standardized = ("/" + resolved as NSString).standardizingPath
+            let normalized = standardized.hasPrefix("/") ? String(standardized.dropFirst()) : standardized
+            let encoded = normalized.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? normalized
             guard let deepLink = URL(string: "hermit://rfc/\(encoded)") else { return }
+            appState.pendingDeepLinkFragment = url.fragment
             openURL(deepLink)
         } else {
             // Absolute URL — open in system browser

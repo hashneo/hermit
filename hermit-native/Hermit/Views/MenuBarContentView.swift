@@ -3734,6 +3734,10 @@ private final class MenuBarDashboardStore: ObservableObject {
                 loadedAt: syncedAt
             )
             RepoRFCCache.shared.store(sections, for: repo.id)
+#if os(macOS)
+            // hermit-txn: retry a deep link that arrived before this repo's RFCs loaded.
+            RFCViewerWindowManager.shared.resolvePendingDeepLink(in: mainRFCs + prRFCs, repo: repo, appState: appState)
+#endif
             RepositoryStore.shared.markSynced(repo, at: syncedAt)
             stats.recordSuccess()
             setState(

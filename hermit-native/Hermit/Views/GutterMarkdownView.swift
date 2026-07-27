@@ -414,25 +414,15 @@ struct GutterMarkdownView: View {
     private static func plainText(from block: MarkdownBlock) -> String {
         switch block {
         case .heading(_, let inlines, _, _), .paragraph(let inlines, _, _), .blockquote(let inlines, _, _):
-            return inlines.map { inlineText($0) }.joined()
+            return inlines.map { MarkdownInline.plainText($0) }.joined()
         case .codeBlock(_, let code, _, _), .mermaidBlock(let code, _, _):
             return code
         case .bulletList(let items, _, _), .orderedList(let items, _, _):
-            return items.map { $0.inlines }.flatMap { $0 }.map { inlineText($0) }.joined(separator: " ")
+            return items.map { $0.inlines }.flatMap { $0 }.map { MarkdownInline.plainText($0) }.joined(separator: " ")
         case .table(let headers, _, _, _):
-            return headers.flatMap { $0 }.map { inlineText($0) }.joined(separator: " ")
+            return headers.flatMap { $0 }.map { MarkdownInline.plainText($0) }.joined(separator: " ")
         case .horizontalRule:
             return "---"
-        }
-    }
-
-    private static func inlineText(_ inline: MarkdownInline) -> String {
-        switch inline {
-        case .text(let s): return s
-        case .bold(let i), .italic(let i): return i.map { inlineText($0) }.joined()
-        case .code(let s): return s
-        case .link(let t, _): return t
-        case .image(let a, _): return a
         }
     }
 }
