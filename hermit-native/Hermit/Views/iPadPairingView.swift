@@ -85,6 +85,7 @@ struct iPadPairingView: View {
                 }
 
                 Spacer()
+
             }
             .navigationTitle("Hermit")
             .navigationBarTitleDisplayMode(.inline)

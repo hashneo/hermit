@@ -25,6 +25,10 @@
 		<string>_hermit-pair._udp</string>
 		<string>_hermit._tcp</string>
 	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Hermit uses the local network to discover and connect to the Hermit server running on your Mac.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Hermit uses the microphone to record voice comments on RFC documents.</string>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>me.steven.hermit.view-rfc</string>

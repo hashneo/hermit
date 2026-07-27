@@ -185,14 +185,15 @@ struct MenuBarContentView: View {
                     .buttonStyle(.bordered)
                 }
 
-                Button {
-                    NewRFCWindowManager.shared.open(appState: appState)
-                } label: {
-                    Label("New RFC", systemImage: "plus")
-                }
-                .labelStyle(.iconOnly)
-                .help("New RFC")
-                .buttonStyle(.borderedProminent)
+                // TODO: re-enable once New RFC is ready for release
+                // Button {
+                //     NewRFCWindowManager.shared.open(appState: appState)
+                // } label: {
+                //     Label("New RFC", systemImage: "plus")
+                // }
+                // .labelStyle(.iconOnly)
+                // .help("New RFC")
+                // .buttonStyle(.borderedProminent)
             }
         } else {
             HStack(spacing: 8) {
@@ -214,12 +215,13 @@ struct MenuBarContentView: View {
                     .help("Detach to floating window")
                 }
 
-                Button {
-                    NewRFCWindowManager.shared.open(appState: appState)
-                } label: {
-                    Label("New RFC", systemImage: "plus")
-                }
-                .buttonStyle(.borderedProminent)
+                // TODO: re-enable once New RFC is ready for release
+                // Button {
+                //     NewRFCWindowManager.shared.open(appState: appState)
+                // } label: {
+                //     Label("New RFC", systemImage: "plus")
+                // }
+                // .buttonStyle(.borderedProminent)
             }
         }
     }

@@ -68,6 +68,7 @@
 		B001FF10 /* LiveVoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001FF11 /* LiveVoiceSession.swift */; };
 		B001FF12 /* PRReviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001FF13 /* PRReviewSheet.swift */; };
 		B001LOG1 /* me.steven.hermit.plist in Resources */ = {isa = PBXBuildFile; fileRef = B001LOG2 /* me.steven.hermit.plist */; };
+		B001PV01 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B001PV02 /* PrivacyInfo.xcprivacy */; };
 		B001RR01 /* RecentRFCStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001RR00 /* RecentRFCStore.swift */; };
 		F51CA0CA0595C036D8E2D00B /* CommentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 702547F1AF611276712EA42C /* CommentStore.swift */; };
 /* End PBXBuildFile section */
@@ -150,6 +151,7 @@
 		B001FF11 /* LiveVoiceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVoiceSession.swift; sourceTree = "<group>"; };
 		B001FF13 /* PRReviewSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRReviewSheet.swift; sourceTree = "<group>"; };
 		B001LOG2 /* me.steven.hermit.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = me.steven.hermit.plist; sourceTree = "<group>"; };
+		B001PV02 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		B001RR00 /* RecentRFCStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentRFCStore.swift; sourceTree = "<group>"; };
 		HERMIT0001 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -319,6 +321,7 @@
 			children = (
 				B001A100 /* Assets.xcassets */,
 				B001LOG2 /* me.steven.hermit.plist */,
+				B001PV02 /* PrivacyInfo.xcprivacy */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -403,6 +406,7 @@
 				B001A101 /* Assets.xcassets in Resources */,
 				B001D007 /* DevConfig in Resources */,
 				B001LOG1 /* me.steven.hermit.plist in Resources */,
+				B001PV01 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
