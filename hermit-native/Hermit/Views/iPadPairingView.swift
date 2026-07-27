@@ -85,6 +85,18 @@ struct iPadPairingView: View {
                 }
 
                 Spacer()
+
+                // ── Demo mode ──────────────────────────────────────────
+                Button {
+                    appState.isDemoMode      = true
+                    appState.isAuthenticated = true
+                } label: {
+                    Text("Try Demo")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .padding(.bottom, 24)
             }
             .navigationTitle("Hermit")
             .navigationBarTitleDisplayMode(.inline)

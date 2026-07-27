@@ -80,6 +80,11 @@ final class AppState: ObservableObject {
     /// destination document identified by pendingDeepLinkPath has loaded.
     @Published var pendingDeepLinkFragment: String? = nil
 
+    /// When true the app is running in demo mode: DemoHermitClient serves bundled
+    /// sample RFCs and all write operations are disabled.  Set by the "Try Demo"
+    /// action; never persisted to UserDefaults.
+    @Published var isDemoMode: Bool = false
+
     // hermit-iwq: UserDefaults keys for scene restoration
     private enum RestoreKey {
         static let rfcID   = "hermit.restore.rfcID"
@@ -234,6 +239,7 @@ final class AppState: ObservableObject {
     /// All GitHub interactions flow through the Go backend — there is no
     /// direct GitHub API fallback in the native client.
     func makeAPIClient() -> (any HermitClientProtocol)? {
+        if isDemoMode { return DemoHermitClient.shared }
         guard !serverBaseURL.isEmpty else { return nil }
 
         // Local-network mode: authenticate with the MPC-paired bearer token.
@@ -280,6 +286,7 @@ final class AppState: ObservableObject {
 
     /// Returns a client scoped to a specific repository.
     func makeAPIClient(for repo: Repository) -> (any HermitClientProtocol)? {
+        if isDemoMode { return DemoHermitClient.shared }
         guard !serverBaseURL.isEmpty else { return nil }
         let bearer: String
         if case .localNetwork = serverMode {

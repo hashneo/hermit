@@ -25,6 +25,7 @@ struct MenuBarRFCBrowserView: View {
     /// Stable identity for the current (account, repo, server-port) triple.
     /// Changing any of these fires a new `.task`, reconfigures the client, and reloads.
     private var activeKey: String {
+        if appState.isDemoMode { return "demo" }
         let acct = accountStore.connections.first?.id.uuidString ?? "none"
         let repo = repoStore.repositories.first?.id.uuidString ?? "none"
         let port = serverMgr.port.map(String.init) ?? "down"
@@ -45,12 +46,13 @@ struct MenuBarRFCBrowserView: View {
                     }
                     .help("Refresh RFCs")
                 }
-                ToolbarItem {
-                    Button { showNewRFC = true } label: {
-                        Image(systemName: "plus")
-                    }
-                    .help("New RFC")
-                }
+                // TODO: re-enable once New RFC is ready for release
+                // ToolbarItem {
+                //     Button { showNewRFC = true } label: {
+                //         Image(systemName: "plus")
+                //     }
+                //     .help("New RFC")
+                // }
             }
         } detail: {
             if let rfc = selectedRFC {
@@ -76,20 +78,21 @@ struct MenuBarRFCBrowserView: View {
             }
         }
         .frame(width: 780, height: 540)
-        .sheet(isPresented: $showNewRFC) {
-            NavigationStack {
-                RFCInterviewView(aiProvider: AIProviderFactory.makeProvider())
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Cancel") { showNewRFC = false }
-                        }
-                    }
-            }
-            .frame(minWidth: 600, minHeight: 500)
-        }
+        // TODO: re-enable once New RFC is ready for release
+        // .sheet(isPresented: $showNewRFC) {
+        //     NavigationStack {
+        //         RFCInterviewView(aiProvider: AIProviderFactory.makeProvider())
+        //             .toolbar {
+        //                 ToolbarItem(placement: .cancellationAction) {
+        //                     Button("Cancel") { showNewRFC = false }
+        //                 }
+        //             }
+        //     }
+        //     .frame(minWidth: 600, minHeight: 500)
+        // }
         .task(id: activeKey) {
             selectedRFC = nil
-            guard serverMgr.port != nil else { return }  // server still restarting
+            guard serverMgr.port != nil || appState.isDemoMode else { return }
             let docsPath = repoStore.repositories.first?.docsPath ?? appState.docsPath
             if let client = appState.makeAPIClient() {
                 store.configure(client: client, docsPath: docsPath)
