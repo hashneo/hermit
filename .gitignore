@@ -45,3 +45,4 @@ hermit-native/DerivedData/
 hermit-native/Hermit/HermitServer.xcframework/
 .idea/
 scripts/__pycache__/
+/deploy

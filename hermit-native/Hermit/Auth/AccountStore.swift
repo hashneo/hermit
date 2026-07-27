@@ -217,18 +217,27 @@ final class AccountStore: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
 
-        // GitHub  → GET /user          (authenticated; returns 401 on bad/missing token)
-        // Gitea   → GET /api/v1/user   (authenticated; same behaviour as GitHub)
-        // Other   → GET /api/v1/health (unauthenticated reachability check only)
+        // GitHub (api.github.com, /api/v3)  → GET {base}/user          (authenticated)
+        // Gitea API base (/api/v1 in path)  → GET {base}/user          (authenticated)
+        // Gitea web base (no API path)      → GET {base}/api/v1/user   (authenticated)
         let isGitHub = Self.isGitHubAPIEndpoint(base)
-        let isGitea  = Self.isGiteaEndpoint(base)
-        let healthPath: String
-        if isGitHub || isGitea {
-            healthPath = "/user"
+        let probeURL: URL?
+        if isGitHub {
+            probeURL = URL(string: "\(base)/user")
         } else {
-            healthPath = "/api/v1/health"
+            // Treat any non-GitHub URL as Gitea/Forgejo-compatible — they all
+            // expose GET /api/v1/user as an authenticated identity endpoint.
+            // If the endpoint already has /api/v1 in the path, append just /user;
+            // otherwise append the full /api/v1/user path.
+            let urlPath = URL(string: base)?.path
+                .lowercased()
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/")) ?? ""
+            let isAPIBase = urlPath == "api/v1" || urlPath.hasSuffix("/api/v1")
+            probeURL = isAPIBase
+                ? URL(string: "\(base)/user")
+                : URL(string: "\(base)/api/v1/user")
         }
-        guard let url = URL(string: "\(base)\(healthPath)") else { return }
+        guard let url = probeURL else { return }
 
         var req = URLRequest(url: url, timeoutInterval: 8)
         if let token = token(for: connection) {
@@ -344,20 +353,6 @@ final class AccountStore: ObservableObject {
             host.contains(".github.") ||
             path == "api/v3" ||
             path.hasSuffix("/api/v3")
-    }
-
-    /// True for self-hosted Gitea instances.  Gitea exposes GET /api/v1/user
-    /// as an authenticated endpoint (returns 401 on bad/missing token), which
-    /// gives us proper credential validation rather than the unauthenticated
-    /// /api/v1/health check.
-    private static func isGiteaEndpoint(_ endpoint: String) -> Bool {
-        guard let url = URL(string: endpoint),
-              let host = url.host?.lowercased() else { return false }
-        // Localhost Gitea dev instances
-        if host == "localhost" || host == "127.0.0.1" { return true }
-        // Explicit /api/v1 path is the Gitea API base convention
-        let path = url.path.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        return path == "api/v1" || path.hasSuffix("/api/v1")
     }
 
     private func save() {
@@ -576,6 +571,16 @@ final class RepositoryStore: ObservableObject {
         save()
         NSLog("[RepositoryStore] healed %d orphaned repo(s) → account '%@'",
               orphanIndices.count, sole.name)
+    }
+
+    /// Inserts a transient demo repository at index 0 without persisting it.
+    /// Called when the user activates demo mode so the RFC browser has a repo to display.
+    func injectDemoRepository() {
+        guard !repositories.contains(where: { $0.owner == "demo" }) else { return }
+        var repo = Repository(accountID: UUID(), owner: "demo", name: "sample-rfcs",
+                              docsPath: "docs", rfcLabel: "")
+        repo.id = UUID(uuidString: "CAFECAFE-CAFE-CAFE-CAFE-CAFECAFE0001") ?? UUID()
+        repositories.insert(repo, at: 0)
     }
 
     private func save() {
