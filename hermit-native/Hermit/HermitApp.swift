@@ -134,6 +134,7 @@ final class HermitAppDelegate: NSObject, NSApplicationDelegate {
         for url in urls {
             if let path = HermitActivity.rfcPath(from: url) {
                 AppState.shared.pendingDeepLinkPath = path
+                RFCViewerWindowManager.shared.resolvePendingDeepLink(appState: AppState.shared)
                 break
             }
         }
@@ -274,6 +275,34 @@ final class RFCViewerWindowManager {
         DispatchQueue.main.async {
             NSApp.setActivationPolicy(.regular)
         }
+    }
+}
+
+// hermit-txn: resolve a pending hermit://rfc/<path> deep link (see AppState.pendingDeepLinkPath)
+// against already-loaded RFC lists and open the matching document's viewer window.
+extension RFCViewerWindowManager {
+    /// Tries every configured repo's cached RFC list. Used right when a deep link
+    /// arrives, in case some repo's list is already cached from an earlier session.
+    @discardableResult
+    func resolvePendingDeepLink(appState: AppState) -> Bool {
+        for repo in RepositoryStore.shared.repositories {
+            guard let sections = RepoRFCCache.shared.nativeSections(for: repo.id) else { continue }
+            if resolvePendingDeepLink(in: sections.mainBranch + sections.pullRequests, repo: repo, appState: appState) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Tries a specific repo's just-loaded RFC list — called as a retry whenever
+    /// a repo's RFCs finish loading, in case the deep link arrived before that.
+    @discardableResult
+    func resolvePendingDeepLink(in rfcs: [RFC], repo: Repository, appState: AppState) -> Bool {
+        guard let path = appState.pendingDeepLinkPath,
+              let rfc = rfcs.first(where: { $0.path == path }) else { return false }
+        appState.pendingDeepLinkPath = nil
+        open(rfc: rfc, repo: repo, appState: appState)
+        return true
     }
 }
 
@@ -709,6 +738,8 @@ final class HermitRepoSubMenu: NSMenu, NSMenuDelegate {
                 guard !Task.isCancelled else { return }
                 self.loadState = .loaded(mainRFCs, prRFCs)
                 self.populate(main: mainRFCs, prs: prRFCs)
+                // hermit-txn: retry a deep link that arrived before this repo's RFCs loaded.
+                RFCViewerWindowManager.shared.resolvePendingDeepLink(in: mainRFCs + prRFCs, repo: self.repo, appState: AppState.shared)
             } catch {
                 guard !Task.isCancelled else { return }
                 self.loadState = .failed(error.localizedDescription)

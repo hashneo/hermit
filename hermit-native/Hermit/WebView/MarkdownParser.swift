@@ -9,6 +9,17 @@ indirect enum MarkdownInline: Equatable {
     case code(String)
     case link(text: String, url: String)
     case image(alt: String, url: String)
+
+    /// Flattens inlines down to their plain-text content (marker/link syntax stripped).
+    static func plainText(_ inline: MarkdownInline) -> String {
+        switch inline {
+        case .text(let s): return s
+        case .bold(let i), .italic(let i): return i.map { plainText($0) }.joined()
+        case .code(let s): return s
+        case .link(let t, _): return t
+        case .image(let a, _): return a
+        }
+    }
 }
 
 enum MarkdownBlock {
@@ -382,5 +393,44 @@ enum MarkdownParser {
         let url  = String(chars[(parenOpen + 1)..<parenClose])
         let consumed = parenClose - from + 1  // number of chars from `from` through `)`
         return (text, url, consumed)
+    }
+}
+
+// MARK: - Heading anchors
+
+/// Builds a GitHub-style heading-slug index so `#fragment` links (same-document
+/// or cross-document) can be resolved to a source line to scroll to.
+enum MarkdownAnchors {
+    /// Maps each heading's slug to its `sourceLine`, deduping repeated slugs by
+    /// appending "-1", "-2", ... in document order (matches GitHub's convention).
+    static func headingLines(in blocks: [MarkdownBlock]) -> [String: Int] {
+        var counts: [String: Int] = [:]
+        var result: [String: Int] = [:]
+        for block in blocks {
+            guard case .heading(_, let inlines, let line, _) = block else { continue }
+            let text = inlines.map { MarkdownInline.plainText($0) }.joined()
+            let base = slugify(text)
+            guard !base.isEmpty else { continue }
+            let occurrence = counts[base, default: 0]
+            counts[base] = occurrence + 1
+            let slug = occurrence == 0 ? base : "\(base)-\(occurrence)"
+            result[slug] = line
+        }
+        return result
+    }
+
+    private static func slugify(_ text: String) -> String {
+        let lowered = text.lowercased()
+        var slug = ""
+        for scalar in lowered.unicodeScalars {
+            if CharacterSet.alphanumerics.contains(scalar) {
+                slug.unicodeScalars.append(scalar)
+            } else if scalar == " " || scalar == "-" || scalar == "_" {
+                slug.append("-")
+            }
+            // All other punctuation is dropped entirely, matching GitHub's slugifier.
+        }
+        while slug.contains("--") { slug = slug.replacingOccurrences(of: "--", with: "-") }
+        return slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
     }
 }

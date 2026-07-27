@@ -76,6 +76,9 @@ final class AppState: ObservableObject {
     // hermit-txn: pending deep-link navigation (set by onOpenURL / open(urls:), consumed once store loads)
     /// Decoded RFC path from a hermit://rfc/<path> URL, waiting for the RFC store to load.
     @Published var pendingDeepLinkPath: String? = nil
+    /// The heading fragment (if any) from the tapped link, to scroll to once the
+    /// destination document identified by pendingDeepLinkPath has loaded.
+    @Published var pendingDeepLinkFragment: String? = nil
 
     // hermit-iwq: UserDefaults keys for scene restoration
     private enum RestoreKey {

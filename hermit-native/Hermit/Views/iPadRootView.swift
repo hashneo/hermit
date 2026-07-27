@@ -377,13 +377,14 @@ struct iPadRootView: View {
                 appState.pendingHandoffRFCID  = nil
                 appState.pendingHandoffLine   = nil
             }
-            // hermit-txn: deep link navigation
-            if let path = appState.pendingDeepLinkPath,
-               let rfc = rfcs.first(where: { $0.path == path }) {
-                appState.selectedRFC         = rfc
-                appState.selectedLine        = nil
-                appState.pendingDeepLinkPath = nil
-            }
+            // hermit-txn: deep link navigation — fallback for the cold-launch race
+            // where the link arrives before the store has loaded.
+            resolveDeepLink(against: rfcs)
+        }
+        // hermit-txn: resolve immediately when a deep link arrives mid-session
+        // (store.rfcs is already loaded and won't change identity on its own).
+        .onChange(of: appState.pendingDeepLinkPath) { _, _ in
+            resolveDeepLink(against: store.rfcs)
         }
         // hermit-myr: donate to Spotlight / Siri whenever the viewed RFC changes (iPadOS)
         // hermit-iwq: persist last-viewed RFC for scene restoration on next launch
@@ -393,6 +394,17 @@ struct iPadRootView: View {
             if let rfc { SpotlightDonor.shared.donate(rfc: rfc) }
 #endif
         }
+    }
+
+    // hermit-txn: shared deep-link matching, called both when the RFC list
+    // loads and whenever a new deep link arrives. Any heading fragment is left
+    // in appState.pendingDeepLinkFragment for RFCDetailView to self-consume.
+    private func resolveDeepLink(against rfcs: [RFC]) {
+        guard let path = appState.pendingDeepLinkPath,
+              let rfc = rfcs.first(where: { $0.path == path }) else { return }
+        appState.selectedRFC         = rfc
+        appState.selectedLine        = nil
+        appState.pendingDeepLinkPath = nil
     }
 
     // MARK: - Landscape: two-column split (list | detail+thread)
