@@ -123,6 +123,45 @@ enum SharedConfigStore {
         }
     }
 
+    // MARK: - Export
+
+    /// Builds a `hermit-repos.json`-compatible payload from the current live stores
+    /// and returns it as pretty-printed JSON data.
+    ///
+    /// Tokens are never included — the JSON schema has no `pat` field.  Each
+    /// recipient adds their own PAT per account after importing.
+    ///
+    /// The account `id` field is the account's UUID string.  Importing this file on
+    /// another machine derives a deterministic UUID from that string (via
+    /// `deterministicUUID(for:)`), giving every team member a consistent, stable
+    /// identity for the same account regardless of how the exporting user originally
+    /// created theirs.
+    @MainActor
+    static func exportJSON() throws -> Data {
+        let accounts = AccountStore.shared.connections.map { acct in
+            ["id": acct.id.uuidString, "name": acct.name, "endpoint": acct.endpoint]
+        }
+
+        let repos: [[String: String]] = RepositoryStore.shared.repositories.compactMap { repo in
+            guard AccountStore.shared.connections.contains(where: { $0.id == repo.accountID }) else {
+                return nil  // orphaned repo — omit from export
+            }
+            return [
+                "account":   repo.accountID.uuidString,
+                "owner":     repo.owner,
+                "name":      repo.name,
+                "docs_path": repo.docsPath,
+                "rfc_label": repo.rfcLabel,
+            ]
+        }
+
+        let payload: [String: Any] = ["version": 1, "accounts": accounts, "repositories": repos]
+        return try JSONSerialization.data(withJSONObject: payload,
+                                         options: [.prettyPrinted, .sortedKeys])
+    }
+
+    // MARK: - UUID helpers
+
     /// Derives a stable UUID from an arbitrary string (e.g. an account id like
     /// `"github-ibm"`) so the same catalog always maps to the same UUIDs.
     /// This keeps Keychain token keys stable across launches and catalog updates.

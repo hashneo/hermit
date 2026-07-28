@@ -1,5 +1,6 @@
 import SwiftUI
 import Network
+import UniformTypeIdentifiers
 
 // MARK: - SettingsView
 // hermit-3wh: Server settings tab (macOS — mode selector, Bonjour list stub, remote URL)
@@ -835,11 +836,16 @@ private struct RepositorySettingsTab: View {
     @State private var validationError: String?    = nil   // error message to show
     @State private var errorRepo:     Repository?  = nil   // repo that failed, offered for edit
     @State private var selection:    Set<UUID>   = []
+    @State private var exportError: String?     = nil
 
     var body: some View {
         VStack(spacing: 0) {
             // ── Toolbar ──────────────────────────────────────────────────
             HStack {
+                Button("Export Team Config…") { exportConfig() }
+                    .buttonStyle(.borderless)
+                    .padding([.top, .leading, .bottom], 8)
+                    .help("Save a hermit-repos.json your team can drop into ~/Library/Application Support/Hermit/config/")
                 Spacer()
                 Button { showAddSheet = true } label: {
                     Label("Add Repository", systemImage: "plus")
@@ -948,6 +954,39 @@ private struct RepositorySettingsTab: View {
                 if let r = deleteTarget { repoStore.remove(r) }
                 deleteTarget = nil
             }
+        }
+        .alert("Export failed", isPresented: Binding(
+            get: { exportError != nil },
+            set: { if !$0 { exportError = nil } }
+        )) {
+            Button("OK", role: .cancel) { exportError = nil }
+        } message: {
+            Text(exportError ?? "")
+        }
+    }
+
+    // MARK: - Export
+
+    private func exportConfig() {
+        let data: Data
+        do {
+            data = try SharedConfigStore.exportJSON()
+        } catch {
+            exportError = error.localizedDescription
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "hermit-repos-team.json"
+        panel.allowedContentTypes  = [.json]
+        panel.message = "Share this file with your team. Each member drops it into ~/Library/Application Support/Hermit/config/ and relaunches Hermit."
+        panel.isExtensionHidden = false
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            exportError = error.localizedDescription
         }
     }
 
