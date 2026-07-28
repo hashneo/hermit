@@ -77,6 +77,7 @@ struct SettingsView: View {
 #if os(macOS)
 private struct GeneralSettingsTab: View {
     @AppStorage("hermit.menuBarStyle") private var menuBarStyle = MenuBarStyle.nativeMenu.rawValue
+    @AppStorage("hermit.dashboardAlwaysOnTop") private var alwaysOnTop = true
 
     var body: some View {
         Form {
@@ -97,6 +98,16 @@ private struct GeneralSettingsTab: View {
                 .foregroundStyle(.secondary)
             } header: {
                 Text("Menu bar")
+            }
+
+            Section {
+                Toggle("Keep dashboard always on top", isOn: $alwaysOnTop)
+            } header: {
+                Text("Dashboard")
+            } footer: {
+                Text("When enabled, the dashboard floats above other windows.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -985,46 +996,32 @@ private struct RepositorySettingsTab: View {
         do { data = try SharedConfigStore.exportJSON() }
         catch { configError = error.localizedDescription; return }
 
-        // Defer past SwiftUI's current render cycle so AppKit can open the panel.
+        // Defer past SwiftUI's button-tap update cycle so the panel opens correctly.
         DispatchQueue.main.async {
-            NSApp.activate(ignoringOtherApps: true)
-
             let panel = NSSavePanel()
             panel.nameFieldStringValue = "hermit-repos-team.json"
             panel.allowedContentTypes  = [UTType.json]
             panel.message = "Share this file with teammates — each member drops it into ~/Library/Application Support/Hermit/config/"
             panel.isExtensionHidden    = false
-            panel.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
-
-            panel.begin { response in
-                guard response == .OK, let url = panel.url else { return }
-                try? data.write(to: url, options: .atomic)
-            }
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            try? data.write(to: url, options: .atomic)
         }
     }
 
     private func triggerImport() {
-        // Defer past SwiftUI's current render cycle so AppKit can open the panel.
+        // Defer past SwiftUI's button-tap update cycle so the panel opens correctly.
         DispatchQueue.main.async {
-            NSApp.activate(ignoringOtherApps: true)
-
             let panel = NSOpenPanel()
             panel.allowedContentTypes     = [UTType.json]
             panel.allowsMultipleSelection = false
             panel.canChooseDirectories    = false
             panel.message                 = "Select a hermit-repos-team.json to load shared accounts and repositories"
-            panel.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
-
-            panel.begin { response in
-                guard response == .OK, let url = panel.url else { return }
-                DispatchQueue.main.async {
-                    do {
-                        let fileData = try Data(contentsOf: url)
-                        try SharedConfigStore.applyData(fileData)
-                    } catch {
-                        configError = "Import failed: \(error.localizedDescription)"
-                    }
-                }
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            do {
+                let fileData = try Data(contentsOf: url)
+                try SharedConfigStore.applyData(fileData)
+            } catch {
+                // Error is intentionally swallowed here; applyData logs internally.
             }
         }
     }

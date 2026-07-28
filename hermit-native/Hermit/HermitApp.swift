@@ -618,7 +618,7 @@ final class HermitNativeMenu: NSMenu, NSMenuDelegate {
     }
 
     @objc private func openSettings() {
-        DashboardFloatingWindowManager.shared.open(appState: AppState.shared, openToSettings: true)
+        SettingsWindowManager.shared.open(appState: AppState.shared)
     }
 
     @objc private func allowPairing() {
@@ -788,10 +788,18 @@ final class HermitRepoSubMenu: NSMenu, NSMenuDelegate {
 final class DashboardFloatingWindowManager {
     static let shared = DashboardFloatingWindowManager()
     private var controller: NSWindowController?
+    private var defaultsObserver: NSObjectProtocol?
+    private static let frameKey        = "hermit.dashboardWindowFrame"
+    private static let alwaysOnTopKey  = "hermit.dashboardAlwaysOnTop"
 
-    var window: NSWindow? { controller?.window }
+    private static var alwaysOnTop: Bool {
+        // Default true — key absent means "not yet set" → on.
+        UserDefaults.standard.object(forKey: alwaysOnTopKey) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: alwaysOnTopKey)
+    }
 
-    func open(appState: AppState, openToSettings: Bool = false) {
+    func open(appState: AppState) {
         if let existing = controller?.window, existing.isVisible {
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -806,17 +814,15 @@ final class DashboardFloatingWindowManager {
         )
         panel.title = "Hermit Dashboard"
         panel.isFloatingPanel = true
-        panel.level = .floating
+        panel.level = Self.alwaysOnTop ? .floating : .normal
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.minSize = NSSize(width: 780, height: 580)
-        panel.center()
 
         let content = MenuBarContentView(
             managesWindowPresentation: false,
             allowsDetach: false,
-            openToSettings: openToSettings,
             onOpenReview: {},
             onClose: { [weak panel] in panel?.close() }
         )
@@ -826,12 +832,123 @@ final class DashboardFloatingWindowManager {
         hosting.sizingOptions = []
         panel.contentViewController = hosting
 
+        // Restore frame AFTER content is attached so SwiftUI's initial layout
+        // doesn't override the saved size.
+        if let saved = Self.savedFrame() {
+            panel.setFrame(saved, display: false)
+        } else {
+            panel.center()
+        }
+
         let controller = NSWindowController(window: panel)
         self.controller = controller
 
         NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
             object: panel,
+            queue: .main
+        ) { [weak self, weak panel] _ in
+            if let panel { Self.persistFrame(panel.frame) }
+            self?.defaultsObserver = nil
+            Task { @MainActor in self?.controller = nil }
+        }
+
+        // React to the toggle changing while the window is open.
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak panel] _ in
+            panel?.level = Self.alwaysOnTop ? .floating : .normal
+        }
+
+        controller.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.async {
+            NSApp.setActivationPolicy(.regular)
+        }
+    }
+
+    /// Returns the saved frame, constrained so the window is fully visible on the
+    /// screen with the most overlap. Clamps size to the screen and nudges the origin
+    /// so no edge hangs off. Returns nil if no screen overlaps at all (fall back to center).
+    private static func savedFrame() -> NSRect? {
+        guard let str = UserDefaults.standard.string(forKey: frameKey) else { return nil }
+        var rect = NSRectFromString(str)
+        guard rect.width > 0, rect.height > 0 else { return nil }
+
+        // Pick the screen whose visible area overlaps the most with the saved frame.
+        guard let screen = NSScreen.screens.max(by: {
+            overlapArea($0.visibleFrame, rect) < overlapArea($1.visibleFrame, rect)
+        }), overlapArea(screen.visibleFrame, rect) > 0 else { return nil }
+
+        let vis = screen.visibleFrame
+
+        // Clamp size so the window can't be larger than the screen.
+        rect.size.width  = min(rect.size.width,  vis.width)
+        rect.size.height = min(rect.size.height, vis.height)
+
+        // Nudge origin so the window is fully inside the visible frame.
+        rect.origin.x = max(vis.minX, min(rect.origin.x, vis.maxX - rect.width))
+        rect.origin.y = max(vis.minY, min(rect.origin.y, vis.maxY - rect.height))
+
+        return rect
+    }
+
+    private static func overlapArea(_ a: NSRect, _ b: NSRect) -> CGFloat {
+        let ix = a.intersection(b)
+        return ix.isNull ? 0 : ix.width * ix.height
+    }
+
+    private static func persistFrame(_ frame: NSRect) {
+        UserDefaults.standard.set(NSStringFromRect(frame), forKey: frameKey)
+    }
+}
+
+// MARK: - Settings Window Manager (macOS)
+// Opens a standalone settings window. Uses a regular NSWindow (not a utility
+// panel) so it becomes the key window and NSSavePanel/NSOpenPanel attach correctly.
+
+final class SettingsWindowManager {
+    static let shared = SettingsWindowManager()
+    private var controller: NSWindowController?
+
+    func open(appState: AppState) {
+        if let existing = controller?.window, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let screen = NSScreen.main ?? NSScreen.screens.first
+        let screenFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let winHeight = (screenFrame.height * 0.6).rounded()
+        let winWidth  = 800.0
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: winWidth, height: winHeight),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Hermit Settings"
+        window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: winWidth, height: winHeight)
+        window.center()
+
+        let hosting = NSHostingController(rootView:
+            SettingsView(embedded: true)
+                .environmentObject(appState)
+        )
+        hosting.sizingOptions = []
+        window.contentViewController = hosting
+
+        let controller = NSWindowController(window: window)
+        self.controller = controller
+
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.controller = nil }
