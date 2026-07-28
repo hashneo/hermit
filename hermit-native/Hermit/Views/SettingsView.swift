@@ -980,47 +980,50 @@ private struct RepositorySettingsTab: View {
     // MARK: - Import / Export
 
     #if os(macOS)
-    @MainActor
     private func triggerExport() {
         let data: Data
         do { data = try SharedConfigStore.exportJSON() }
         catch { configError = error.localizedDescription; return }
 
-        NSApp.activate(ignoringOtherApps: true)
+        // Defer past SwiftUI's current render cycle so AppKit can open the panel.
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
 
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = "hermit-repos-team.json"
-        panel.allowedContentTypes  = [UTType.json]
-        panel.isExtensionHidden    = false
-        // Raise above the floating dashboard panel so it appears on top.
-        panel.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = "hermit-repos-team.json"
+            panel.allowedContentTypes  = [UTType.json]
+            panel.message = "Share this file with teammates — each member drops it into ~/Library/Application Support/Hermit/config/"
+            panel.isExtensionHidden    = false
+            panel.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
 
-        panel.begin { response in
-            guard response == .OK, let url = panel.url else { return }
-            try? data.write(to: url, options: .atomic)
+            panel.begin { response in
+                guard response == .OK, let url = panel.url else { return }
+                try? data.write(to: url, options: .atomic)
+            }
         }
     }
 
-    @MainActor
     private func triggerImport() {
-        NSApp.activate(ignoringOtherApps: true)
+        // Defer past SwiftUI's current render cycle so AppKit can open the panel.
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
 
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes     = [UTType.json]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories    = false
-        panel.message                 = "Select a hermit-repos-team.json file"
-        // Raise above the floating dashboard panel so it appears on top.
-        panel.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
+            let panel = NSOpenPanel()
+            panel.allowedContentTypes     = [UTType.json]
+            panel.allowsMultipleSelection = false
+            panel.canChooseDirectories    = false
+            panel.message                 = "Select a hermit-repos-team.json to load shared accounts and repositories"
+            panel.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
 
-        panel.begin { response in
-            guard response == .OK, let url = panel.url else { return }
-            Task { @MainActor in
-                do {
-                    let fileData = try Data(contentsOf: url)
-                    try SharedConfigStore.applyData(fileData)
-                } catch {
-                    configError = "Import failed: \(error.localizedDescription)"
+            panel.begin { response in
+                guard response == .OK, let url = panel.url else { return }
+                DispatchQueue.main.async {
+                    do {
+                        let fileData = try Data(contentsOf: url)
+                        try SharedConfigStore.applyData(fileData)
+                    } catch {
+                        configError = "Import failed: \(error.localizedDescription)"
+                    }
                 }
             }
         }
