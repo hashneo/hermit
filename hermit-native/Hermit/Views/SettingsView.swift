@@ -1,5 +1,6 @@
 import SwiftUI
 import Network
+import UniformTypeIdentifiers
 
 // MARK: - SettingsView
 // hermit-3wh: Server settings tab (macOS — mode selector, Bonjour list stub, remote URL)
@@ -76,6 +77,7 @@ struct SettingsView: View {
 #if os(macOS)
 private struct GeneralSettingsTab: View {
     @AppStorage("hermit.menuBarStyle") private var menuBarStyle = MenuBarStyle.nativeMenu.rawValue
+    @AppStorage("hermit.dashboardAlwaysOnTop") private var alwaysOnTop = true
 
     var body: some View {
         Form {
@@ -96,6 +98,16 @@ private struct GeneralSettingsTab: View {
                 .foregroundStyle(.secondary)
             } header: {
                 Text("Menu bar")
+            }
+
+            Section {
+                Toggle("Keep dashboard always on top", isOn: $alwaysOnTop)
+            } header: {
+                Text("Dashboard")
+            } footer: {
+                Text("When enabled, the dashboard floats above other windows.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -834,12 +846,29 @@ private struct RepositorySettingsTab: View {
     @State private var validating:    UUID?        = nil   // repo ID currently being validated
     @State private var validationError: String?    = nil   // error message to show
     @State private var errorRepo:     Repository?  = nil   // repo that failed, offered for edit
-    @State private var selection:    Set<UUID>   = []
+    @State private var selection:   Set<UUID> = []
+    @State private var configError: String?  = nil
 
     var body: some View {
         VStack(spacing: 0) {
             // ── Toolbar ──────────────────────────────────────────────────
             HStack {
+                #if os(macOS)
+                Button { triggerImport() } label: {
+                    Label("Import Config", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(.borderless)
+                .padding([.top, .leading, .bottom], 8)
+                .help("Import a hermit-repos-team.json to load shared accounts and repositories")
+
+                Button { triggerExport() } label: {
+                    Label("Export Config", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.borderless)
+                .padding([.top, .leading, .bottom], 8)
+                .help("Save a hermit-repos-team.json to share your accounts and repositories with teammates")
+                #endif
+
                 Spacer()
                 Button { showAddSheet = true } label: {
                     Label("Add Repository", systemImage: "plus")
@@ -949,7 +978,54 @@ private struct RepositorySettingsTab: View {
                 deleteTarget = nil
             }
         }
+        .alert("Config error", isPresented: Binding(
+            get: { configError != nil },
+            set: { if !$0 { configError = nil } }
+        )) {
+            Button("OK", role: .cancel) { configError = nil }
+        } message: {
+            Text(configError ?? "")
+        }
     }
+
+    // MARK: - Import / Export
+
+    #if os(macOS)
+    private func triggerExport() {
+        let data: Data
+        do { data = try SharedConfigStore.exportJSON() }
+        catch { configError = error.localizedDescription; return }
+
+        // Defer past SwiftUI's button-tap update cycle so the panel opens correctly.
+        DispatchQueue.main.async {
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = "hermit-repos-team.json"
+            panel.allowedContentTypes  = [UTType.json]
+            panel.message = "Share this file with teammates — each member drops it into ~/Library/Application Support/Hermit/config/"
+            panel.isExtensionHidden    = false
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    private func triggerImport() {
+        // Defer past SwiftUI's button-tap update cycle so the panel opens correctly.
+        DispatchQueue.main.async {
+            let panel = NSOpenPanel()
+            panel.allowedContentTypes     = [UTType.json]
+            panel.allowsMultipleSelection = false
+            panel.canChooseDirectories    = false
+            panel.message                 = "Select a hermit-repos-team.json to load shared accounts and repositories"
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            do {
+                let fileData = try Data(contentsOf: url)
+                try SharedConfigStore.applyData(fileData)
+            } catch {
+                // Error is intentionally swallowed here; applyData logs internally.
+            }
+        }
+    }
+    #endif
 
     // MARK: - Validation
 

@@ -33,7 +33,6 @@ struct MenuBarContentView: View {
         anchorScreenX: CGFloat? = nil,
         managesWindowPresentation: Bool = true,
         allowsDetach: Bool = true,
-        openToSettings: Bool = false,
         onOpenReview: @escaping () -> Void = {},
         onDetach: @escaping () -> Void = {},
         onClose: @escaping () -> Void = {}
@@ -44,7 +43,7 @@ struct MenuBarContentView: View {
         self.onOpenReview = onOpenReview
         self.onDetach = onDetach
         self.onClose = onClose
-        _selectedView = State(initialValue: openToSettings ? .settings : .dashboard)
+        _selectedView = State(initialValue: .dashboard)
         _menuAnchor = State(initialValue: MenuBarBubbleAnchor.capture(anchorScreenX))
         _pointerX = State(initialValue: managesWindowPresentation ? MenuBarBubbleWindowController.fallbackPointerX : 280)
     }
@@ -144,7 +143,7 @@ struct MenuBarContentView: View {
                 IssueBanner(issue: issue, compact: true, onRetry: {
                     Task { await refreshAll(force: true) }
                 }, onSettings: {
-                    selectedView = .settings
+                    SettingsWindowManager.shared.open(appState: appState)
                 })
             }
         }
@@ -155,11 +154,10 @@ struct MenuBarContentView: View {
         Picker("View", selection: $selectedView) {
             Label("Dashboard", systemImage: "rectangle.grid.2x2").tag(MenuBarPrimaryView.dashboard)
             Label("Monitor", systemImage: "waveform.path.ecg").tag(MenuBarPrimaryView.monitoring)
-            Label("Settings", systemImage: "gearshape").tag(MenuBarPrimaryView.settings)
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .frame(width: renderMode == .compact ? 280 : 300)
+        .frame(width: renderMode == .compact ? 200 : 220)
     }
 
     @ViewBuilder
@@ -185,15 +183,14 @@ struct MenuBarContentView: View {
                     .buttonStyle(.bordered)
                 }
 
-                // TODO: re-enable once New RFC is ready for release
-                // Button {
-                //     NewRFCWindowManager.shared.open(appState: appState)
-                // } label: {
-                //     Label("New RFC", systemImage: "plus")
-                // }
-                // .labelStyle(.iconOnly)
-                // .help("New RFC")
-                // .buttonStyle(.borderedProminent)
+                Button {
+                    SettingsWindowManager.shared.open(appState: appState)
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .labelStyle(.iconOnly)
+                .help("Settings")
+                .buttonStyle(.bordered)
             }
         } else {
             HStack(spacing: 8) {
@@ -215,13 +212,13 @@ struct MenuBarContentView: View {
                     .help("Detach to floating window")
                 }
 
-                // TODO: re-enable once New RFC is ready for release
-                // Button {
-                //     NewRFCWindowManager.shared.open(appState: appState)
-                // } label: {
-                //     Label("New RFC", systemImage: "plus")
-                // }
-                // .buttonStyle(.borderedProminent)
+                Button {
+                    SettingsWindowManager.shared.open(appState: appState)
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .buttonStyle(.bordered)
+                .help("Settings")
             }
         }
     }
@@ -244,9 +241,6 @@ struct MenuBarContentView: View {
                 dashboardStats: dashboardStore.stats,
                 states: dashboardStore.statesSnapshot
             )
-        case .settings:
-            SettingsView(embedded: true)
-                .environmentObject(appState)
         }
     }
 
@@ -369,7 +363,10 @@ struct MenuBarContentView: View {
                         isActive: repo.id == repoStore.repositories.first?.id,
                         onActivate: { activate(repo) },
                         onRefresh: { Task { await dashboardStore.reload(repo: repo, appState: appState) } },
-                        onOpenSettings: { selectedView = .settings },
+                        onOpenSettings: {
+                        NSApp.activate(ignoringOtherApps: true)
+                        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                    },
                         onOpenPR: { rfc in open(rfc, in: repo) },
                         onOpen: { rfc in open(rfc, in: repo) }
                     )
@@ -801,7 +798,6 @@ private enum MenuBarBubbleWindowController {
 private enum MenuBarPrimaryView {
     case dashboard
     case monitoring
-    case settings
 }
 
 private enum MenuBarRenderMode {
