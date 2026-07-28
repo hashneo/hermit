@@ -789,6 +789,8 @@ final class DashboardFloatingWindowManager {
     static let shared = DashboardFloatingWindowManager()
     private var controller: NSWindowController?
 
+    var window: NSWindow? { controller?.window }
+
     func open(appState: AppState, openToSettings: Bool = false) {
         if let existing = controller?.window, existing.isVisible {
             existing.makeKeyAndOrderFront(nil)

@@ -160,6 +160,16 @@ enum SharedConfigStore {
                                          options: [.prettyPrinted, .sortedKeys])
     }
 
+    /// Applies a catalog from raw JSON data immediately — used by the in-app
+    /// import picker so the stores update without requiring a relaunch.
+    @MainActor
+    static func applyData(_ data: Data) throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let catalog = try decoder.decode(Catalog.self, from: data)
+        upsert(catalog: catalog, source: URL(fileURLWithPath: "in-app-import"))
+    }
+
     // MARK: - UUID helpers
 
     /// Derives a stable UUID from an arbitrary string (e.g. an account id like
