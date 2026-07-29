@@ -46,8 +46,8 @@ struct SettingsView: View {
 #endif
                 ServerSettingsTab()
                     .tabItem { Label("Server", systemImage: "server.rack") }
-                AISettingsTab()
-                    .tabItem { Label("AI", systemImage: "sparkles") }
+//                AISettingsTab()
+//                    .tabItem { Label("AI", systemImage: "sparkles") }
             }
         }
 #if os(macOS)
