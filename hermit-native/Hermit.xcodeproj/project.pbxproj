@@ -51,8 +51,8 @@
 		B001A003 /* MarkdownRendererView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A004 /* MarkdownRendererView.swift */; };
 		B001A005 /* MermaidView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A006 /* MermaidView.swift */; };
 		B001A007 /* SyntaxHighlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001A008 /* SyntaxHighlighter.swift */; };
+		B001A101 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B001A100 /* Assets.xcassets */; };
 		B001AC01 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001AC00 /* AccountStore.swift */; };
-		B001FC01 /* SharedConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001FC02 /* SharedConfigStore.swift */; };
 		B001B001 /* HermitModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B002 /* HermitModels.swift */; };
 		B001B003 /* HermitAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B004 /* HermitAPIClient.swift */; };
 		B001B005 /* EmbeddedServerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001B006 /* EmbeddedServerManager.swift */; };
@@ -62,9 +62,9 @@
 		B001D004 /* HermitActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D001 /* HermitActivity.swift */; };
 		B001D005 /* BookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D006 /* BookmarkStore.swift */; };
 		B001D007 /* DevConfig in Resources */ = {isa = PBXBuildFile; fileRef = B001D008 /* DevConfig */; };
-		B001A101 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B001A100 /* Assets.xcassets */; };
 		B001D009 /* ThreadPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D00A /* ThreadPopoverView.swift */; };
 		B001D010 /* ConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001D011 /* ConfigStore.swift */; };
+		B001FC01 /* SharedConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001FC02 /* SharedConfigStore.swift */; };
 		B001FF10 /* LiveVoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001FF11 /* LiveVoiceSession.swift */; };
 		B001FF12 /* PRReviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001FF13 /* PRReviewSheet.swift */; };
 		B001LOG1 /* me.steven.hermit.plist in Resources */ = {isa = PBXBuildFile; fileRef = B001LOG2 /* me.steven.hermit.plist */; };
@@ -110,15 +110,14 @@
 		B001002D /* WebViewRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewRenderer.swift; sourceTree = "<group>"; };
 		B001002F /* MarkdownRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRenderer.swift; sourceTree = "<group>"; };
 		B0010031 /* BundledAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledAssets.swift; sourceTree = "<group>"; };
-		B001A100 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B0010033 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
 		B0010035 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		B0010037 /* RFCBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCBrowserView.swift; sourceTree = "<group>"; };
 		B0010039 /* MenuBarContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarContentView.swift; sourceTree = "<group>"; };
 		B001003B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		B001003D /* macOSViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = macOSViews.swift; sourceTree = "<group>"; };
-		B001003F /* iPadRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadRootView.swift; sourceTree = "<group>"; };
 		B001003E3 /* iPadPairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadPairingView.swift; sourceTree = "<group>"; };
+		B001003F /* iPadRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadRootView.swift; sourceTree = "<group>"; };
 		B0010041 /* RFCDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCDetailView.swift; sourceTree = "<group>"; };
 		B0010043 /* RFCInterviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCInterviewView.swift; sourceTree = "<group>"; };
 		B0010045 /* RFCListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCListView.swift; sourceTree = "<group>"; };
@@ -134,8 +133,8 @@
 		B001A004 /* MarkdownRendererView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRendererView.swift; sourceTree = "<group>"; };
 		B001A006 /* MermaidView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MermaidView.swift; sourceTree = "<group>"; };
 		B001A008 /* SyntaxHighlighter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyntaxHighlighter.swift; sourceTree = "<group>"; };
+		B001A100 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B001AC00 /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
-		B001FC02 /* SharedConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedConfigStore.swift; sourceTree = "<group>"; };
 		B001B002 /* HermitModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitModels.swift; sourceTree = "<group>"; };
 		B001B004 /* HermitAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermitAPIClient.swift; sourceTree = "<group>"; };
 		B001B006 /* EmbeddedServerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedServerManager.swift; sourceTree = "<group>"; };
@@ -148,6 +147,7 @@
 		B001D008 /* DevConfig */ = {isa = PBXFileReference; lastKnownFileType = folder; path = DevConfig; sourceTree = "<group>"; };
 		B001D00A /* ThreadPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadPopoverView.swift; sourceTree = "<group>"; };
 		B001D011 /* ConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigStore.swift; sourceTree = "<group>"; };
+		B001FC02 /* SharedConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedConfigStore.swift; sourceTree = "<group>"; };
 		B001FF11 /* LiveVoiceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVoiceSession.swift; sourceTree = "<group>"; };
 		B001FF13 /* PRReviewSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRReviewSheet.swift; sourceTree = "<group>"; };
 		B001LOG2 /* me.steven.hermit.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = me.steven.hermit.plist; sourceTree = "<group>"; };
@@ -643,9 +643,9 @@
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Hermit uses the microphone to let you dictate RFC content using your voice.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Hermit uses on-device speech recognition to transcribe your voice into RFC text.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportsDocumentBrowser = NO;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportsDocumentBrowser = NO;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -668,7 +668,7 @@
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 2;
 			};
 			name = Debug;
 		};
@@ -710,9 +710,9 @@
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Hermit uses the microphone to let you dictate RFC content using your voice.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Hermit uses on-device speech recognition to transcribe your voice into RFC text.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportsDocumentBrowser = NO;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportsDocumentBrowser = NO;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -736,7 +736,7 @@
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 2;
 			};
 			name = Release;
 		};
