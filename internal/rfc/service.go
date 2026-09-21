@@ -384,7 +384,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string,
 	for _, prItem := range prResult.Items {
 		items = append(items, CatalogItem{
 			ID:              makePRCatalogID(prItem.PRNumber, prItem.Path),
-			Title:           prItem.Title,
+			Title:           normalizeRFCTitle(prItem.Title, prItem.Path),
 			Path:            prItem.Path,
 			SourceType:      "pull_request",
 			SourceLabel:     fmt.Sprintf("PR #%d", prItem.PRNumber),
