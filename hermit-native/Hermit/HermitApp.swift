@@ -731,7 +731,7 @@ final class HermitRepoSubMenu: NSMenu, NSMenuDelegate {
                 let primaryPRs = primaryPRDocuments(from: prs)
 
                 let prRFCs = primaryPRs.map {
-                    RFC(id: "pr-\($0.number)", title: $0.prTitle.isEmpty ? $0.title : $0.prTitle,
+                    RFC(id: "pr-\($0.number)", title: $0.title.isEmpty ? $0.prTitle : $0.title,
                         path: $0.documentPath, sha: $0.headSHA, source: .pullRequest($0),
                         lifecycleStatus: nil, htmlURL: $0.htmlURL)
                 }.sorted { $0.title < $1.title }
