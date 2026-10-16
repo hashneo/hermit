@@ -7,6 +7,13 @@ on:
       - main
 
 jobs:
+  native-keychain:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keychain session cache regressions
+        run: make test-native-keychain
+
   backend:
     runs-on: ubuntu-latest
     steps:
