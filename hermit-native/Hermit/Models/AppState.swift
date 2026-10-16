@@ -286,12 +286,13 @@ final class AppState: ObservableObject {
             guard !localNetworkToken.isEmpty else { return nil }
             bearer = localNetworkToken
         } else {
+            // Keep the repository bound to its selected account. Accounts on
+            // the same host may represent different users and permissions.
             let conn = AccountStore.shared.connections.first(where: { $0.id == repo.accountID })
-                    ?? AccountStore.shared.connections.first
-            // Fall back to appState.pat (set by GiteaAutoConfig bundled config) when
-            // the account store has no token — this covers the dev migration path.
+            // Keep the legacy development fallback only when no accounts exist.
+            // A missing token on a configured account must not borrow another PAT.
             let storeToken = conn.flatMap { AccountStore.shared.token(for: $0) } ?? ""
-            let token = storeToken.isEmpty ? pat : storeToken
+            let token = AccountStore.shared.connections.isEmpty ? pat : storeToken
             guard !token.isEmpty else { return nil }
             bearer = token
         }

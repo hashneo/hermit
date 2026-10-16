@@ -34,13 +34,6 @@ private func esLog(_ message: String) {
     }
 }
 
-/// Replace every "pat":"<value>" in a JSON string with "pat":"[REDACTED]".
-private func redactPATs(in json: String) -> String {
-    guard let regex = try? NSRegularExpression(pattern: #""pat"\s*:\s*"[^"]*""#) else { return json }
-    let range = NSRange(json.startIndex..., in: json)
-    return regex.stringByReplacingMatches(in: json, range: range, withTemplate: #""pat":"[REDACTED]""#)
-}
-
 // MARK: - hermit-y9x: Launch embedded Go server at app startup
 // MARK: - hermit-6et: Register Bonjour _hermit._tcp service after server starts
 
@@ -76,8 +69,8 @@ final class EmbeddedServerManager: ObservableObject {
 
         let config = buildConfigJSON(appState: appState)
 
-        // hermit-nnn: log config JSON with PATs redacted, then log the raw result
-        esLog("MobileStart config: \(redactPATs(in: config))")
+        // The configuration includes PATs and the TLS private key; never log it.
+        esLog("Starting embedded server")
 
         // Redirect Go slog to the same debug log file before starting the server
         // so that all server-side structured logs land alongside Swift esLog output.
