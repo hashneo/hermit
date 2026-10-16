@@ -116,6 +116,30 @@ paths:
         default:
           $ref: '#/components/responses/ApiError'
 
+  /api/v1/repositories/{repositoryId}/auth-status:
+    get:
+      tags: [Repositories]
+      summary: Get repository credential and sync auth health
+      description: >-
+        Combines the repository's persisted validation metadata with the most
+        recent sync outcome to surface an authoritative credential/auth state
+        for dashboard health indication. A 401 from the provider is classified
+        as authentication_required; a 403/SSO failure as access_denied.
+      operationId: getRepositoryAuthStatus
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+      responses:
+        '200':
+          description: Repository auth/sync health
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepositoryAuthStatus'
+        '404':
+          $ref: '#/components/responses/ApiError'
+        default:
+          $ref: '#/components/responses/ApiError'
+
   /api/v1/repositories/{repositoryId}/pull-requests/{prNumber}/rfc:
     get:
       tags: [RFC Documents]
@@ -615,6 +639,42 @@ components:
           type: string
           enum: [pass, fail, warn]
         message:
+          type: string
+          nullable: true
+
+    RepositoryAuthStatus:
+      type: object
+      required: [state]
+      description: >-
+        Authoritative credential/auth health for a repository, derived from the
+        most recent sync outcome recorded in the workset cache.
+      properties:
+        state:
+          type: string
+          enum: [healthy, authentication_required, access_denied, refresh_failed, unknown]
+        method:
+          type: string
+          enum: [pat]
+          nullable: true
+        last_validated_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_successful_refresh_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_attempted_refresh_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_error_code:
+          type: string
+          nullable: true
+        last_error_message:
+          type: string
+          nullable: true
+        remediation:
           type: string
           nullable: true
 

@@ -442,8 +442,8 @@ func TestListRepositoryRFCs_RefreshPreservesCachedBasisOnProviderError(t *testin
 	if upstreamCalls.Load() <= callsAfterPrime {
 		t.Fatalf("forced refresh did not attempt source of truth")
 	}
-	if refreshed.Cache == nil || !refreshed.Cache.Cached || refreshed.Cache.LastErrorCode != "provider_error" {
-		t.Fatalf("refresh cache metadata = %+v, want cached provider_error", refreshed.Cache)
+	if refreshed.Cache == nil || !refreshed.Cache.Cached || refreshed.Cache.LastErrorCode != "auth_failed" {
+		t.Fatalf("refresh cache metadata = %+v, want cached auth_failed", refreshed.Cache)
 	}
 	if refreshed.Total != first.Total || refreshed.Items[0].Title != first.Items[0].Title {
 		t.Fatalf("cached basis mismatch: got total=%d title=%q, want total=%d title=%q", refreshed.Total, refreshed.Items[0].Title, first.Total, first.Items[0].Title)

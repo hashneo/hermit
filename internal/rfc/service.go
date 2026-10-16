@@ -305,12 +305,16 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string,
 	if !ok {
 		return RepositoryRFCListResponse{}, fmt.Errorf("repository not found")
 	}
-	if token == "" {
-		return RepositoryRFCListResponse{}, fmt.Errorf("repository token unavailable")
-	}
 	baseURL := s.registryBaseURL(registry, repoBaseURL)
 	sourceKey := repositoryRFCListSourceKey(registry, baseURL, owner, name, branch, docsPath)
 	cacheTTL := s.repositoryRFCListCacheTTL(repositoryID)
+	if token == "" {
+		err := fmt.Errorf("repository token unavailable")
+		if cached, ok := s.cachedRepositoryRFCListAfterError(ctx, repositoryID, sourceKey, cacheTTL, err); ok {
+			return cached, nil
+		}
+		return RepositoryRFCListResponse{}, err
+	}
 	if s.workset != nil && !refresh {
 		if projection, ok, err := s.workset.GetFreshRepositoryRFCList(ctx, repositoryID, sourceKey, cacheTTL); err == nil && ok {
 			var cached RepositoryRFCListResponse
@@ -447,18 +451,53 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string,
 	return response, nil
 }
 
+// classifySyncError maps a provider error from a repository RFC refresh to a
+// stable error code. Auth-shaped failures (expired/revoked PAT, SSO required)
+// are distinguished from generic provider errors so the dashboard can surface a
+// clear "authentication required" indication rather than a vague failure.
+func classifySyncError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(err.Error())
+	// Rate limits surface as HTTP 403 but are transient provider errors, not
+	// access-control issues. Detect them before the 403/denied branch.
+	if strings.Contains(msg, "rate limit") {
+		return "provider_error"
+	}
+	switch {
+	case strings.Contains(msg, "401") ||
+		strings.Contains(msg, "bad credentials"):
+		return "auth_failed"
+	case strings.Contains(msg, "403") ||
+		strings.Contains(msg, "forbidden") ||
+		strings.Contains(msg, "denied") ||
+		strings.Contains(msg, "saml") ||
+		strings.Contains(msg, "sso"):
+		return "access_denied"
+	case strings.Contains(msg, "token unavailable") ||
+		strings.Contains(msg, "token revoked") ||
+		strings.Contains(msg, "token expired") ||
+		strings.Contains(msg, "credential helper returned empty"):
+		return "auth_failed"
+	default:
+		return "provider_error"
+	}
+}
+
 func (s *Service) cachedRepositoryRFCListAfterError(ctx context.Context, repositoryID, sourceKey string, ttl time.Duration, err error) (RepositoryRFCListResponse, bool) {
 	if s.workset == nil {
 		return RepositoryRFCListResponse{}, false
 	}
-	_ = s.workset.PutRepositoryRFCListError(ctx, repositoryID, sourceKey, "provider_error", err.Error())
+	code := classifySyncError(err)
+	_ = s.workset.PutRepositoryRFCListError(ctx, repositoryID, sourceKey, code, err.Error())
 	projection, ok, getErr := s.workset.GetAnyRepositoryRFCList(ctx, repositoryID, sourceKey, ttl)
 	if getErr != nil || !ok {
 		return RepositoryRFCListResponse{}, false
 	}
 	meta := projection.Cache
 	meta.Cached = true
-	meta.LastErrorCode = "provider_error"
+	meta.LastErrorCode = code
 	meta.LastErrorMessage = err.Error()
 	var cached RepositoryRFCListResponse
 	if decodeErr := json.Unmarshal(projection.Payload, &cached); decodeErr != nil {
