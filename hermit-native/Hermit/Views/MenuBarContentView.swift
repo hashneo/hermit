@@ -257,15 +257,14 @@ struct MenuBarContentView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     CompactAllRepositoriesSummary(
-                        repoCount: displayedRepos.count,
-                        loadedCount: loadedRepositoryCount,
                         pendingReviewCount: aggregatePendingReviewCount,
                         openPRCount: aggregateOpenPRCount,
                         publishedCount: aggregatePublishedCount,
                         prStateSummaries: aggregatePRStateSummaries,
                         prStatsFreshness: aggregatePRStatsFreshness,
                         serverStatusText: serverStatusText,
-                        serverStatusColor: serverStatusColor
+                        serverStatusColor: serverStatusColor,
+                        onOpenSettings: openRepositorySettings
                     )
 
                     CompactReviewQueue(
@@ -325,14 +324,29 @@ struct MenuBarContentView: View {
                     prStateSummaries: aggregatePRStateSummaries
                 )
 
-                ForEach(filteredOrderedRepos) { repo in
-                    RepoFilterRow(
-                        repo: repo,
-                        state: dashboardStore.state(for: repo.id),
-                        isSelected: repo.id == selectedRepoID,
-                        isActive: repo.id == repoStore.repositories.first?.id,
-                        onSelect: { selectedRepoID = repo.id }
-                    )
+                if hasTeamGrouping {
+                    ForEach(groupedFilteredRepos, id: \.team) { group in
+                        RepoTeamHeader(title: group.team, count: group.repos.count)
+                        ForEach(group.repos) { repo in
+                            RepoFilterRow(
+                                repo: repo,
+                                state: dashboardStore.state(for: repo.id),
+                                isSelected: repo.id == selectedRepoID,
+                                isActive: repo.id == repoStore.repositories.first?.id,
+                                onSelect: { selectedRepoID = repo.id }
+                            )
+                        }
+                    }
+                } else {
+                    ForEach(filteredOrderedRepos) { repo in
+                        RepoFilterRow(
+                            repo: repo,
+                            state: dashboardStore.state(for: repo.id),
+                            isSelected: repo.id == selectedRepoID,
+                            isActive: repo.id == repoStore.repositories.first?.id,
+                            onSelect: { selectedRepoID = repo.id }
+                        )
+                    }
                 }
             }
             .padding(14)
@@ -347,7 +361,8 @@ struct MenuBarContentView: View {
                     AllRepositoriesSection(
                         repoCount: displayedRepos.count,
                         loadedCount: loadedRepositoryCount,
-                        prStatsFreshness: aggregatePRStatsFreshness
+                        prStatsFreshness: aggregatePRStatsFreshness,
+                        onOpenSettings: openRepositorySettings
                     )
                     PRReviewSection(
                         title: "Review queue",
@@ -363,10 +378,7 @@ struct MenuBarContentView: View {
                         isActive: repo.id == repoStore.repositories.first?.id,
                         onActivate: { activate(repo) },
                         onRefresh: { Task { await dashboardStore.reload(repo: repo, appState: appState) } },
-                        onOpenSettings: {
-                        NSApp.activate(ignoringOtherApps: true)
-                        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                    },
+                        onOpenSettings: openRepositorySettings,
                         onOpenPR: { rfc in open(rfc, in: repo) },
                         onOpen: { rfc in open(rfc, in: repo) }
                     )
@@ -441,6 +453,27 @@ struct MenuBarContentView: View {
         }
     }
 
+    /// True when at least one repository in the filtered set has a non-empty
+    /// `team`. Drives whether the sidebar renders grouped sections vs. a flat
+    /// list. Based on the filtered set so grouping adapts to the active filter.
+    private var hasTeamGrouping: Bool {
+        filteredOrderedRepos.contains { !$0.team.isEmpty }
+    }
+
+    /// Groups `filteredOrderedRepos` by team for sectioned display.
+    /// Named teams are sorted alphabetically; repos without a team land in a
+    /// trailing "Other" bucket.
+    private var groupedFilteredRepos: [(team: String, repos: [Repository])] {
+        let groups = Dictionary(grouping: filteredOrderedRepos, by: { $0.team })
+        var result = groups.keys.filter { !$0.isEmpty }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            .map { (team: $0, repos: groups[$0] ?? []) }
+        if let other = groups[""], !other.isEmpty {
+            result.append((team: "Other", repos: other))
+        }
+        return result
+    }
+
     private var repoIdentitySignature: String {
         displayedRepos.map { repo in
             repo.serverID ?? "\(repo.owner.lowercased())/\(repo.name.lowercased())"
@@ -512,9 +545,18 @@ struct MenuBarContentView: View {
 
     private var aggregatePRStatsFreshness: PRStatsFreshness {
         let states = displayedRepos.compactMap { dashboardStore.state(for: $0.id) }
-        let loadedStates = states.filter { $0.prStatsLoadedAt != nil && !$0.isLoading && $0.issue == nil }
+        // A repository counts as "loaded" as soon as it has a baseline
+        // (prStatsLoadedAt != nil), even while a background refresh is in
+        // flight. This avoids a cold-start where the badge climbs from 0
+        // instead of showing the persisted cache baseline immediately. A
+        // repository with no baseline yet has prStatsLoadedAt == nil and is
+        // still excluded; the in-flight refresh is surfaced via isLoading.
+        let loadedStates = states.filter { $0.prStatsLoadedAt != nil && $0.issue == nil }
         let failedStates = states.filter { $0.issue != nil }
         let authFailureCount = failedStates.filter { state in
+            if let status = state.authStatus {
+                return status.isCredentialIssue
+            }
             guard let issue = state.issue else { return false }
             return isRepositoryAuthenticationIssue(issue)
         }.count
@@ -582,6 +624,11 @@ struct MenuBarContentView: View {
         let accountID = accountStore.connections.first?.id
         await serverRepoStore.refresh(port: port, accountID: accountID)
         await refreshDashboard(force: force)
+    }
+
+    private func openRepositorySettings() {
+        appState.deepLinkSettingsTab = .repository
+        SettingsWindowManager.shared.open(appState: appState)
     }
 
     private func activate(_ repo: Repository) {
@@ -842,8 +889,6 @@ private enum RepoFilterOption: String, CaseIterable, Identifiable {
 }
 
 private struct CompactAllRepositoriesSummary: View {
-    let repoCount: Int
-    let loadedCount: Int
     let pendingReviewCount: Int
     let openPRCount: Int
     let publishedCount: Int
@@ -851,6 +896,7 @@ private struct CompactAllRepositoriesSummary: View {
     let prStatsFreshness: PRStatsFreshness
     let serverStatusText: String
     let serverStatusColor: Color
+    let onOpenSettings: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -858,7 +904,14 @@ private struct CompactAllRepositoriesSummary: View {
                 Text("Review workflow")
                     .font(.headline)
                 Spacer()
-                StatusCapsule(title: "\(loadedCount)/\(repoCount) loaded", systemImage: "shippingbox", tint: .secondary)
+                Button(action: onOpenSettings) {
+                    Image(systemName: "gearshape")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Open repository settings")
+                StatusCapsule(title: prStatsFreshness.compactLabel, systemImage: prStatsFreshness.systemImage, tint: prStatsFreshness.tint)
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -886,7 +939,6 @@ private struct CompactAllRepositoriesSummary: View {
             }
 
             PRStateSummaryStrip(summaries: prStateSummaries)
-            PRStatsFreshnessRow(freshness: prStatsFreshness)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1076,6 +1128,26 @@ private struct SidebarMetricCard: View {
     }
 }
 
+private struct RepoTeamHeader: View {
+    let title: String
+    let count: Int
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .textCase(.uppercase)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text("\(count)")
+                .font(.caption2.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.top, 6)
+    }
+}
+
 private struct RepoFilterRow: View {
     private static let rowHeight: CGFloat = 54
 
@@ -1111,6 +1183,10 @@ private struct RepoFilterRow: View {
                     ProgressView()
                         .controlSize(.small)
                         .help("Refreshing repository RFCs")
+                }
+
+                if let badge = credentialBadge {
+                    badge
                 }
 
                 if isActive {
@@ -1155,6 +1231,38 @@ private struct RepoFilterRow: View {
     private var helpText: String {
         guard let issue = state?.issue else { return repo.fullName }
         return issue.helpText
+    }
+
+    /// A compact credential/auth-status indicator shown when the server reports
+    /// a credential-shaped failure. Drawn from the authoritative auth-status
+    /// endpoint rather than inferred from error text.
+    private var credentialBadge: AnyView? {
+        guard let status = state?.authStatus, status.isCredentialIssue else { return nil }
+        let icon: String
+        let tint: Color
+        let label: String
+        switch status.state {
+        case .authenticationRequired:
+            icon = "person.badge.key.fill"
+            tint = .orange
+            label = "Authentication required"
+        case .accessDenied:
+            icon = "exclamationmark.lock.fill"
+            tint = .red
+            label = "Access denied"
+        default:
+            return nil
+        }
+        let detail = [status.lastErrorMessage, status.remediation]
+            .compactMap { $0?.isEmpty == false ? $0 : nil }
+            .joined(separator: "\n\n")
+        return AnyView(
+            Image(systemName: icon)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(tint)
+                .help(detail.isEmpty ? label : "\(label)\n\(detail)")
+                .accessibilityLabel(label)
+        )
     }
 }
 
@@ -2447,6 +2555,22 @@ private struct PRStatsFreshness {
         return "Updated \(relativeDate)"
     }
 
+    /// One-line status combining repo count, auth state, and loading state for
+    /// the single dashboard status badge.
+    var compactLabel: String {
+        let core = "\(loadedRepositoryCount)/\(totalRepositoryCount) repos"
+        if authFailureCount > 0 {
+            return "\(core) · \(authFailureCount) need auth"
+        }
+        if failedRepositoryCount > 0 {
+            return "\(core) · \(failedRepositoryCount) failed"
+        }
+        if isLoading {
+            return "\(loadedRepositoryCount)/\(totalRepositoryCount) · refreshing"
+        }
+        return core
+    }
+
     var tint: Color {
         if authFailureCount > 0 || failedRepositoryCount > 0 {
             return .orange
@@ -2466,21 +2590,11 @@ private struct PRStatsFreshness {
     }
 }
 
-private struct PRStatsFreshnessRow: View {
-    let freshness: PRStatsFreshness
-
-    var body: some View {
-        Label(freshness.label, systemImage: freshness.systemImage)
-            .font(.caption2.weight(.medium))
-            .foregroundStyle(freshness.tint)
-            .lineLimit(1)
-    }
-}
-
 private struct AllRepositoriesSection: View {
     let repoCount: Int
     let loadedCount: Int
     let prStatsFreshness: PRStatsFreshness
+    let onOpenSettings: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -2493,6 +2607,13 @@ private struct AllRepositoriesSection: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button(action: onOpenSettings) {
+                    Image(systemName: "gearshape")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Open repository settings")
             }
         }
     }
@@ -3571,9 +3692,10 @@ private final class ServerRepositoryMenuStore: ObservableObject {
                 let name: String
                 let docsPath: String
                 let rfcLabel: String
+                let team: String?
 
                 private enum CodingKeys: String, CodingKey {
-                    case id, owner, name
+                    case id, owner, name, team
                     case docsPath = "docs_path_policy"
                     case rfcLabel = "rfc_label"
                 }
@@ -3601,7 +3723,8 @@ private final class ServerRepositoryMenuStore: ObservableObject {
                     owner: item.owner,
                     name: item.name,
                     docsPath: item.docsPath,
-                    rfcLabel: item.rfcLabel
+                    rfcLabel: item.rfcLabel,
+                    team: item.team ?? existing?.team ?? ""
                 )
             }
             repositories = nextRepositories
@@ -3627,6 +3750,7 @@ private final class MenuBarDashboardStore: ObservableObject {
         var prStateCounts = PRStateCounts.empty
         var prStatsLoadedAt: Date? = nil
         var issue: MenuBarIssue? = nil
+        var authStatus: RepositoryAuthStatus? = nil
 
         var allRFCs: [RFC] { pullRequests + mainBranch }
         var priorityRFC: RFC? { pullRequests.first ?? mainBranch.first }
@@ -3645,6 +3769,26 @@ private final class MenuBarDashboardStore: ObservableObject {
     }
 
     func refresh(repos: [Repository], appState: AppState, force: Bool) async {
+        // Synchronously hydrate the persisted cache baseline for every repo so
+        // the dashboard shows last-known counts immediately on cold start
+        // instead of climbing from 0 while the per-repo refresh runs.
+        var didHydrate = false
+        for repo in repos {
+            if states[repo.id] == nil, let cached = RepoRFCCache.shared.sections(for: repo.id) {
+                states[repo.id] = RepoState(
+                    isLoading: true,
+                    mainBranch: cached.mainBranch,
+                    pullRequests: cached.pullRequests,
+                    pendingReviewCount: cached.summary.pendingReviewCount,
+                    openPRCount: cached.summary.openPRCount,
+                    prStateCounts: cached.summary.prStateCounts,
+                    prStatsLoadedAt: cached.loadedAt
+                )
+                didHydrate = true
+            }
+        }
+        if didHydrate { objectWillChange.send() }
+
         await withTaskGroup(of: Void.self) { group in
             for repo in repos {
                 group.addTask { [weak self] in
@@ -3700,19 +3844,25 @@ private final class MenuBarDashboardStore: ObservableObject {
 
         do {
             let (mainFiles, prs, summary) = try await client.discoverRFCs()
+            // Best-effort: pull the server's authoritative credential/auth
+            // health (set during the sync above) for the dashboard badge.
+            let authStatus = try? await client.fetchAuthStatus()
             let mainRFCs = mainFiles.map {
                 RFC(id: $0.id, title: $0.name, path: $0.path, sha: $0.sha,
-                    source: .mainBranch, lifecycleStatus: $0.lifecycleStatus,
-                    htmlURL: $0.htmlURL)
+                    source: .mainBranch,
+                    lifecycleStatus: $0.lifecycleStatus,
+                    htmlURL: $0.htmlURL,
+                    documentType: $0.documentType)
             }.sorted { $0.title < $1.title }
-            // One entry per PR: filter to the primary RFC document using the
-            // same deduplication logic as the native menu (documentType == "rfc",
-            // rfc-NNN path, non-terminal lifecycle status, highest RFC number wins).
+            // Select one primary docs-cms document per PR, preferring an
+            // actionable lifecycle status with the native menu's shared ordering.
             let prRFCs = primaryPRDocuments(from: prs).map {
                 RFC(id: $0.catalogID, title: $0.prTitle.isEmpty ? $0.title : $0.prTitle,
                     path: $0.documentPath, sha: $0.headSHA,
-                    source: .pullRequest($0), lifecycleStatus: $0.lifecycleStatus,
-                    htmlURL: $0.htmlURL)
+                    source: .pullRequest($0),
+                    lifecycleStatus: $0.lifecycleStatus,
+                    htmlURL: $0.htmlURL,
+                    documentType: $0.documentType)
             }.sorted { lhs, rhs in
                 let lhsNumber = if case .pullRequest(let pr) = lhs.source { pr.number } else { 0 }
                 let rhsNumber = if case .pullRequest(let pr) = rhs.source { pr.number } else { 0 }
@@ -3724,20 +3874,32 @@ private final class MenuBarDashboardStore: ObservableObject {
                 menuBarDebugLog("[MenuBarDashboardStore] load stale-success ignored repo=\(repo.fullName) generation=\(generation)")
                 return
             }
-            let syncedAt = Date()
-            let sections = RepoRFCLoader.RFCSections(
-                mainBranch: mainRFCs,
-                pullRequests: prRFCs,
-                summary: summary,
-                loadedAt: syncedAt
-            )
-            RepoRFCCache.shared.store(sections, for: repo.id)
+            let refreshIssue = authStatus.flatMap { menuIssue(for: $0) }
+            let syncedAt: Date?
+            if let authStatus {
+                syncedAt = authStatus.successfulRefreshDate(observedAt: Date(), cachedAt: state.prStatsLoadedAt)
+            } else {
+                syncedAt = Date()
+            }
+            if let syncedAt {
+                let sections = RepoRFCLoader.RFCSections(
+                    mainBranch: mainRFCs,
+                    pullRequests: prRFCs,
+                    summary: summary,
+                    loadedAt: syncedAt
+                )
+                RepoRFCCache.shared.store(sections, for: repo.id)
+            }
 #if os(macOS)
             // hermit-txn: retry a deep link that arrived before this repo's RFCs loaded.
             RFCViewerWindowManager.shared.resolvePendingDeepLink(in: mainRFCs + prRFCs, repo: repo, appState: appState)
 #endif
-            RepositoryStore.shared.markSynced(repo, at: syncedAt)
-            stats.recordSuccess()
+            if refreshIssue != nil {
+                stats.recordFailure()
+            } else {
+                if let syncedAt { RepositoryStore.shared.markSynced(repo, at: syncedAt) }
+                stats.recordSuccess()
+            }
             setState(
                 RepoState(
                     isLoading: false,
@@ -3746,10 +3908,12 @@ private final class MenuBarDashboardStore: ObservableObject {
                     pendingReviewCount: summary.pendingReviewCount,
                     openPRCount: summary.openPRCount,
                     prStateCounts: summary.prStateCounts,
-                    prStatsLoadedAt: syncedAt
+                    prStatsLoadedAt: syncedAt,
+                    issue: refreshIssue,
+                    authStatus: authStatus
                 ),
                 for: repo,
-                reason: "load-success"
+                reason: refreshIssue == nil ? "load-success" : "load-cached-error"
             )
         } catch {
             guard isCurrentGeneration(generation, for: repo.id) else {
@@ -3758,6 +3922,11 @@ private final class MenuBarDashboardStore: ObservableObject {
             }
             state.isLoading = false
             state.issue = menuIssue(for: error)
+            // The failed sync persisted a classified error code server-side;
+            // fetch it so the dashboard can show the authoritative auth state
+            // (e.g. authentication_required) instead of inferring from the text.
+            state.authStatus = try? await client.fetchAuthStatus()
+            guard isCurrentGeneration(generation, for: repo.id) else { return }
             // Propagate any SSO URL to AccountStore so the Settings account row
             // can surface the Authorize SSO link even when the /user probe
             // doesn't return an X-GitHub-SSO header.
@@ -3961,6 +4130,19 @@ private func menuIssue(for error: Error) -> MenuBarIssue {
     return MenuBarIssue(title: "Git integration error", shortTitle: "Git", message: menuErrorMessage(error), recovery: "Retry the request. If it persists, inspect repo access, branch state, and backend logs.", systemImage: "exclamationmark.triangle", tint: .orange)
 }
 
+private func menuIssue(for status: RepositoryAuthStatus) -> MenuBarIssue? {
+    guard status.hasRefreshFailure else { return nil }
+    let message = status.lastErrorMessage.flatMap { $0.isEmpty ? nil : $0 }
+        ?? "The last repository refresh failed. Showing cached documents when available."
+    let code: Int
+    switch status.state {
+    case .authenticationRequired: code = 401
+    case .accessDenied: code = 403
+    default: code = 500
+    }
+    return menuIssue(forHTTPStatus: code, message: message)
+}
+
 private func menuIssue(forHTTPStatus statusCode: Int?, message: String) -> MenuBarIssue {
     // GitHub SAML SSO enforcement — arrives as 502 (Go maps GitHub 403 → 502).
     // The error body embeds a URL the user must visit to authorize the token.
@@ -3995,12 +4177,17 @@ private func menuIssue(forHTTPStatus statusCode: Int?, message: String) -> MenuB
     }
 }
 
-// MARK: - RFC cache
+// MARK: - Doc store (RFC cache)
+// RepoRFCCache is the on-device document store, generalized in ADR-011 to carry
+// a documentType on every item so callers can query any docs-cms doc type
+// (adr/prd/rfc/memo), not just RFCs. `DocStore` is the preferred alias.
+
+typealias DocStore = RepoRFCCache
 
 @MainActor
 final class RepoRFCCache {
     static let shared = RepoRFCCache()
-    private let defaultsKey = "hermit.menuBar.rfcProjectionCache.v1"
+    private let defaultsKey = "hermit.menuBar.docProjectionCache.v2"
     private var cache: [UUID: RepoRFCLoader.RFCSections] = [:]
 
     private init() {
@@ -4014,6 +4201,34 @@ final class RepoRFCCache {
         guard let s = cache[id] else { return nil }
         return (s.mainBranch, s.pullRequests)
     }
+
+    /// The distinct docs-cms document types present for a repository
+    /// (e.g. ["adr", "rfc"]). Empty when nothing is cached.
+    func documentTypes(for id: UUID) -> [String] {
+        guard let s = cache[id] else { return [] }
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for doc in s.mainBranch + s.pullRequests {
+            let t = doc.documentType.isEmpty ? "rfc" : doc.documentType
+            if seen.insert(t).inserted { ordered.append(t) }
+        }
+        return ordered
+    }
+
+    /// Sections filtered to a single document type, preserving the original
+    /// summary/loadedAt. Returns nil when the repo has no cached data.
+    fileprivate func sections(for id: UUID, documentType: String) -> RepoRFCLoader.RFCSections? {
+        guard let s = cache[id] else { return nil }
+        let want = documentType.lowercased()
+        let isMatch: (RFC) -> Bool = { ($0.documentType.isEmpty ? "rfc" : $0.documentType.lowercased()) == want }
+        return RepoRFCLoader.RFCSections(
+            mainBranch: s.mainBranch.filter(isMatch),
+            pullRequests: s.pullRequests.filter(isMatch),
+            summary: s.summary,
+            loadedAt: s.loadedAt
+        )
+    }
+
     fileprivate func store(_ s: RepoRFCLoader.RFCSections, for id: UUID) {
         cache[id] = s
         persist()
@@ -4109,6 +4324,7 @@ final class RepoRFCCache {
         let title: String
         let path: String
         let sha: String
+        let documentType: String
         let lifecycleStatus: String?
         let htmlURL: String
         let pullRequest: CachedPullRequest?
@@ -4118,6 +4334,7 @@ final class RepoRFCCache {
             title = rfc.title
             path = rfc.path
             sha = rfc.sha
+            documentType = rfc.documentType
             lifecycleStatus = rfc.lifecycleStatus
             htmlURL = rfc.htmlURL
             if case .pullRequest(let pr) = rfc.source {
@@ -4136,7 +4353,8 @@ final class RepoRFCCache {
                     sha: sha,
                     source: .pullRequest(pullRequest.pullRequest),
                     lifecycleStatus: lifecycleStatus,
-                    htmlURL: htmlURL
+                    htmlURL: htmlURL,
+                    documentType: documentType
                 )
             }
             return RFC(
@@ -4146,7 +4364,8 @@ final class RepoRFCCache {
                 sha: sha,
                 source: .mainBranch,
                 lifecycleStatus: lifecycleStatus,
-                htmlURL: htmlURL
+                htmlURL: htmlURL,
+                documentType: documentType
             )
         }
     }

@@ -190,7 +190,10 @@ structure:
 			http.NotFound(w, r)
 		case "/repos/owner/repo/contents/services/service-a/docs-project.toml":
 			http.NotFound(w, r)
-		case "/repos/owner/repo/contents/rfcs":
+		case "/repos/owner/repo/contents/rfcs",
+			"/repos/owner/repo/contents/adr",
+			"/repos/owner/repo/contents/prd",
+			"/repos/owner/repo/contents/memos":
 			http.NotFound(w, r)
 		case "/repos/owner/repo/contents/services/service-a/docs/proposals":
 			_ = json.NewEncoder(w).Encode([]map[string]string{
@@ -215,7 +218,7 @@ structure:
 func TestHTTPGitHubRFCClient_ListReviewReadyRFCs_FiltersDraftPRsAndRFCPaths(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-				case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "closed":
+		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "closed":
 			_ = json.NewEncoder(w).Encode([]map[string]any{})
 		case r.URL.Path == "/repos/owner/repo/pulls" && r.URL.Query().Get("state") == "open":
 			if got := r.URL.Query().Get("labels"); got != "" {

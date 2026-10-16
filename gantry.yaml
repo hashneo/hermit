@@ -1,0 +1,10 @@
+project: hermit
+fabric: devx
+cluster: hermit-local
+skills_src:
+    - .agf-workspace/skills-src
+sources:
+    - name: upstream
+      location: github.com/hashneo/hermit
+      description: Canonical Hermit repository.
+      canonical: true

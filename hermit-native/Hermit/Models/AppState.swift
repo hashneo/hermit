@@ -58,6 +58,13 @@ final class AppState: ObservableObject {
     @Published var rfcLabel: String
     @Published var pat: String
 
+    /// Requested Settings tab to deep-link to when the settings view opens.
+    /// Consumed and cleared by SettingsView.onAppear. Lets the dashboard gear
+    /// jump straight to the Repository tab.
+    #if os(macOS)
+    @Published var deepLinkSettingsTab: SettingsTab? = nil
+    #endif
+
     // hermit-999: NSUserActivity — shared selection state
     /// The RFC currently being viewed. Written by iPadRootView (iOS) and
     /// RFCViewerWindowManager (macOS) so NSUserActivity machinery can read it.
@@ -110,7 +117,7 @@ final class AppState: ObservableObject {
     @Published var localNetworkToken: String = ""
 
     init() {
-        // hermit-jxi / ADR-010: Load any shared account/repository catalogs from
+        // hermit-jxi / ADR-012: Load any shared account/repository catalogs from
         // the user-facing config dir (~/Library/Application Support/Hermit/config/)
         // first, so both DEBUG (bundled Gitea) and binary (release) builds see
         // them. No-op when the directory is absent. Tokens are added per-user.
@@ -286,12 +293,13 @@ final class AppState: ObservableObject {
             guard !localNetworkToken.isEmpty else { return nil }
             bearer = localNetworkToken
         } else {
+            // Keep the repository bound to its selected account. Accounts on
+            // the same host may represent different users and permissions.
             let conn = AccountStore.shared.connections.first(where: { $0.id == repo.accountID })
-                    ?? AccountStore.shared.connections.first
-            // Fall back to appState.pat (set by GiteaAutoConfig bundled config) when
-            // the account store has no token — this covers the dev migration path.
+            // Keep the legacy development fallback only when no accounts exist.
+            // A missing token on a configured account must not borrow another PAT.
             let storeToken = conn.flatMap { AccountStore.shared.token(for: $0) } ?? ""
-            let token = storeToken.isEmpty ? pat : storeToken
+            let token = AccountStore.shared.connections.isEmpty ? pat : storeToken
             guard !token.isEmpty else { return nil }
             bearer = token
         }

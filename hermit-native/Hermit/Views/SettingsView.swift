@@ -7,12 +7,23 @@ import UniformTypeIdentifiers
 // hermit-ogz: Server selection UI in iPad SettingsView
 // hermit-jmt: Remote URL configuration and health-check validation
 
+#if os(macOS)
+/// Selectable Settings tabs. Used by AppState.deepLinkSettingsTab to jump
+/// straight to a specific section (e.g. the Repository tab from the dashboard).
+enum SettingsTab: String, CaseIterable {
+    case general, account, repository, server
+}
+#endif
+
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     let embedded: Bool
 
     // hermit-9ds: shown when any config change requires an app relaunch
     @State private var showRestartBanner = false
+    #if os(macOS)
+    @State private var selectedTab: SettingsTab = .general
+    #endif
 
     init(embedded: Bool = false) {
         self.embedded = embedded
@@ -35,25 +46,50 @@ struct SettingsView: View {
                 .background(Color.accentColor)
             }
 
-            TabView {
-#if os(macOS)
+            #if os(macOS)
+            TabView(selection: $selectedTab) {
                 GeneralSettingsTab()
                     .tabItem { Label("General", systemImage: "gearshape") }
+                    .tag(SettingsTab.general)
                 AccountSettingsTab()
                     .tabItem { Label("Account", systemImage: "person.circle") }
+                    .tag(SettingsTab.account)
                 RepositorySettingsTab()
                     .tabItem { Label("Repository", systemImage: "arrow.triangle.branch") }
-#endif
+                    .tag(SettingsTab.repository)
+                ServerSettingsTab()
+                    .tabItem { Label("Server", systemImage: "server.rack") }
+                    .tag(SettingsTab.server)
+            }
+            #else
+            TabView {
                 ServerSettingsTab()
                     .tabItem { Label("Server", systemImage: "server.rack") }
 //                AISettingsTab()
 //                    .tabItem { Label("AI", systemImage: "sparkles") }
             }
+            #endif
         }
 #if os(macOS)
         .frame(width: embedded ? nil : 600, height: embedded ? nil : 560)
 #endif
         // hermit-9ds: listen for config-change notifications from AccountStore/RepositoryStore
+        .onAppear {
+            #if os(macOS)
+            if let requested = appState.deepLinkSettingsTab {
+                selectedTab = requested
+                appState.deepLinkSettingsTab = nil
+            }
+            #endif
+        }
+        #if os(macOS)
+        .onChange(of: appState.deepLinkSettingsTab) { _, requested in
+            if let requested {
+                selectedTab = requested
+                appState.deepLinkSettingsTab = nil
+            }
+        }
+        #endif
         .onReceive(NotificationCenter.default.publisher(for: .hermitRestartRequired)) { _ in
             showRestartBanner = true
             // Auto-dismiss after 4 s — covers cases where the port publisher
@@ -325,7 +361,7 @@ private struct AddAccountSheet: View {
 
     @State private var preset:   AccountPreset = .github
     @State private var name     = AccountPreset.github.defaultName
-    @State private var endpoint = AccountPreset.github.fixedEndpoint ?? ""
+    @State private var endpoint = ""
     @State private var token    = ""
     @State private var isSaving = false
 #if os(macOS)
@@ -361,9 +397,16 @@ private struct AddAccountSheet: View {
                         if name.isEmpty || name == oldPreset.defaultName {
                             name = newPreset.defaultName
                         }
-                        // Clear the custom endpoint field when switching away
-                        // from a preset that needs one.
-                        if newPreset.fixedEndpoint != nil {
+                        // Reset the endpoint so the new preset's API pattern
+                        // default is shown (e.g. the GitHub Enterprise
+                        // "https://…/api/v3" example) instead of a leftover
+                        // value from the previous preset — notably the read-only
+                        // https://api.github.com carried over from GitHub. A
+                        // genuinely typed custom endpoint is preserved.
+                        let isLeftover = endpoint.isEmpty
+                            || endpoint == (oldPreset.fixedEndpoint ?? "")
+                            || endpoint == oldPreset.endpointPlaceholder
+                        if isLeftover {
                             endpoint = ""
                         }
                     }
@@ -902,6 +945,12 @@ private struct RepositorySettingsTab: View {
                     Text(repo.name)
                 }
 
+                TableColumn("Team") { repo in
+                    Text(repo.team.isEmpty ? "—" : repo.team)
+                        .foregroundStyle(repo.team.isEmpty ? .secondary : .primary)
+                }
+                .width(min: 80, ideal: 120)
+
                 TableColumn("Last synced") { repo in
                     RepositoryLastSyncedText(date: repo.lastSyncedAt)
                 }
@@ -1140,6 +1189,7 @@ private struct AddRepoSheet: View {
     @State private var name     = ""
     @State private var docsPath = ""
     @State private var rfcLabel = ""
+    @State private var team     = ""
     @State private var isSaving = false
 
     var canSave: Bool {
@@ -1188,6 +1238,11 @@ private struct AddRepoSheet: View {
 #if os(iOS)
                         .textInputAutocapitalization(.never)
 #endif
+                    TextField("Team", text: $team, prompt: Text("platform"))
+                        .autocorrectionDisabled()
+#if os(iOS)
+                        .textInputAutocapitalization(.never)
+#endif
                 }
             }
             .formStyle(.grouped)
@@ -1227,7 +1282,8 @@ private struct AddRepoSheet: View {
             owner: owner.trimmingCharacters(in: .whitespaces),
             name: name.trimmingCharacters(in: .whitespaces),
             docsPath: docsPath.isEmpty ? "docs-cms/rfcs" : docsPath.trimmingCharacters(in: .whitespaces),
-            rfcLabel: rfcLabel.isEmpty ? "" : rfcLabel.trimmingCharacters(in: .whitespaces)
+            rfcLabel: rfcLabel.isEmpty ? "" : rfcLabel.trimmingCharacters(in: .whitespaces),
+            team: team.trimmingCharacters(in: .whitespaces)
         )
         let registeredServerID = await registerWithRunningServer(repo)
         if let serverID = registeredServerID {
@@ -1257,7 +1313,8 @@ private struct AddRepoSheet: View {
             "base_url": resolvedAPIBase(for: account.endpoint),
             "personal_access_token": token,
             "docs_path_policy": repo.docsPath,
-            "rfc_label": repo.rfcLabel
+            "rfc_label": repo.rfcLabel,
+            "team": repo.team
         ]
         req.httpBody = try? JSONEncoder().encode(payload)
 
@@ -1310,6 +1367,7 @@ private struct EditRepoSheet: View {
     @State private var name:     String
     @State private var docsPath: String
     @State private var rfcLabel: String
+    @State private var team:     String
 
     init(repo: Repository, isPresented: Binding<Bool>) {
         self.repo    = repo
@@ -1319,6 +1377,7 @@ private struct EditRepoSheet: View {
         _name     = State(initialValue: repo.name)
         _docsPath = State(initialValue: repo.docsPath)
         _rfcLabel = State(initialValue: repo.rfcLabel)
+        _team     = State(initialValue: repo.team)
     }
 
     var body: some View {
@@ -1354,6 +1413,11 @@ private struct EditRepoSheet: View {
 #if os(iOS)
                         .textInputAutocapitalization(.never)
 #endif
+                    TextField("Team", text: $team, prompt: Text("platform"))
+                        .autocorrectionDisabled()
+#if os(iOS)
+                        .textInputAutocapitalization(.never)
+#endif
                 }
             }
             .formStyle(.grouped)
@@ -1373,6 +1437,7 @@ private struct EditRepoSheet: View {
                         updated.name      = name.trimmingCharacters(in: .whitespaces)
                         updated.docsPath  = docsPath.trimmingCharacters(in: .whitespaces)
                         updated.rfcLabel  = rfcLabel.trimmingCharacters(in: .whitespaces)
+                        updated.team      = team.trimmingCharacters(in: .whitespaces)
                         repoStore.update(updated)
                         isPresented = false
                     }

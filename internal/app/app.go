@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"hermit/internal/authstatus"
 	"hermit/internal/config"
 	"hermit/internal/middleware"
 	"hermit/internal/observability"
@@ -30,11 +31,11 @@ const shutdownTimeout = 10 * time.Second
 
 // App wires foundational HTTP services for the Hermit monolith.
 type App struct {
-	server     *http.Server
-	closers    []io.Closer
-	Auth       *middleware.LocalNetworkAuth // exposed for live token register/revoke
-	tlsCertFile string                      // path to cert PEM on disk (nil = plain HTTP)
-	tlsKeyPEM  []byte                       // key PEM from Keychain, in-memory only
+	server      *http.Server
+	closers     []io.Closer
+	Auth        *middleware.LocalNetworkAuth // exposed for live token register/revoke
+	tlsCertFile string                       // path to cert PEM on disk (nil = plain HTTP)
+	tlsKeyPEM   []byte                       // key PEM from Keychain, in-memory only
 }
 
 // New creates an application with baseline routing and server configuration.
@@ -61,7 +62,7 @@ func New(cfg config.Config) *App {
 	}
 	if cfg.TLSCertFile != "" && cfg.TLSKeyPEM != "" {
 		a.tlsCertFile = cfg.TLSCertFile
-		a.tlsKeyPEM   = []byte(cfg.TLSKeyPEM)
+		a.tlsKeyPEM = []byte(cfg.TLSKeyPEM)
 	}
 	return a
 }
@@ -159,6 +160,10 @@ func newMux(cfg config.Config) *http.ServeMux {
 	if err != nil {
 		slog.Warn("sqlite workset disabled", "dataDir", cfg.DataDir, "error", err)
 	}
+
+	authStatusHandler := authstatus.NewHandler(repositoryService, worksetStore)
+	mux.HandleFunc("GET "+authstatus.Path(), authStatusHandler.GetAuthStatus)
+
 	rfcService := rfc.NewServiceWithRepositoryResolver(repositoryService, registryBaseURLs)
 	rfcService.WithWorkset(worksetStore)
 	rfcService.WithRepositoryRFCListCacheTiming(

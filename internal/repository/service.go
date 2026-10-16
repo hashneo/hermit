@@ -50,6 +50,7 @@ type Config struct {
 	DefaultBranch  string             `json:"default_branch"`
 	DocsPathPolicy string             `json:"docs_path_policy"`
 	RFCLabel       string             `json:"rfc_label"`
+	Team           string             `json:"team"`
 	Auth           AuthMetadata       `json:"auth"`
 	Validation     ValidationResponse `json:"validation"`
 	CreatedAt      string             `json:"created_at"`
@@ -65,6 +66,7 @@ type createInput struct {
 	DefaultBranch  string
 	DocsPathPolicy string
 	RFCLabel       string
+	Team           string
 }
 
 type rotateTokenInput struct {
@@ -156,6 +158,7 @@ func (s *Service) SeedFromConfig(repositories []config.Repository) {
 		if rfcLabel == "" {
 			rfcLabel = ""
 		}
+		team := repository.Team
 
 		token := strings.TrimSpace(repository.Token)
 		if token == "" {
@@ -197,6 +200,7 @@ func (s *Service) SeedFromConfig(repositories []config.Repository) {
 			DefaultBranch:  defaultBranch,
 			DocsPathPolicy: docsPath,
 			RFCLabel:       rfcLabel,
+			Team:           team,
 			Auth: AuthMetadata{
 				Method:               "pat",
 				TokenLastValidatedAt: validatedAt,
@@ -282,6 +286,7 @@ func (s *Service) configFromRepository(repository config.Repository, now string)
 	if rfcLabel == "" {
 		rfcLabel = ""
 	}
+	team := repository.Team
 
 	token := strings.TrimSpace(repository.Token)
 	validation := ValidationResponse{
@@ -320,6 +325,7 @@ func (s *Service) configFromRepository(repository config.Repository, now string)
 		DefaultBranch:  defaultBranch,
 		DocsPathPolicy: docsPath,
 		RFCLabel:       rfcLabel,
+		Team:           team,
 		Auth: AuthMetadata{
 			Method:               "pat",
 			TokenLastValidatedAt: validatedAt,
@@ -381,6 +387,7 @@ func (s *Service) Create(ctx context.Context, input createInput) (Config, error)
 		DefaultBranch:  input.DefaultBranch,
 		DocsPathPolicy: input.DocsPathPolicy,
 		RFCLabel:       input.RFCLabel,
+		Team:           input.Team,
 		Auth: AuthMetadata{
 			Method:               "pat",
 			TokenLastValidatedAt: tokenValidatedAt,

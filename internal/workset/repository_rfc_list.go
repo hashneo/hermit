@@ -116,6 +116,18 @@ func (s *Store) PutRepositoryRFCListError(ctx context.Context, repositoryID, sou
 	return err
 }
 
+// GetRepositoryRFCListCache returns the last-known cache metadata for a
+// repository's RFC list, regardless of source-key match or freshness. It is
+// used by the auth-status endpoint to surface the most recent refresh outcome
+// (including auth-shaped failures) for dashboard health indication.
+func (s *Store) GetRepositoryRFCListCache(ctx context.Context, repositoryID string) (CacheMetadata, bool, error) {
+	record, ok, err := s.getRepositoryRFCList(ctx, repositoryID)
+	if err != nil || !ok {
+		return CacheMetadata{}, false, err
+	}
+	return metadataFromRecord(record, false, time.Time{}), true, nil
+}
+
 func (s *Store) InvalidateRepositoryRFCList(ctx context.Context, repositoryID string) error {
 	if repositoryID == "" {
 		return errors.New("repository id is required")

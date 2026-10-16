@@ -48,9 +48,44 @@ struct Repository: Identifiable, Codable, Equatable {
     var name:      String         // e.g. "hermit-rfcs"
     var docsPath:  String         // e.g. "docs-cms/rfcs"
     var rfcLabel:  String         // e.g. ""
+    var team:      String = ""    // optional grouping key (e.g. "platform")
     var lastSyncedAt: Date? = nil
 
     var fullName: String { "\(owner)/\(name)" }
+}
+
+// MARK: Repository + Codable (custom: team/serverID/lastSyncedAt are optional at decode)
+
+extension Repository {
+    enum CodingKeys: String, CodingKey {
+        case id, serverID, accountID, owner, name, docsPath, rfcLabel, team, lastSyncedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c       = try decoder.container(keyedBy: CodingKeys.self)
+        id          = try c.decode(UUID.self,   forKey: .id)
+        serverID    = try c.decodeIfPresent(String.self, forKey: .serverID)
+        accountID   = try c.decode(UUID.self,   forKey: .accountID)
+        owner       = try c.decode(String.self, forKey: .owner)
+        name        = try c.decode(String.self, forKey: .name)
+        docsPath    = try c.decode(String.self, forKey: .docsPath)
+        rfcLabel    = try c.decodeIfPresent(String.self, forKey: .rfcLabel) ?? ""
+        team        = try c.decodeIfPresent(String.self, forKey: .team) ?? ""
+        lastSyncedAt = try c.decodeIfPresent(Date.self, forKey: .lastSyncedAt)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id,           forKey: .id)
+        try c.encodeIfPresent(serverID, forKey: .serverID)
+        try c.encode(accountID,    forKey: .accountID)
+        try c.encode(owner,        forKey: .owner)
+        try c.encode(name,         forKey: .name)
+        try c.encode(docsPath,     forKey: .docsPath)
+        try c.encode(rfcLabel,     forKey: .rfcLabel)
+        try c.encode(team,         forKey: .team)
+        try c.encodeIfPresent(lastSyncedAt, forKey: .lastSyncedAt)
+    }
 }
 
 // MARK: - AccountStore
@@ -136,7 +171,7 @@ final class AccountStore: ObservableObject {
     /// Idempotently inserts or updates a connection derived from a shared
     /// catalog (`SharedConfigStore`), keyed by a stable UUID. Preserves any
     /// existing token. Does NOT post `.hermitRestartRequired` — called during
-    /// app init, before the server starts. See ADR-010.
+    /// app init, before the server starts. See ADR-012.
     func upsertShared(id: UUID, name: String, endpoint: String) {
         if let idx = connections.firstIndex(where: { $0.id == id }) {
             var existing = connections[idx]
@@ -481,9 +516,9 @@ final class RepositoryStore: ObservableObject {
     /// Idempotently inserts or updates a repository derived from a shared
     /// catalog (`SharedConfigStore`), matched by accountID + owner + name so
     /// the existing UUID (and any open RFC windows) stay valid. Does NOT post
-    /// `.hermitRestartRequired` — called during app init. See ADR-010.
+    /// `.hermitRestartRequired` — called during app init. See ADR-012.
     func upsertShared(accountID: UUID, owner: String, name: String,
-                      docsPath: String, rfcLabel: String) {
+                      docsPath: String, rfcLabel: String, team: String = "") {
         if let idx = repositories.firstIndex(where: {
             $0.accountID == accountID &&
             $0.owner.lowercased() == owner.lowercased() &&
@@ -492,11 +527,12 @@ final class RepositoryStore: ObservableObject {
             var existing = repositories[idx]
             existing.docsPath = docsPath
             existing.rfcLabel = rfcLabel
+            existing.team = team
             repositories[idx] = existing
         } else {
             repositories.append(
                 Repository(accountID: accountID, owner: owner, name: name,
-                           docsPath: docsPath, rfcLabel: rfcLabel)
+                           docsPath: docsPath, rfcLabel: rfcLabel, team: team)
             )
         }
         save()
@@ -516,7 +552,7 @@ final class RepositoryStore: ObservableObject {
                 return Repository(id: existing.id, serverID: inbound.serverID, accountID: existing.accountID,
                                   owner: inbound.owner, name: inbound.name,
                                   docsPath: inbound.docsPath, rfcLabel: inbound.rfcLabel,
-                                  lastSyncedAt: existing.lastSyncedAt)
+                                  team: inbound.team, lastSyncedAt: existing.lastSyncedAt)
             }
             return inbound
         }

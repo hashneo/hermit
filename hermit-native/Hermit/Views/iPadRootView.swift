@@ -35,7 +35,8 @@ final class RFCStore: ObservableObject {
             var result: [RFC] = mainFiles.map {
                 RFC(id: $0.id, title: $0.name,
                     path: $0.path, sha: $0.sha, source: .mainBranch,
-                    lifecycleStatus: $0.lifecycleStatus, htmlURL: $0.htmlURL)
+                    lifecycleStatus: $0.lifecycleStatus, htmlURL: $0.htmlURL,
+                    documentType: $0.documentType)
             }
             // Apply the same deduplication + filtering as the Mac native menu:
             // one primary RFC per PR, genuine RFC files only, non-terminal status preferred.
@@ -45,7 +46,8 @@ final class RFCStore: ObservableObject {
                                   path: pr.documentPath,
                                   sha: pr.headSHA,
                                   source: .pullRequest(pr),
-                                  lifecycleStatus: pr.lifecycleStatus, htmlURL: pr.htmlURL))
+                                  lifecycleStatus: pr.lifecycleStatus, htmlURL: pr.htmlURL,
+                                  documentType: pr.documentType))
             }
             rfcs = result.sorted {
                 let aIsPR = if case .pullRequest = $0.source { true } else { false }
@@ -551,20 +553,32 @@ struct iPadRootView: View {
     }
 
     /// A Menu that lists all repos and lets the user switch between them.
+    /// Repos are grouped by `team` when any team is set; otherwise flat.
     @ViewBuilder
     private var repoSwitcherMenu: some View {
         let repos = repoStore.repositories
         let active = repos.first
+        let hasTeams = repos.contains { !$0.team.isEmpty }
+        let groups = Dictionary(grouping: repos, by: { $0.team })
         Menu {
-            ForEach(repos) { repo in
-                Button {
-                    switchRepo(repo)
-                } label: {
-                    if repo.id == active?.id {
-                        Label(repo.fullName, systemImage: "checkmark")
-                    } else {
-                        Text(repo.fullName)
+            if hasTeams {
+                ForEach(groups.keys.filter { !$0.isEmpty }.sorted(), id: \.self) { team in
+                    Section(team) {
+                        ForEach(groups[team] ?? []) { repo in
+                            repoMenuButton(repo, active: active)
+                        }
                     }
+                }
+                if let other = groups[""], !other.isEmpty {
+                    Section("Other") {
+                        ForEach(other) { repo in
+                            repoMenuButton(repo, active: active)
+                        }
+                    }
+                }
+            } else {
+                ForEach(repos) { repo in
+                    repoMenuButton(repo, active: active)
                 }
             }
         } label: {
@@ -581,6 +595,19 @@ struct iPadRootView: View {
             }
         }
         .disabled(repos.count <= 1)
+    }
+
+    @ViewBuilder
+    private func repoMenuButton(_ repo: Repository, active: Repository?) -> some View {
+        Button {
+            switchRepo(repo)
+        } label: {
+            if repo.id == active?.id {
+                Label(repo.fullName, systemImage: "checkmark")
+            } else {
+                Text(repo.fullName)
+            }
+        }
     }
 
     // MARK: - Detail view (shared; showInlineThread controls landscape thread panel)

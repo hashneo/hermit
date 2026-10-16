@@ -23,6 +23,28 @@ import Security
 final class KeychainHelper {
     static let shared = KeychainHelper()
 
+    /// Injectable operations let cache regressions run without accessing real secrets.
+    struct Operations {
+        var read: (CFDictionary) -> (OSStatus, AnyObject?) = { query in
+            var result: AnyObject?
+            let status = SecItemCopyMatching(query, &result)
+            return (status, result)
+        }
+        var update: (CFDictionary, CFDictionary) -> OSStatus = SecItemUpdate
+        var add: (CFDictionary) -> OSStatus = { SecItemAdd($0, nil) }
+        var delete: (CFDictionary) -> OSStatus = SecItemDelete
+    }
+
+    private let operations: Operations
+    private let cacheLock = NSLock()
+    // Successful reads only, scoped to this process. Never persisted to disk.
+    // Hold the lock through Keychain calls so concurrent readers share one prompt.
+    private var cachedStrings: [String: String] = [:]
+
+    init(operations: Operations) {
+        self.operations = operations
+    }
+
     /// The Keychain access group for all Hermit items.
     /// Set in Info.plist as `$(DEVELOPMENT_TEAM).$(PRODUCT_BUNDLE_IDENTIFIER)`.
     /// Falls back to an empty string on iOS simulator / unit tests where the
@@ -31,6 +53,7 @@ final class KeychainHelper {
         Bundle.main.infoDictionary?["KeychainAccessGroup"] as? String ?? ""
 
     private init() {
+        operations = Operations()
         migrateToAccessGroup()
     }
 
@@ -40,6 +63,10 @@ final class KeychainHelper {
     // MARK: - Generic low-level helpers
 
     private func readString(account: String) -> String? {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        if let cached = cachedStrings[account] { return cached }
+
         var query: [CFString: Any] = [
             kSecClass:       kSecClassGenericPassword,
             kSecAttrService: service as CFString,
@@ -50,13 +77,21 @@ final class KeychainHelper {
         if !Self.accessGroup.isEmpty {
             query[kSecAttrAccessGroup] = Self.accessGroup as CFString
         }
-        var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+        let (status, result) = operations.read(query as CFDictionary)
+        guard status == errSecSuccess,
               let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        let value = String(data: data, encoding: .utf8)
+        cachedStrings[account] = value
+        return value
     }
 
     private func writeString(_ value: String?, account: String) {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        // Invalidate even when persistence fails: never keep serving an old token
+        // after an attempted replacement or removal.
+        cachedStrings.removeValue(forKey: account)
+
         var query: [CFString: Any] = [
             kSecClass:          kSecClassGenericPassword,
             kSecAttrService:    service as CFString,
@@ -67,18 +102,20 @@ final class KeychainHelper {
             query[kSecAttrAccessGroup] = Self.accessGroup as CFString
         }
         guard let value, let data = value.data(using: .utf8) else {
-            SecItemDelete(query as CFDictionary)
+            _ = operations.delete(query as CFDictionary)
             return
         }
         let attrs: [CFString: Any] = [
             kSecValueData:      data,
             kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlock,
         ]
-        if SecItemUpdate(query as CFDictionary, attrs as CFDictionary) == errSecItemNotFound {
+        var status = operations.update(query as CFDictionary, attrs as CFDictionary)
+        if status == errSecItemNotFound {
             var add = query
             add[kSecValueData] = data
-            SecItemAdd(add as CFDictionary, nil)
+            status = operations.add(add as CFDictionary)
         }
+        if status == errSecSuccess { cachedStrings[account] = value }
     }
 
     // MARK: - Migration: move old items (no access group) into the declared group

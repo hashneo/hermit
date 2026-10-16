@@ -205,6 +205,22 @@ ipad-sim-deploy: native-build-ipad ## Build and deploy to iPad simulator (boots 
 	DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl launch "$(IPAD_SIM_UDID)" "$$BUNDLE_ID"; \
 	echo "Launched $$BUNDLE_ID in simulator $(IPAD_SIM_UDID)"
 
+.PHONY: test-native-models
+test-native-models: ## Test native document selection without launching the app
+	@mkdir -p .tmp
+	DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swiftc \
+		hermit-native/Hermit/Models/HermitModels.swift hermit-native/tests/model_tests.swift \
+		-o .tmp/hermit-model-tests
+	@.tmp/hermit-model-tests
+
+.PHONY: test-native-keychain
+test-native-keychain: ## Test credential caching without accessing the system Keychain
+	@mkdir -p .tmp
+	DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swiftc \
+		hermit-native/Hermit/Auth/KeychainHelper.swift hermit-native/tests/keychain_tests.swift \
+		-o .tmp/hermit-keychain-tests
+	@.tmp/hermit-keychain-tests
+
 native-test: ## Run the native app test suite
 	@echo "Testing Hermit..."
 	$(XCODE) \
@@ -388,17 +404,17 @@ ipad-deploy: ## Build and push to connected iPad (requires Developer Mode enable
 # ── gomobile xcframework ───────────────────────────────────────────────────────
 
 GOMOBILE_OUT := $(NATIVE_DIR)/Hermit/HermitServer.xcframework
+MACOS_DEPLOYMENT_TARGET ?= 15.2
 
-gomobile-build: ## Compile the Go mobile package into HermitServer.xcframework (auto-installs gomobile if needed)
-	@if ! command -v gomobile >/dev/null 2>&1; then \
-		echo "gomobile not found — installing..."; \
-		go install golang.org/x/mobile/cmd/gomobile@latest; \
-	fi
-	@DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer gomobile init 2>/dev/null || true
+gomobile-build: ## Compile the Go mobile package using the tools pinned in go.mod
+	@mkdir -p .tmp/gomobile-tools
+	go build -o .tmp/gomobile-tools/gomobile golang.org/x/mobile/cmd/gomobile
+	go build -o .tmp/gomobile-tools/gobind golang.org/x/mobile/cmd/gobind
 	@echo "Building HermitServer.xcframework via gomobile bind..."
-	DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-	gomobile bind \
+	PATH="$(CURDIR)/.tmp/gomobile-tools:$$PATH" DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+	.tmp/gomobile-tools/gomobile bind \
 		-target macos \
+		-macosversion $(MACOS_DEPLOYMENT_TARGET) \
 		-o $(GOMOBILE_OUT) \
 		hermit/mobile
 	@echo "xcframework written to $(GOMOBILE_OUT)"
