@@ -24,6 +24,8 @@ bin/hermit
 # Embedded dev config (copied by make native-embed-config, contains secrets)
 /hermit-native/Hermit/DevConfig/hermit.yaml
 /hermit-native/Hermit/DevConfig/gitea-token-export.sh
+/hermit-native/HermitNative/DevConfig/hermit.yaml
+/hermit-native/HermitNative/DevConfig/gitea-token-export.sh
 
 # Shared native catalogs (ADR-010) — live in ~/Library/Application Support/Hermit/config/,
 # never in the repo/build (may reference internal endpoints).
@@ -43,6 +45,7 @@ hermit-native/DerivedData/
 
 # gomobile build artifacts
 hermit-native/Hermit/HermitServer.xcframework/
+hermit-native/HermitNative/HermitServer.xcframework/
 .idea/
 scripts/__pycache__/
 /deploy

@@ -388,17 +388,17 @@ ipad-deploy: ## Build and push to connected iPad (requires Developer Mode enable
 # ── gomobile xcframework ───────────────────────────────────────────────────────
 
 GOMOBILE_OUT := $(NATIVE_DIR)/Hermit/HermitServer.xcframework
+MACOS_DEPLOYMENT_TARGET ?= 15.2
 
-gomobile-build: ## Compile the Go mobile package into HermitServer.xcframework (auto-installs gomobile if needed)
-	@if ! command -v gomobile >/dev/null 2>&1; then \
-		echo "gomobile not found — installing..."; \
-		go install golang.org/x/mobile/cmd/gomobile@latest; \
-	fi
-	@DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer gomobile init 2>/dev/null || true
+gomobile-build: ## Compile the Go mobile package using the tools pinned in go.mod
+	@mkdir -p .tmp/gomobile-tools
+	go build -o .tmp/gomobile-tools/gomobile golang.org/x/mobile/cmd/gomobile
+	go build -o .tmp/gomobile-tools/gobind golang.org/x/mobile/cmd/gobind
 	@echo "Building HermitServer.xcframework via gomobile bind..."
-	DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-	gomobile bind \
+	PATH="$(CURDIR)/.tmp/gomobile-tools:$$PATH" DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+	.tmp/gomobile-tools/gomobile bind \
 		-target macos \
+		-macosversion $(MACOS_DEPLOYMENT_TARGET) \
 		-o $(GOMOBILE_OUT) \
 		hermit/mobile
 	@echo "xcframework written to $(GOMOBILE_OUT)"

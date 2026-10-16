@@ -25,22 +25,8 @@ if ! command -v go >/dev/null 2>&1; then
     brew install go
 fi
 
-# Install gomobile if not present.
-if ! command -v gomobile >/dev/null 2>&1; then
-    echo "Installing gomobile..."
-    go install golang.org/x/mobile/cmd/gomobile@latest
-    export PATH="$PATH:$(go env GOPATH)/bin"
-fi
-
-gomobile init 2>/dev/null || true
-
-echo "Running gomobile bind..."
+# Use the same pinned tools and deployment target as local builds.
 cd "$REPO_ROOT"
-# Set MACOSX_DEPLOYMENT_TARGET so the xcframework object files match the
-# project's deployment target and suppress the ld version mismatch warning.
-MACOSX_DEPLOYMENT_TARGET=15.2 gomobile bind \
-    -target macos \
-    -o "$XCFRAMEWORK_OUT" \
-    hermit/mobile
+make gomobile-build
 
 echo "ci_pre_xcodebuild: wrote $XCFRAMEWORK_OUT"
