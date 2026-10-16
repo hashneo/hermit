@@ -35,7 +35,8 @@ final class RFCStore: ObservableObject {
             var result: [RFC] = mainFiles.map {
                 RFC(id: $0.id, title: $0.name,
                     path: $0.path, sha: $0.sha, source: .mainBranch,
-                    lifecycleStatus: $0.lifecycleStatus, htmlURL: $0.htmlURL)
+                    lifecycleStatus: $0.lifecycleStatus, htmlURL: $0.htmlURL,
+                    documentType: $0.documentType)
             }
             // Apply the same deduplication + filtering as the Mac native menu:
             // one primary RFC per PR, genuine RFC files only, non-terminal status preferred.
@@ -45,7 +46,8 @@ final class RFCStore: ObservableObject {
                                   path: pr.documentPath,
                                   sha: pr.headSHA,
                                   source: .pullRequest(pr),
-                                  lifecycleStatus: pr.lifecycleStatus, htmlURL: pr.htmlURL))
+                                  lifecycleStatus: pr.lifecycleStatus, htmlURL: pr.htmlURL,
+                                  documentType: pr.documentType))
             }
             rfcs = result.sorted {
                 let aIsPR = if case .pullRequest = $0.source { true } else { false }

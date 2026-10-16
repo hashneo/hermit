@@ -25,7 +25,7 @@ bin/hermit
 /hermit-native/Hermit/DevConfig/hermit.yaml
 /hermit-native/Hermit/DevConfig/gitea-token-export.sh
 
-# Shared native catalogs (ADR-010) — live in ~/Library/Application Support/Hermit/config/,
+# Shared native catalogs (ADR-012) — live in ~/Library/Application Support/Hermit/config/,
 # never in the repo/build (may reference internal endpoints).
 /config/hermit-repos.*.json
 

@@ -7,6 +7,13 @@ on:
       - main
 
 jobs:
+  native-models:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native document model regressions
+        run: make test-native-models
+
   backend:
     runs-on: ubuntu-latest
     steps:

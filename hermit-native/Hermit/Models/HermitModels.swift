@@ -9,6 +9,18 @@ struct RFCFile: Identifiable, Hashable {
     let sha: String
     let htmlURL: String
     let lifecycleStatus: String?  // "draft", "accepted", "implemented", "unknown"
+    let documentType: String  // docs-cms type: "rfc", "adr", "prd", "memo" (ADR-011)
+
+    init(id: String, name: String, path: String, sha: String, htmlURL: String,
+         lifecycleStatus: String?, documentType: String = "rfc") {
+        self.id = id
+        self.name = name
+        self.path = path
+        self.sha = sha
+        self.htmlURL = htmlURL
+        self.lifecycleStatus = lifecycleStatus
+        self.documentType = documentType
+    }
 }
 
 struct RFCPullRequest: Identifiable {
@@ -189,5 +201,73 @@ struct LifecycleTransitionResult: Decodable {
         case rfcID     = "rfc_id"
         case newStatus = "new_status"
         case commitSHA = "commit_sha"
+    }
+}
+
+// MARK: - Shared PR document filtering (all platforms)
+
+/// Returns the single primary `RFCPullRequest` for each PR in `prs`.
+/// Filters to numbered docs-cms documents of the declared type,
+/// prefers actionable (non-terminal) lifecycle status, and uses the highest
+/// document number as a tiebreaker so superseded/updated files are not picked over
+/// the newly proposed one.
+func primaryPRDocuments(from prs: [RFCPullRequest]) -> [RFCPullRequest] {
+    Dictionary(grouping: prs, by: { $0.number })
+        .values
+        .compactMap { group -> RFCPullRequest? in
+            let rfcs = group.filter { isDocumentPath($0.documentPath, docType: $0.documentType) }
+            guard !rfcs.isEmpty else { return nil }
+            let actionable = rfcs.filter { !isTerminalStatus($0.lifecycleStatus) }
+            return (actionable.isEmpty ? rfcs : actionable)
+                .max(by: {
+                    if $0.documentType != $1.documentType { return $0.documentType > $1.documentType }
+                    let lhs = documentNumberFromPath($0.documentPath, docType: $0.documentType)
+                    let rhs = documentNumberFromPath($1.documentPath, docType: $1.documentType)
+                    return lhs == rhs ? $0.documentPath > $1.documentPath : lhs < rhs
+                })
+        }
+        .sorted { $0.number < $1.number }
+}
+
+/// Returns true when `path` points to a genuine RFC document.
+/// Matches filenames like `rfc-001-title.md` but rejects index files
+/// (`rfc-index.md`), ADRs, PRDs, and any file without a numeric suffix
+/// immediately following the `rfc-` prefix.
+func isRFCDocumentPath(_ path: String) -> Bool {
+    isDocumentPath(path, docType: "rfc")
+}
+
+/// Generic docs-cms document-path check: true when `path` is a numbered
+/// `<docType>-NNN-slug.md` file (e.g. adr-003-…, prd-001-…, rfc-076-…, memo-002-…).
+/// Rejects index files and files without a numeric suffix after the prefix (ADR-011).
+func isDocumentPath(_ path: String, docType: String) -> Bool {
+    let type = docType.lowercased()
+    guard ["rfc", "adr", "prd", "memo"].contains(type),
+          let filename = path.split(separator: "/").last.map(String.init) else { return false }
+    return filename.range(of: "^" + type + "-[0-9]{3}-[a-z0-9]+(?:-[a-z0-9]+)*\\.md$",
+                          options: .regularExpression) != nil
+}
+
+/// Extracts the RFC sequence number from a path like `docs-cms/rfcs/rfc-076-title.md` → 76.
+func rfcNumberFromPath(_ path: String) -> Int {
+    documentNumberFromPath(path, docType: "rfc")
+}
+
+/// Generic docs-cms sequence number from a `<docType>-NNN-…` path (ADR-011).
+func documentNumberFromPath(_ path: String, docType: String) -> Int {
+    guard let filename = path.split(separator: "/").last.map(String.init) else { return 0 }
+    let lower = filename.lowercased()
+    let prefix = docType.lowercased() + "-"
+    guard lower.hasPrefix(prefix) else { return 0 }
+    let digits = lower.dropFirst(prefix.count).prefix(while: { $0.isNumber })
+    return Int(digits) ?? 0
+}
+
+/// Returns true for lifecycle statuses that mean the RFC is no longer actively
+/// being proposed — superseded, implemented, or rejected.
+func isTerminalStatus(_ status: String?) -> Bool {
+    switch status?.lowercased() {
+    case "superseded", "implemented", "rejected": return true
+    default: return false
     }
 }

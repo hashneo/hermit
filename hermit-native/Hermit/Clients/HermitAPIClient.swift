@@ -247,7 +247,8 @@ actor HermitAPIClient: HermitClientProtocol {
                 files.append(RFCFile(id: item.id, name: item.title,
                                      path: item.path, sha: item.head_sha ?? "",
                                      htmlURL: item.html_url ?? "",
-                                     lifecycleStatus: item.lifecycle_status))
+                                     lifecycleStatus: item.lifecycle_status,
+                                     documentType: item.document_type ?? "rfc"))
             }
         }
         return (

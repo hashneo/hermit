@@ -2,9 +2,10 @@
 title: User-Facing Config Directory for the Native App
 status: Proposed
 created: 2026-07-01T00:00:00Z
+updated: 2026-10-14T00:00:00Z
 deciders: Engineering Team
 tags: [architecture, config, distribution, native]
-id: adr-010
+id: adr-012
 project_id: hermit
 doc_uuid: 0b357ad2-daac-4b6d-ba71-bd7f77b9505d
 ---

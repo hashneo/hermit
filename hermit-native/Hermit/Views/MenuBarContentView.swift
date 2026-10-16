@@ -3702,17 +3702,20 @@ private final class MenuBarDashboardStore: ObservableObject {
             let (mainFiles, prs, summary) = try await client.discoverRFCs()
             let mainRFCs = mainFiles.map {
                 RFC(id: $0.id, title: $0.name, path: $0.path, sha: $0.sha,
-                    source: .mainBranch, lifecycleStatus: $0.lifecycleStatus,
-                    htmlURL: $0.htmlURL)
+                    source: .mainBranch,
+                    lifecycleStatus: $0.lifecycleStatus,
+                    htmlURL: $0.htmlURL,
+                    documentType: $0.documentType)
             }.sorted { $0.title < $1.title }
-            // One entry per PR: filter to the primary RFC document using the
-            // same deduplication logic as the native menu (documentType == "rfc",
-            // rfc-NNN path, non-terminal lifecycle status, highest RFC number wins).
+            // Select one primary docs-cms document per PR, preferring an
+            // actionable lifecycle status with the native menu's shared ordering.
             let prRFCs = primaryPRDocuments(from: prs).map {
                 RFC(id: $0.catalogID, title: $0.prTitle.isEmpty ? $0.title : $0.prTitle,
                     path: $0.documentPath, sha: $0.headSHA,
-                    source: .pullRequest($0), lifecycleStatus: $0.lifecycleStatus,
-                    htmlURL: $0.htmlURL)
+                    source: .pullRequest($0),
+                    lifecycleStatus: $0.lifecycleStatus,
+                    htmlURL: $0.htmlURL,
+                    documentType: $0.documentType)
             }.sorted { lhs, rhs in
                 let lhsNumber = if case .pullRequest(let pr) = lhs.source { pr.number } else { 0 }
                 let rhsNumber = if case .pullRequest(let pr) = rhs.source { pr.number } else { 0 }
@@ -3995,12 +3998,17 @@ private func menuIssue(forHTTPStatus statusCode: Int?, message: String) -> MenuB
     }
 }
 
-// MARK: - RFC cache
+// MARK: - Doc store (RFC cache)
+// RepoRFCCache is the on-device document store, generalized in ADR-011 to carry
+// a documentType on every item so callers can query any docs-cms doc type
+// (adr/prd/rfc/memo), not just RFCs. `DocStore` is the preferred alias.
+
+typealias DocStore = RepoRFCCache
 
 @MainActor
 final class RepoRFCCache {
     static let shared = RepoRFCCache()
-    private let defaultsKey = "hermit.menuBar.rfcProjectionCache.v1"
+    private let defaultsKey = "hermit.menuBar.docProjectionCache.v2"
     private var cache: [UUID: RepoRFCLoader.RFCSections] = [:]
 
     private init() {
@@ -4014,6 +4022,34 @@ final class RepoRFCCache {
         guard let s = cache[id] else { return nil }
         return (s.mainBranch, s.pullRequests)
     }
+
+    /// The distinct docs-cms document types present for a repository
+    /// (e.g. ["adr", "rfc"]). Empty when nothing is cached.
+    func documentTypes(for id: UUID) -> [String] {
+        guard let s = cache[id] else { return [] }
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for doc in s.mainBranch + s.pullRequests {
+            let t = doc.documentType.isEmpty ? "rfc" : doc.documentType
+            if seen.insert(t).inserted { ordered.append(t) }
+        }
+        return ordered
+    }
+
+    /// Sections filtered to a single document type, preserving the original
+    /// summary/loadedAt. Returns nil when the repo has no cached data.
+    fileprivate func sections(for id: UUID, documentType: String) -> RepoRFCLoader.RFCSections? {
+        guard let s = cache[id] else { return nil }
+        let want = documentType.lowercased()
+        let isMatch: (RFC) -> Bool = { ($0.documentType.isEmpty ? "rfc" : $0.documentType.lowercased()) == want }
+        return RepoRFCLoader.RFCSections(
+            mainBranch: s.mainBranch.filter(isMatch),
+            pullRequests: s.pullRequests.filter(isMatch),
+            summary: s.summary,
+            loadedAt: s.loadedAt
+        )
+    }
+
     fileprivate func store(_ s: RepoRFCLoader.RFCSections, for id: UUID) {
         cache[id] = s
         persist()
@@ -4109,6 +4145,7 @@ final class RepoRFCCache {
         let title: String
         let path: String
         let sha: String
+        let documentType: String
         let lifecycleStatus: String?
         let htmlURL: String
         let pullRequest: CachedPullRequest?
@@ -4118,6 +4155,7 @@ final class RepoRFCCache {
             title = rfc.title
             path = rfc.path
             sha = rfc.sha
+            documentType = rfc.documentType
             lifecycleStatus = rfc.lifecycleStatus
             htmlURL = rfc.htmlURL
             if case .pullRequest(let pr) = rfc.source {
@@ -4136,7 +4174,8 @@ final class RepoRFCCache {
                     sha: sha,
                     source: .pullRequest(pullRequest.pullRequest),
                     lifecycleStatus: lifecycleStatus,
-                    htmlURL: htmlURL
+                    htmlURL: htmlURL,
+                    documentType: documentType
                 )
             }
             return RFC(
@@ -4146,7 +4185,8 @@ final class RepoRFCCache {
                 sha: sha,
                 source: .mainBranch,
                 lifecycleStatus: lifecycleStatus,
-                htmlURL: htmlURL
+                htmlURL: htmlURL,
+                documentType: documentType
             )
         }
     }

@@ -724,7 +724,8 @@ final class HermitRepoSubMenu: NSMenu, NSMenuDelegate {
                 let mainRFCs = mainFiles.map {
                     RFC(id: $0.id, title: $0.name, path: $0.path,
                         sha: $0.sha, source: .mainBranch,
-                        lifecycleStatus: $0.lifecycleStatus, htmlURL: $0.htmlURL)
+                        lifecycleStatus: $0.lifecycleStatus, htmlURL: $0.htmlURL,
+                        documentType: $0.documentType)
                 }.sorted { $0.title < $1.title }
 
                 // One entry per PR: deduplicate to the primary RFC document.
@@ -733,7 +734,8 @@ final class HermitRepoSubMenu: NSMenu, NSMenuDelegate {
                 let prRFCs = primaryPRs.map {
                     RFC(id: "pr-\($0.number)", title: $0.title.isEmpty ? $0.prTitle : $0.title,
                         path: $0.documentPath, sha: $0.headSHA, source: .pullRequest($0),
-                        lifecycleStatus: nil, htmlURL: $0.htmlURL)
+                        lifecycleStatus: nil, htmlURL: $0.htmlURL,
+                        documentType: $0.documentType)
                 }.sorted { $0.title < $1.title }
                 guard !Task.isCancelled else { return }
                 self.loadState = .loaded(mainRFCs, prRFCs)
@@ -1011,52 +1013,3 @@ final class NewRFCWindowManager {
     }
 }
 #endif
-
-// MARK: - Shared PR document filtering (all platforms)
-
-/// Returns the single primary `RFCPullRequest` for each PR in `prs`.
-/// Filters to genuine RFC documents (documentType == "rfc", rfc-NNN path),
-/// prefers actionable (non-terminal) lifecycle status, and uses the highest
-/// RFC number as a tiebreaker so superseded/updated files are not picked over
-/// the newly proposed one.
-func primaryPRDocuments(from prs: [RFCPullRequest]) -> [RFCPullRequest] {
-    Dictionary(grouping: prs, by: { $0.number })
-        .values
-        .compactMap { group -> RFCPullRequest? in
-            let rfcs = group.filter { $0.documentType == "rfc" && isRFCDocumentPath($0.documentPath) }
-            guard !rfcs.isEmpty else { return nil }
-            let actionable = rfcs.filter { !isTerminalStatus($0.lifecycleStatus) }
-            return (actionable.isEmpty ? rfcs : actionable)
-                .max(by: { rfcNumberFromPath($0.documentPath) < rfcNumberFromPath($1.documentPath) })
-        }
-        .sorted { $0.number < $1.number }
-}
-
-/// Returns true when `path` points to a genuine RFC document.
-/// Matches filenames like `rfc-001-title.md` but rejects index files
-/// (`rfc-index.md`), ADRs, PRDs, and any file without a numeric suffix
-/// immediately following the `rfc-` prefix.
-func isRFCDocumentPath(_ path: String) -> Bool {
-    guard let filename = path.split(separator: "/").last.map(String.init) else { return false }
-    let lower = filename.lowercased()
-    guard lower.hasSuffix(".md"), lower.hasPrefix("rfc-") else { return false }
-    return lower.dropFirst(4).first?.isNumber == true
-}
-
-/// Extracts the RFC sequence number from a path like `docs-cms/rfcs/rfc-076-title.md` → 76.
-func rfcNumberFromPath(_ path: String) -> Int {
-    guard let filename = path.split(separator: "/").last.map(String.init) else { return 0 }
-    let lower = filename.lowercased()
-    guard lower.hasPrefix("rfc-") else { return 0 }
-    let digits = lower.dropFirst(4).prefix(while: { $0.isNumber })
-    return Int(digits) ?? 0
-}
-
-/// Returns true for lifecycle statuses that mean the RFC is no longer actively
-/// being proposed — superseded, implemented, or rejected.
-func isTerminalStatus(_ status: String?) -> Bool {
-    switch status?.lowercased() {
-    case "superseded", "implemented", "rejected": return true
-    default: return false
-    }
-}

@@ -152,6 +152,28 @@ func (s *Service) WithRepositoryRFCListCacheTiming(readTTL, jitter time.Duration
 
 var docuchangoRFCFilenamePattern = regexp.MustCompile(`^rfc-[0-9]{3}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$`)
 
+// docuchangoDocumentFilenamePattern matches any Docuchango numbered document
+// (adr-NNN-, prd-NNN-, rfc-NNN-, memo-NNN-) — the canonical filename shape
+// across all docs-cms document types, not just RFCs. Used by the main-branch
+// catalog listing so ADR/PRD/memo docs are surfaced alongside RFCs (ADR-011).
+var docuchangoDocumentFilenamePattern = regexp.MustCompile(`^(adr|prd|rfc|memo)-[0-9]{3}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$`)
+
+func isDocuchangoDocumentFilename(name string) bool {
+	return docuchangoDocumentFilenamePattern.MatchString(name)
+}
+
+// docTypeFromDocumentFilename extracts the docs-cms doc type ("adr","prd",
+// "rfc","memo") from a numbered document filename, or "" when unknown.
+func docTypeFromDocumentFilename(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	for _, t := range []string{"adr", "prd", "rfc", "memo"} {
+		if strings.HasPrefix(name, t+"-") {
+			return t
+		}
+	}
+	return ""
+}
+
 const (
 	defaultRepositoryRFCListCacheTTL    = 3 * time.Minute
 	defaultRepositoryRFCListCacheJitter = time.Minute
@@ -229,7 +251,7 @@ func (s *Service) ListRFCs() ([]CatalogItem, error) {
 
 	items := make([]CatalogItem, 0, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() || !isDocuchangoRFCFilename(entry.Name()) {
+		if entry.IsDir() || !isDocuchangoDocumentFilename(entry.Name()) {
 			continue
 		}
 
@@ -255,6 +277,7 @@ func (s *Service) ListRFCs() ([]CatalogItem, error) {
 			SourceType:      "main",
 			SourceLabel:     "Main branch",
 			AllowedActions:  []string{"view"},
+			DocumentType:    docTypeFromDocumentFilename(entry.Name()),
 			LifecycleStatus: normalizeLifecycleStatus(frontmatter["status"]),
 			Commentable:     false,
 		})
@@ -268,7 +291,7 @@ func (s *Service) ListRFCs() ([]CatalogItem, error) {
 }
 
 func (s *Service) RenderRFC(id string) (DocumentView, error) {
-	if id == "" || filepath.Base(id) != id || !isDocuchangoRFCFilename(id) {
+	if id == "" || filepath.Base(id) != id || !isDocuchangoDocumentFilename(id) {
 		return DocumentView{}, fmt.Errorf("invalid rfc id")
 	}
 
@@ -353,6 +376,7 @@ func (s *Service) ListRFCsByRepository(ctx context.Context, repositoryID string,
 				Title:           title,
 				Path:            item.Path,
 				SourceType:      "main",
+				DocumentType:    item.DocumentType,
 				SourceLabel:     "Main branch",
 				AllowedActions:  []string{"view"},
 				LifecycleStatus: lifecycleStatus,
@@ -967,8 +991,6 @@ func (s *Service) MergePR(ctx context.Context, repositoryID string, prNumber int
 		slog.Error("MergePR service: github merge failed", "owner", owner, "repo", name, "prNumber", prNumber, "error", err)
 		return MergePRResult{}, fmt.Errorf("merge PR: %w", err)
 	}
-
-
 
 	slog.Info("MergePR service: done", "owner", owner, "repo", name, "prNumber", prNumber, "merged", merged, "blockedByCI", blockedByCI)
 	return MergePRResult{Merged: merged, BlockedByCI: blockedByCI}, nil
