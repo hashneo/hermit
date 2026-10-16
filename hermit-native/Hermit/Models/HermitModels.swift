@@ -1,5 +1,51 @@
 import Foundation
 
+/// The server's most recent refresh outcome, including failures returned with
+/// cached documents. An HTTP success alone does not imply a successful sync.
+enum RepositoryAuthState: String, Decodable {
+    case healthy
+    case authenticationRequired = "authentication_required"
+    case accessDenied = "access_denied"
+    case refreshFailed = "refresh_failed"
+    case unknown
+
+    init(fromRaw value: String) {
+        self = RepositoryAuthState(rawValue: value) ?? .unknown
+    }
+}
+
+struct RepositoryAuthStatus {
+    let state: RepositoryAuthState
+    let method: String
+    let lastValidatedAt: String?
+    let lastSuccessfulRefreshAt: String?
+    let lastAttemptedRefreshAt: String?
+    let lastErrorCode: String?
+    let lastErrorMessage: String?
+    let remediation: String?
+
+    var isCredentialIssue: Bool {
+        state == .authenticationRequired || state == .accessDenied
+    }
+
+    var hasRefreshFailure: Bool {
+        isCredentialIssue || state == .refreshFailed
+    }
+
+    /// Keep server cache timestamps truthful. Failed refreshes must never turn
+    /// a cached response into a new successful-sync timestamp.
+    func successfulRefreshDate(observedAt: Date, cachedAt: Date?) -> Date? {
+        if let raw = lastSuccessfulRefreshAt {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = formatter.date(from: raw) { return date }
+            formatter.formatOptions = [.withInternetDateTime]
+            if let date = formatter.date(from: raw) { return date }
+        }
+        return hasRefreshFailure ? cachedAt : observedAt
+    }
+}
+
 // MARK: - Shared domain models used across HermitAPIClient and all views
 
 struct RFCFile: Identifiable, Hashable {

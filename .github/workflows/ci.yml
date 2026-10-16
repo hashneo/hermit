@@ -7,6 +7,13 @@ on:
       - main
 
 jobs:
+  native-refresh-health:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native refresh-health regressions
+        run: make test-native-refresh-health
+
   backend:
     runs-on: ubuntu-latest
     steps:

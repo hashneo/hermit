@@ -205,6 +205,14 @@ ipad-sim-deploy: native-build-ipad ## Build and deploy to iPad simulator (boots 
 	DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl launch "$(IPAD_SIM_UDID)" "$$BUNDLE_ID"; \
 	echo "Launched $$BUNDLE_ID in simulator $(IPAD_SIM_UDID)"
 
+.PHONY: test-native-refresh-health
+test-native-refresh-health: ## Test cached refresh health without launching the app
+	@mkdir -p .tmp
+	DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swiftc \
+		hermit-native/Hermit/Models/HermitModels.swift hermit-native/tests/refresh_health_tests.swift \
+		-o .tmp/hermit-refresh-health-tests
+	@.tmp/hermit-refresh-health-tests
+
 native-test: ## Run the native app test suite
 	@echo "Testing Hermit..."
 	$(XCODE) \
