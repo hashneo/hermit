@@ -265,7 +265,8 @@ struct MenuBarContentView: View {
                         prStateSummaries: aggregatePRStateSummaries,
                         prStatsFreshness: aggregatePRStatsFreshness,
                         serverStatusText: serverStatusText,
-                        serverStatusColor: serverStatusColor
+                        serverStatusColor: serverStatusColor,
+                        onOpenSettings: openRepositorySettings
                     )
 
                     CompactReviewQueue(
@@ -347,7 +348,8 @@ struct MenuBarContentView: View {
                     AllRepositoriesSection(
                         repoCount: displayedRepos.count,
                         loadedCount: loadedRepositoryCount,
-                        prStatsFreshness: aggregatePRStatsFreshness
+                        prStatsFreshness: aggregatePRStatsFreshness,
+                        onOpenSettings: openRepositorySettings
                     )
                     PRReviewSection(
                         title: "Review queue",
@@ -363,10 +365,7 @@ struct MenuBarContentView: View {
                         isActive: repo.id == repoStore.repositories.first?.id,
                         onActivate: { activate(repo) },
                         onRefresh: { Task { await dashboardStore.reload(repo: repo, appState: appState) } },
-                        onOpenSettings: {
-                        NSApp.activate(ignoringOtherApps: true)
-                        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                    },
+                        onOpenSettings: openRepositorySettings,
                         onOpenPR: { rfc in open(rfc, in: repo) },
                         onOpen: { rfc in open(rfc, in: repo) }
                     )
@@ -582,6 +581,11 @@ struct MenuBarContentView: View {
         let accountID = accountStore.connections.first?.id
         await serverRepoStore.refresh(port: port, accountID: accountID)
         await refreshDashboard(force: force)
+    }
+
+    private func openRepositorySettings() {
+        appState.deepLinkSettingsTab = .repository
+        SettingsWindowManager.shared.open(appState: appState)
     }
 
     private func activate(_ repo: Repository) {
@@ -851,6 +855,7 @@ private struct CompactAllRepositoriesSummary: View {
     let prStatsFreshness: PRStatsFreshness
     let serverStatusText: String
     let serverStatusColor: Color
+    let onOpenSettings: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -858,6 +863,13 @@ private struct CompactAllRepositoriesSummary: View {
                 Text("Review workflow")
                     .font(.headline)
                 Spacer()
+                Button(action: onOpenSettings) {
+                    Image(systemName: "gearshape")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Open repository settings")
                 StatusCapsule(title: "\(loadedCount)/\(repoCount) loaded", systemImage: "shippingbox", tint: .secondary)
             }
 
@@ -2481,6 +2493,7 @@ private struct AllRepositoriesSection: View {
     let repoCount: Int
     let loadedCount: Int
     let prStatsFreshness: PRStatsFreshness
+    let onOpenSettings: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -2493,6 +2506,13 @@ private struct AllRepositoriesSection: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button(action: onOpenSettings) {
+                    Image(systemName: "gearshape")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Open repository settings")
             }
         }
     }

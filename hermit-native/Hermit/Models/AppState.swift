@@ -58,6 +58,13 @@ final class AppState: ObservableObject {
     @Published var rfcLabel: String
     @Published var pat: String
 
+    /// Requested Settings tab to deep-link to when the settings view opens.
+    /// Consumed and cleared by SettingsView.onAppear. Lets the dashboard gear
+    /// jump straight to the Repository tab.
+    #if os(macOS)
+    @Published var deepLinkSettingsTab: SettingsTab? = nil
+    #endif
+
     // hermit-999: NSUserActivity — shared selection state
     /// The RFC currently being viewed. Written by iPadRootView (iOS) and
     /// RFCViewerWindowManager (macOS) so NSUserActivity machinery can read it.

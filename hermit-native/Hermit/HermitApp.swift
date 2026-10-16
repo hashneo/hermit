@@ -30,6 +30,7 @@ struct HermitApp: App {
         // - popup mode: Settings is also accessible inline inside the dashboard panel
         Settings {
             SettingsView()
+                .environmentObject(appState)
         }
 #else
         WindowGroup {
