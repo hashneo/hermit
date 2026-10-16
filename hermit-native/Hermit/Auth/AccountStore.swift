@@ -136,7 +136,7 @@ final class AccountStore: ObservableObject {
     /// Idempotently inserts or updates a connection derived from a shared
     /// catalog (`SharedConfigStore`), keyed by a stable UUID. Preserves any
     /// existing token. Does NOT post `.hermitRestartRequired` — called during
-    /// app init, before the server starts. See ADR-010.
+    /// app init, before the server starts. See ADR-012.
     func upsertShared(id: UUID, name: String, endpoint: String) {
         if let idx = connections.firstIndex(where: { $0.id == id }) {
             var existing = connections[idx]
@@ -481,7 +481,7 @@ final class RepositoryStore: ObservableObject {
     /// Idempotently inserts or updates a repository derived from a shared
     /// catalog (`SharedConfigStore`), matched by accountID + owner + name so
     /// the existing UUID (and any open RFC windows) stay valid. Does NOT post
-    /// `.hermitRestartRequired` — called during app init. See ADR-010.
+    /// `.hermitRestartRequired` — called during app init. See ADR-012.
     func upsertShared(accountID: UUID, owner: String, name: String,
                       docsPath: String, rfcLabel: String) {
         if let idx = repositories.firstIndex(where: {

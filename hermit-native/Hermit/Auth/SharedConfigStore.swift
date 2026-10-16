@@ -11,7 +11,7 @@ import CryptoKit
 // populate their account + repository list without a source checkout or any
 // build-time embedding. Tokens are NOT stored here — each user adds their own
 // PAT per account (Keychain), keyed by the account's stable derived UUID.
-// See ADR-010.
+// See ADR-012.
 
 enum SharedConfigStore {
 
