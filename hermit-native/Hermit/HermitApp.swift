@@ -561,11 +561,24 @@ final class HermitNativeMenu: NSMenu, NSMenuDelegate {
         let repos = RepositoryStore.shared.repositories
         if repos.isEmpty {
             addDisabledItem("No repositories configured")
+        } else if repos.contains(where: { !$0.team.isEmpty }) {
+            // Grouped by team; named teams sorted alphabetically, "Other" last.
+            let groups = Dictionary(grouping: repos, by: { $0.team })
+            for team in groups.keys.filter({ !$0.isEmpty }).sorted() {
+                addDisabledItem(team.uppercased())
+                for repo in groups[team] ?? [] {
+                    addItem(repoSubmenu(for: repo))
+                }
+            }
+            if let other = groups[""], !other.isEmpty {
+                addDisabledItem("OTHER")
+                for repo in other {
+                    addItem(repoSubmenu(for: repo))
+                }
+            }
         } else {
             for repo in repos {
-                let item = NSMenuItem(title: repo.fullName, action: nil, keyEquivalent: "")
-                item.submenu = cachedSubmenu(for: repo)
-                addItem(item)
+                addItem(repoSubmenu(for: repo))
             }
         }
         addItem(.separator())
@@ -604,6 +617,13 @@ final class HermitNativeMenu: NSMenu, NSMenuDelegate {
         let sub = HermitRepoSubMenu(repo: repo)
         repoSubmenus[repo.id] = sub
         return sub
+    }
+
+    /// Builds the top-level NSMenuItem for a repo, with its cached submenu.
+    private func repoSubmenu(for repo: Repository) -> NSMenuItem {
+        let item = NSMenuItem(title: repo.fullName, action: nil, keyEquivalent: "")
+        item.submenu = cachedSubmenu(for: repo)
+        return item
     }
 
     // MARK: - Actions

@@ -72,6 +72,7 @@ type RepoConfig struct {
 	Repo     string `json:"repo"`
 	DocsPath string `json:"docsPath"`
 	RFCLabel string `json:"rfcLabel"`
+	Team     string `json:"team"`
 }
 
 var (
@@ -362,6 +363,7 @@ func buildConfig(sc StartConfig) (config.Config, error) {
 			DefaultBranch:  "main",
 			DocsPathPolicy: r.DocsPath,
 			RFCLabel:       r.RFCLabel,
+			Team:           r.Team,
 			Token:          r.PAT,
 		})
 	}

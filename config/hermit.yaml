@@ -20,13 +20,16 @@ repositories:
 #    registry: github
 #    default_branch: main
 #    docs_path_policy: docs-cms/rfcs/
+#    team: platform
 #  - owner: Steven-Taylor1
 #    name: hermit
 #    registry: github-enterprise
 #    default_branch: main
 #    docs_path_policy: docs-cms/rfcs/
+#    team: docs
   - owner: gitea_admin
     name: hermit-rfcs
     registry: gitea-local
     default_branch: main
     docs_path_policy: docs-cms/rfcs/
+    team: docs

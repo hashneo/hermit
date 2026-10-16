@@ -41,6 +41,7 @@ enum SharedConfigStore {
             let name: String
             let docsPath: String?
             let rfcLabel: String?
+            let team: String?
         }
         let accounts: [Account]
         let repositories: [Repository]
@@ -118,7 +119,8 @@ enum SharedConfigStore {
                 owner:     repo.owner,
                 name:      repo.name,
                 docsPath:  repo.docsPath ?? "docs-cms/rfcs",
-                rfcLabel:  repo.rfcLabel ?? "hermit:rfc-ready"
+                rfcLabel:  repo.rfcLabel ?? "hermit:rfc-ready",
+                team:      repo.team ?? ""
             )
         }
     }
@@ -152,6 +154,7 @@ enum SharedConfigStore {
                 "name":      repo.name,
                 "docs_path": repo.docsPath,
                 "rfc_label": repo.rfcLabel,
+                "team":      repo.team,
             ]
         }
 

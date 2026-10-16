@@ -564,6 +564,23 @@ components:
         docs_path_policy:
           type: string
           example: docs-cms/rfcs/
+        registry:
+          type: string
+          nullable: true
+          description: Registry name this repository is registered under.
+        base_url:
+          type: string
+          format: uri
+          nullable: true
+          description: Resolved API base URL for the registry.
+        rfc_label:
+          type: string
+          nullable: true
+          description: Label used to flag RFC-ready pull requests.
+        team:
+          type: string
+          nullable: true
+          description: Optional grouping key for organizing repositories in the UI.
         auth:
           $ref: '#/components/schemas/RepositoryAuthMetadata'
         validation:
@@ -635,6 +652,19 @@ components:
         docs_path_policy:
           type: string
           default: docs-cms/rfcs/
+        registry:
+          type: string
+          description: Registry name to register this repository under.
+        base_url:
+          type: string
+          format: uri
+          description: API base URL for a custom registry.
+        rfc_label:
+          type: string
+          description: Label used to flag RFC-ready pull requests.
+        team:
+          type: string
+          description: Optional grouping key for organizing repositories in the UI.
 
     RfcDocument:
       type: object

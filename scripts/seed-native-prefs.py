@@ -187,6 +187,7 @@ def main():
                 "name": repo_name,
                 "docsPath": repo_docs,
                 "rfcLabel": repo.get("rfc_label", ""),
+                "team": repo.get("team", ""),
             })
 
         existing_accounts = decode_existing_json("hermit.accounts")
@@ -305,6 +306,7 @@ def main():
                     "name":      name,
                     "docsPath":  docs,
                     "rfcLabel":  "",
+                    "team":      "",
                 }
             ]
     else:

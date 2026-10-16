@@ -32,6 +32,10 @@ type Repository struct {
 	DefaultBranch  string `yaml:"default_branch"`
 	DocsPathPolicy string `yaml:"docs_path_policy"`
 	RFCLabel       string `yaml:"rfc_label"`
+	// Team is an optional grouping key used to organise repositories in the UI.
+	// Repositories that share a Team value are displayed together. A repository
+	// with no Team is shown in a default "Other" group. Free-form string.
+	Team string `yaml:"team"`
 	// Token is an in-memory PAT used when building config programmatically
 	// (e.g. the embedded mobile server). It is never read from or written to YAML.
 	Token string `yaml:"-"`

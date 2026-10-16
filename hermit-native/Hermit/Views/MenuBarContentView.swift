@@ -325,14 +325,29 @@ struct MenuBarContentView: View {
                     prStateSummaries: aggregatePRStateSummaries
                 )
 
-                ForEach(filteredOrderedRepos) { repo in
-                    RepoFilterRow(
-                        repo: repo,
-                        state: dashboardStore.state(for: repo.id),
-                        isSelected: repo.id == selectedRepoID,
-                        isActive: repo.id == repoStore.repositories.first?.id,
-                        onSelect: { selectedRepoID = repo.id }
-                    )
+                if hasTeamGrouping {
+                    ForEach(groupedFilteredRepos, id: \.team) { group in
+                        RepoTeamHeader(title: group.team, count: group.repos.count)
+                        ForEach(group.repos) { repo in
+                            RepoFilterRow(
+                                repo: repo,
+                                state: dashboardStore.state(for: repo.id),
+                                isSelected: repo.id == selectedRepoID,
+                                isActive: repo.id == repoStore.repositories.first?.id,
+                                onSelect: { selectedRepoID = repo.id }
+                            )
+                        }
+                    }
+                } else {
+                    ForEach(filteredOrderedRepos) { repo in
+                        RepoFilterRow(
+                            repo: repo,
+                            state: dashboardStore.state(for: repo.id),
+                            isSelected: repo.id == selectedRepoID,
+                            isActive: repo.id == repoStore.repositories.first?.id,
+                            onSelect: { selectedRepoID = repo.id }
+                        )
+                    }
                 }
             }
             .padding(14)
@@ -439,6 +454,27 @@ struct MenuBarContentView: View {
                 return state?.issue != nil
             }
         }
+    }
+
+    /// True when at least one repository in the filtered set has a non-empty
+    /// `team`. Drives whether the sidebar renders grouped sections vs. a flat
+    /// list. Based on the filtered set so grouping adapts to the active filter.
+    private var hasTeamGrouping: Bool {
+        filteredOrderedRepos.contains { !$0.team.isEmpty }
+    }
+
+    /// Groups `filteredOrderedRepos` by team for sectioned display.
+    /// Named teams are sorted alphabetically; repos without a team land in a
+    /// trailing "Other" bucket.
+    private var groupedFilteredRepos: [(team: String, repos: [Repository])] {
+        let groups = Dictionary(grouping: filteredOrderedRepos, by: { $0.team })
+        var result = groups.keys.filter { !$0.isEmpty }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            .map { (team: $0, repos: groups[$0] ?? []) }
+        if let other = groups[""], !other.isEmpty {
+            result.append((team: "Other", repos: other))
+        }
+        return result
     }
 
     private var repoIdentitySignature: String {
@@ -1073,6 +1109,26 @@ private struct SidebarMetricCard: View {
                     .frame(width: 3)
             }
         }
+    }
+}
+
+private struct RepoTeamHeader: View {
+    let title: String
+    let count: Int
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .textCase(.uppercase)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text("\(count)")
+                .font(.caption2.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.top, 6)
     }
 }
 
@@ -3571,9 +3627,10 @@ private final class ServerRepositoryMenuStore: ObservableObject {
                 let name: String
                 let docsPath: String
                 let rfcLabel: String
+                let team: String?
 
                 private enum CodingKeys: String, CodingKey {
-                    case id, owner, name
+                    case id, owner, name, team
                     case docsPath = "docs_path_policy"
                     case rfcLabel = "rfc_label"
                 }
@@ -3601,7 +3658,8 @@ private final class ServerRepositoryMenuStore: ObservableObject {
                     owner: item.owner,
                     name: item.name,
                     docsPath: item.docsPath,
-                    rfcLabel: item.rfcLabel
+                    rfcLabel: item.rfcLabel,
+                    team: item.team ?? existing?.team ?? ""
                 )
             }
             repositories = nextRepositories

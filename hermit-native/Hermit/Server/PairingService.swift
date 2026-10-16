@@ -146,9 +146,10 @@ final class PairingAdvertiser: NSObject, ObservableObject {
             let n: String   // name
             let d: String   // docsPath
             let l: String   // rfcLabel
+            let t: String   // team
         }
         let repoEntries = RepositoryStore.shared.repositories.map {
-            RepoEntry(o: $0.owner, n: $0.name, d: $0.docsPath, l: $0.rfcLabel)
+            RepoEntry(o: $0.owner, n: $0.name, d: $0.docsPath, l: $0.rfcLabel, t: $0.team)
         }
         let reposJSON = (try? String(data: JSONEncoder().encode(repoEntries), encoding: .utf8)) ?? "[]"
 
@@ -331,11 +332,12 @@ final class PairingBrowser: NSObject, ObservableObject {
               let data = json.data(using: .utf8) else { return }
         struct RepoEntry: Decodable {
             let o: String; let n: String; let d: String; let l: String
+            let t: String?
         }
         if let entries = try? JSONDecoder().decode([RepoEntry].self, from: data), !entries.isEmpty {
             RepositoryStore.shared.replaceAll(fromMDNS: entries.map {
                 Repository(accountID: UUID(), owner: $0.o, name: $0.n,
-                           docsPath: $0.d, rfcLabel: $0.l)
+                           docsPath: $0.d, rfcLabel: $0.l, team: $0.t ?? "")
             })
         }
     }

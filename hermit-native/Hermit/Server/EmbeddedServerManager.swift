@@ -191,6 +191,7 @@ final class EmbeddedServerManager: ObservableObject {
                 "owner":    repo.owner,
                 "repo":     repo.name,
                 "docsPath": repo.docsPath,
+                "team":     repo.team,
             ])
         }
 

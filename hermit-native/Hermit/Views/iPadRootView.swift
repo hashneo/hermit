@@ -551,20 +551,32 @@ struct iPadRootView: View {
     }
 
     /// A Menu that lists all repos and lets the user switch between them.
+    /// Repos are grouped by `team` when any team is set; otherwise flat.
     @ViewBuilder
     private var repoSwitcherMenu: some View {
         let repos = repoStore.repositories
         let active = repos.first
+        let hasTeams = repos.contains { !$0.team.isEmpty }
+        let groups = Dictionary(grouping: repos, by: { $0.team })
         Menu {
-            ForEach(repos) { repo in
-                Button {
-                    switchRepo(repo)
-                } label: {
-                    if repo.id == active?.id {
-                        Label(repo.fullName, systemImage: "checkmark")
-                    } else {
-                        Text(repo.fullName)
+            if hasTeams {
+                ForEach(groups.keys.filter { !$0.isEmpty }.sorted(), id: \.self) { team in
+                    Section(team) {
+                        ForEach(groups[team] ?? []) { repo in
+                            repoMenuButton(repo, active: active)
+                        }
                     }
+                }
+                if let other = groups[""], !other.isEmpty {
+                    Section("Other") {
+                        ForEach(other) { repo in
+                            repoMenuButton(repo, active: active)
+                        }
+                    }
+                }
+            } else {
+                ForEach(repos) { repo in
+                    repoMenuButton(repo, active: active)
                 }
             }
         } label: {
@@ -581,6 +593,19 @@ struct iPadRootView: View {
             }
         }
         .disabled(repos.count <= 1)
+    }
+
+    @ViewBuilder
+    private func repoMenuButton(_ repo: Repository, active: Repository?) -> some View {
+        Button {
+            switchRepo(repo)
+        } label: {
+            if repo.id == active?.id {
+                Label(repo.fullName, systemImage: "checkmark")
+            } else {
+                Text(repo.fullName)
+            }
+        }
     }
 
     // MARK: - Detail view (shared; showInlineThread controls landscape thread panel)

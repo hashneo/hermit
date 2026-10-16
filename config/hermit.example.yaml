@@ -16,13 +16,16 @@ repositories:
     registry: github-public
     default_branch: main
     docs_path_policy: docs-cms/rfcs/
+    team: platform
   - owner: acme
     name: platform-rfcs
     registry: github-enterprise
     default_branch: trunk
     docs_path_policy: docs-cms/rfcs/
+    team: platform
   - owner: gitea_admin
     name: hermit-rfcs
     registry: gitea-local
     default_branch: main
     docs_path_policy: docs-cms/rfcs/
+    team: docs

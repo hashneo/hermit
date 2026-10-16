@@ -902,6 +902,12 @@ private struct RepositorySettingsTab: View {
                     Text(repo.name)
                 }
 
+                TableColumn("Team") { repo in
+                    Text(repo.team.isEmpty ? "—" : repo.team)
+                        .foregroundStyle(repo.team.isEmpty ? .secondary : .primary)
+                }
+                .width(min: 80, ideal: 120)
+
                 TableColumn("Last synced") { repo in
                     RepositoryLastSyncedText(date: repo.lastSyncedAt)
                 }
@@ -1140,6 +1146,7 @@ private struct AddRepoSheet: View {
     @State private var name     = ""
     @State private var docsPath = ""
     @State private var rfcLabel = ""
+    @State private var team     = ""
     @State private var isSaving = false
 
     var canSave: Bool {
@@ -1188,6 +1195,11 @@ private struct AddRepoSheet: View {
 #if os(iOS)
                         .textInputAutocapitalization(.never)
 #endif
+                    TextField("Team", text: $team, prompt: Text("platform"))
+                        .autocorrectionDisabled()
+#if os(iOS)
+                        .textInputAutocapitalization(.never)
+#endif
                 }
             }
             .formStyle(.grouped)
@@ -1227,7 +1239,8 @@ private struct AddRepoSheet: View {
             owner: owner.trimmingCharacters(in: .whitespaces),
             name: name.trimmingCharacters(in: .whitespaces),
             docsPath: docsPath.isEmpty ? "docs-cms/rfcs" : docsPath.trimmingCharacters(in: .whitespaces),
-            rfcLabel: rfcLabel.isEmpty ? "" : rfcLabel.trimmingCharacters(in: .whitespaces)
+            rfcLabel: rfcLabel.isEmpty ? "" : rfcLabel.trimmingCharacters(in: .whitespaces),
+            team: team.trimmingCharacters(in: .whitespaces)
         )
         let registeredServerID = await registerWithRunningServer(repo)
         if let serverID = registeredServerID {
@@ -1257,7 +1270,8 @@ private struct AddRepoSheet: View {
             "base_url": resolvedAPIBase(for: account.endpoint),
             "personal_access_token": token,
             "docs_path_policy": repo.docsPath,
-            "rfc_label": repo.rfcLabel
+            "rfc_label": repo.rfcLabel,
+            "team": repo.team
         ]
         req.httpBody = try? JSONEncoder().encode(payload)
 
@@ -1310,6 +1324,7 @@ private struct EditRepoSheet: View {
     @State private var name:     String
     @State private var docsPath: String
     @State private var rfcLabel: String
+    @State private var team:     String
 
     init(repo: Repository, isPresented: Binding<Bool>) {
         self.repo    = repo
@@ -1319,6 +1334,7 @@ private struct EditRepoSheet: View {
         _name     = State(initialValue: repo.name)
         _docsPath = State(initialValue: repo.docsPath)
         _rfcLabel = State(initialValue: repo.rfcLabel)
+        _team     = State(initialValue: repo.team)
     }
 
     var body: some View {
@@ -1354,6 +1370,11 @@ private struct EditRepoSheet: View {
 #if os(iOS)
                         .textInputAutocapitalization(.never)
 #endif
+                    TextField("Team", text: $team, prompt: Text("platform"))
+                        .autocorrectionDisabled()
+#if os(iOS)
+                        .textInputAutocapitalization(.never)
+#endif
                 }
             }
             .formStyle(.grouped)
@@ -1373,6 +1394,7 @@ private struct EditRepoSheet: View {
                         updated.name      = name.trimmingCharacters(in: .whitespaces)
                         updated.docsPath  = docsPath.trimmingCharacters(in: .whitespaces)
                         updated.rfcLabel  = rfcLabel.trimmingCharacters(in: .whitespaces)
+                        updated.team      = team.trimmingCharacters(in: .whitespaces)
                         repoStore.update(updated)
                         isPresented = false
                     }
