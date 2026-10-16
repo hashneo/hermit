@@ -1,0 +1,237 @@
+{
+  "schema_version": 1,
+  "purpose": "Planning snapshot, not live task status. Gantry is authoritative for execution.",
+  "created": "2026-10-16",
+  "project": "hermit",
+  "workflow_id": "wf-gen-thr7mb",
+  "workstream_id": "dashboard-journey",
+  "workflow_title": "Hermit dashboard: trusted review journey",
+  "next_action": "D1",
+  "tasks": [
+    {
+      "key": "D1",
+      "id": "task-dashboard-journey-4bh4gh",
+      "title": "D1 — Draft dashboard journey PRD and reconcile RFC-008",
+      "role": "design",
+      "priority": 2,
+      "description": "Create Draft PRD-002 for the dashboard journey: saved scope -> choose next review -> read context -> respond -> confirm GitHub sync -> return to queue. Compare reviewer-first default with maintainer health-first; make the choice explicit for human review. Define request/document count units, active re-review after merge, partial/stale/loading/empty states, account-scoped recovery, compact/detached behavior, accessibility and measurable usability criteria. Inventory available Hermit API signals; do not invent assignment/personalization. Reconcile RFC-008 single-repo, embedded Settings and direct GitHub assumptions with ADR-009 and current integration code. Acceptance: linked draft PRD/RFC PR, state and scenario matrix, unresolved decisions listed; no UI implementation or approval inferred. Existing tracking: hermit-ixg; audit: hermit-gk7. Propose explicit iPad dashboard parity versus regression-only coverage of the existing reading/commenting journey, including supported sizes. Propose a baseline measurement method: participant selection, versioned scenarios/fixtures, task wording, timing boundaries and failure scoring, plus thresholds for task success, timing, coverage and submission-state comprehension. R1 must approve method, thresholds and platform scope before M0 measures them.",
+      "files": [
+        "docs-cms/prd/prd-002-dashboard-core-journey.md",
+        "docs-cms/rfcs/rfc-008-macos-menu-bar-app.md",
+        "docs-cms/rfcs/rfc-009-ipad-reading-and-commenting-app.md"
+      ],
+      "depends_on": []
+    },
+    {
+      "key": "B0",
+      "title": "B0 — Establish the reviewed upstream baseline",
+      "role": "review",
+      "priority": 2,
+      "depends_on": [],
+      "description": "External prerequisite for implementation PRs. PR #27 at 3d7b782 is the preserved integration source and split-review index, not a merge vehicle. Review and obtain authorized merges of baseline PRs #28, #29, #30, #31, #32, #33, #34, #35, #36 against current hashneo/hermit/main. Merge the ADR identity correction before the catalog/planning proposals and the auth-status API before native refresh health; use the native build-tooling fix for subsequent native validation. Reconcile overlapping files and CI/test targets as PRs land. Keep Proposed ADRs subject to human approval. Preserve Settings fixes, session Keychain caching, repository-bound credentials, team transport, document types and truthful refresh failures. Acceptance: human review outcomes and required checks on each final PR head, full macOS app build and focused launch/new-existing Settings/refresh-recovery smoke evidence, commands/signing overrides/OS/results, explicit merge authorization and resulting combined main SHA. Repeat the full macOS build and focused smoke checks on the final combined main revision; original integration evidence and individual green CI jobs are insufficient. Record outstanding iPad validation explicitly as a release blocker. Record the currently approved deployed app/backend artifact set, source SHAs, locations/checksums and rollback reference; if none exists, record no approved release. Routine users retain the existing release pin until R3. Do not self-merge or infer stable adoption. Any deferred baseline feature requires a recorded human scope decision and reconciled PRD, baseline scenarios and dependent tasks before closure. Design documents can proceed meanwhile. Broader macOS scenarios: hermit-5lt; signing: hermit-oaj; iPad: hermit-1ny.",
+      "files": [],
+      "human_review": true,
+      "id": "task-dashboard-journey-8jn86t"
+    },
+    {
+      "key": "R1",
+      "title": "R1 — Design review: core journey and information priorities",
+      "role": "review",
+      "priority": 2,
+      "depends_on": [
+        "D1"
+      ],
+      "description": "Human product/design review of Draft PRD-002 and RFC-008 reconciliation. Decide reviewer-first versus maintainer-first default; approve scope persistence, request/document units, workflow versus merge/lifecycle vocabulary, closed-PR re-review, honest partial coverage, recovery and sync completion criteria. Review normal, empty, stale and failed journeys. Acceptance: named reviewer, artifact revision, decision and unresolved items attached. Only complete on explicit approval of the reviewed scope. Requested changes return to D1 and keep this gate pending. Mandatory acceptance: explicitly approve iPad parity or regression-only scope in PRD-002, supported sizes, usability thresholds and the measurement method (participant selection, versioned scenarios/fixtures, task wording, timing and failure scoring). M0 cannot collect baseline measurements before this approval. Identify the baseline collector when assigning M0.",
+      "files": [],
+      "human_review": true,
+      "id": "task-dashboard-journey-hsycmg"
+    },
+    {
+      "key": "D2",
+      "title": "D2 — Specify queue state and Hermit API support",
+      "role": "design",
+      "priority": 2,
+      "depends_on": [
+        "R1"
+      ],
+      "description": "Map every proposed UI signal to existing Hermit API fields and model behavior. Define stable identity (provider/host/repository/PR), request and document counts, active-label re-review eligibility, workflow action ordering with available timestamps and deterministic ties, freshness and per-account partial coverage. Do not sort globally by PR number or infer assigned-to-me without data. Acceptance: contract/state table and synthetic fixture matrix; identify minimal OpenAPI additions only if needed, compatibility and test plan. Follow ADR-009; any major architectural departure requires a Proposed ADR and human approval before implementation. Map the R1-approved iPad scope to existing platform behavior, API contracts and implementation boundaries, including portrait/landscape/narrow-window navigation and completion/recovery. The regression-only option must identify shared-code risks to the existing iPad journey.",
+      "files": [
+        "api/openapi/v1/openapi.yaml",
+        "hermit-native/Hermit/Models",
+        "docs-cms/rfcs",
+        "hermit-native/Hermit/Views/iPadRootView.swift"
+      ],
+      "human_review": false,
+      "id": "task-dashboard-journey-cn855h"
+    },
+    {
+      "key": "D3",
+      "title": "D3 — Prototype dashboard journeys and document iPad scope",
+      "role": "design",
+      "priority": 2,
+      "depends_on": [
+        "R1"
+      ],
+      "description": "Produce reviewable compact and detached wireframes using synthetic data. Order information: saved scope, trustworthy coverage/recovery, next review action and document title, supporting context. Defer server port, published totals and detailed diff metadata to Monitor/library/detail. Show loading, true empty, partial empty, cached/offline, auth recovery, mixed-account and merged-but-active re-review cases. Preserve navigation, Settings access and return-to-queue context. Acceptance: annotated screens and keyboard/VoiceOver flow tied to PRD criteria, with current-layout comparison; no production layout change yet. Also deliver annotated iPad portrait, landscape and supported narrow-window flows for parity, or an explicit existing-journey regression matrix for regression-only scope. Reconcile RFC-009 if the approved iPad scope changes its requirements. These artifacts are required by R2; screenshots do not substitute for M0 measured baseline evidence. Prototype work may proceed while M0 awaits baseline or target readiness.",
+      "files": [
+        "hermit-native/Hermit/Views/MenuBarContentView.swift",
+        "docs-cms/rfcs",
+        "docs-cms/rfcs/rfc-009-ipad-reading-and-commenting-app.md",
+        "hermit-native/Hermit/Views/iPadRootView.swift"
+      ],
+      "human_review": false,
+      "id": "task-dashboard-journey-42jjna"
+    },
+    {
+      "key": "M0",
+      "title": "M0 — Collect current-layout usability baseline",
+      "role": "test",
+      "priority": 2,
+      "depends_on": [
+        "R1",
+        "B0",
+        "O2"
+      ],
+      "description": "Own baseline collection before implementation. After R1 approves the method and platform scope, measure the B0-reviewed current layout using versioned synthetic scenarios and the O2 iPad target. Record the collector, tested build SHA, device/OS, scenario and fixture revisions, participant selection, task wording, timing boundaries, failure scoring and anonymized observations/results for task success, time to next action, coverage comprehension and submission-state comprehension. For regression-only iPad scope, capture existing-journey regression evidence without claiming dashboard improvement. Prepare synthetic inputs without changing production layout or requiring real credentials; O1 stable signing is not a prerequisite for fixture-only measurement. Acceptance: linked durable evidence and results for R2 to review; screenshots alone or missing/invented measurements do not qualify. Record consent/environment limits. If approved method, scenarios or participant selection change materially, recollect a comparable baseline and seek renewed review before improvement claims. R2 remains blocked until this evidence exists and is accepted.",
+      "files": [
+        "docs-cms/prd/prd-002-dashboard-core-journey.md"
+      ],
+      "human_review": false,
+      "id": "task-dashboard-journey-kgcw0p"
+    },
+    {
+      "key": "R2",
+      "title": "R2 — Design review: interaction, states and contract feasibility",
+      "role": "review",
+      "priority": 2,
+      "depends_on": [
+        "D2",
+        "D3",
+        "M0"
+      ],
+      "description": "Joint human design/engineering review of prototypes and API/state mapping. Walk each core journey and failure scenario at compact and detached sizes. Resolve missing API signals, action labels, ordering/count units, error recovery, accessibility and scope persistence before coding. Acceptance: named reviewers, exact artifact revisions, explicit approved decisions and bounded implementation PR sequence. If contracts cannot support a mockup, revise the mockup or scope instead of fabricating data. Complete only on explicit approval; material later changes reopen a review gate. Additional mandatory acceptance: accept M0 actual measured baseline evidence, including tested SHA, device/OS, scenario/fixture revisions, participant selection, procedure and results against the R1 method. Require the explicit iPad scope and D3 matching platform artifacts, plus corresponding P2-P4 implementation boundaries. Do not close on screenshots alone or missing measurements. Baseline evidence and the runnable iPad target must exist before implementation.",
+      "files": [],
+      "human_review": true,
+      "id": "task-dashboard-journey-wwhm5m"
+    },
+    {
+      "key": "P1",
+      "title": "P1 — Supporting PR: queue presentation model and deterministic fixtures",
+      "role": "impl",
+      "priority": 2,
+      "depends_on": [
+        "B0",
+        "R2"
+      ],
+      "description": "First supporting implementation PR: isolate queue transformation and state derivation from SwiftUI rendering. Implement approved stable cross-repository identity, eligibility, ordering and explicit count/freshness units. Add only contract changes approved in D2; keep existing layout. Acceptance: meaningful regressions for duplicate PR numbers across repos, multiple documents per PR, active closed-PR re-review, partial auth and cached refresh failure; fixture-driven previews avoid real credentials. CI green and reviewed PR merged into current main before dependent PRs. Before merge, require a full macOS build and changed-journey smoke checks on final head. Shared native or iPad changes also require a full iPad app build and target launch/smoke checks; unavailable required targets block merge. Record commands, SHA, device/OS and results. These checks apply in addition to relevant CI. Merge is integration only; preserve the B0 release pin until R3.",
+      "files": [
+        "hermit-native/Hermit/Models",
+        "hermit-native/Hermit/Views/MenuBarContentView.swift",
+        "api/openapi/v1/openapi.yaml"
+      ],
+      "human_review": false,
+      "id": "task-dashboard-journey-e66k8y"
+    },
+    {
+      "key": "P2",
+      "title": "P2 — Supporting PR: trustworthy coverage and targeted recovery",
+      "role": "impl",
+      "priority": 2,
+      "depends_on": [
+        "P1"
+      ],
+      "description": "Use approved presentation state to make cached/partial coverage and last successful sync explicit. Distinguish no work from unavailable work, retain useful cached rows, route recovery to the affected account/repository and preserve saved scope. Never automatically replace credentials from another account on the same host. Keep Keychain caching within the running process; no password caching, ACL weakening or persistent token workaround. Acceptance: fixture-driven loading/empty/partial/stale/auth/rate-limit cases and targeted recovery integration checks; reviewed independently and merged with green CI. Apply R1-approved iPad scope: implement corresponding iPad recovery behavior for parity or preserve and regression-test existing iPad behavior. Before merge, require full macOS build and focused recovery smoke evidence on final head; shared native/iPad changes also require full iPad build and launch/smoke evidence. Record commands, SHA, device/OS and results; unavailable required targets block merge. Preserve the B0 release pin until R3.",
+      "files": [
+        "hermit-native/Hermit/Views/MenuBarContentView.swift",
+        "hermit-native/Hermit/Models",
+        "hermit-native/Hermit/Views/iPadRootView.swift"
+      ],
+      "human_review": false,
+      "id": "task-dashboard-journey-kz8afe"
+    },
+    {
+      "key": "P3",
+      "title": "P3 — Dashboard PR: review queue hierarchy and progressive detail",
+      "role": "impl",
+      "priority": 2,
+      "depends_on": [
+        "P2"
+      ],
+      "description": "Implement the approved compact/detached hierarchy: scope and coverage first, actionable review rows next, diagnostics and catalog browsing through secondary navigation. Make document title and workflow action prominent; move branch/file/diff metadata and excerpts to progressive detail. Apply approved ordering and label request/document counts; explain active re-review separately from merge state. Acceptance: screenshot comparison to R2, keyboard/VoiceOver paths, narrow-window layouts and preserved Settings/Monitor/library access. Keep changes reviewable as one layout PR and preserve a simple revert path. Apply R1-approved iPad scope: implement R2-approved iPad layouts for parity, or preserve existing iPad navigation for regression-only scope. Before merge, require full macOS build and changed-layout smoke evidence on final head; shared native/iPad changes also require full iPad build and launch/smoke evidence. Record commands, SHA, device/OS and results; unavailable required targets block merge. Require human-reviewed PR merge into current main before P4. Preserve the B0 release pin until R3.",
+      "files": [
+        "hermit-native/Hermit/Views/MenuBarContentView.swift",
+        "hermit-native/Hermit/Views/iPadRootView.swift"
+      ],
+      "human_review": false,
+      "id": "task-dashboard-journey-918rhf"
+    },
+    {
+      "key": "P4",
+      "title": "P4 — Dashboard PR: completion feedback and return to queue",
+      "role": "impl",
+      "priority": 2,
+      "depends_on": [
+        "P3"
+      ],
+      "description": "Connect existing supported review actions to truthful submission/pending/success/failure feedback and return-to-queue selection. Confirm canonical GitHub state through the Hermit API before reporting completion or removing work. Preserve scope/selection on refresh and retry; cover delayed sync and failed writes. Acceptance: journey-level checks from queue to document/action to refreshed queue, with no optimistic false success. If required commenting or approval capability is absent, replan a separately approved feature instead of silently expanding this dashboard PR. Include the approved iPad completion and return flows for parity, or verify existing behavior for regression-only scope. Before merge, require full macOS build and completion/recovery smoke evidence on final head; shared native/iPad changes also require full iPad build and launch/smoke evidence. Record commands, SHA, device/OS and results; unavailable required targets block merge. Require human-reviewed PR merge before V1. Preserve the B0 release pin until R3; candidate builds are for explicit validation only.",
+      "files": [
+        "hermit-native/Hermit/Views/MenuBarContentView.swift",
+        "hermit-native/Hermit/Models",
+        "hermit-native/Hermit/Views/iPadRootView.swift"
+      ],
+      "human_review": false,
+      "id": "task-dashboard-journey-9q1wnz"
+    },
+    {
+      "key": "O1",
+      "title": "O1 — Supporting environment: stable development signing",
+      "role": "ops",
+      "priority": 2,
+      "depends_on": [],
+      "description": "Existing blocker hermit-oaj. Establish a stable development signing identity with the user so rebuilding Hermit does not replace the Keychain-trusted code identity every time. Current machine has no valid signing identity and ad-hoc builds can reprompt despite Always Allow. Acceptance: identity configured locally and a controlled rebuild/relaunch verifies credential access; document remaining macOS consent behavior. Do not collect passwords, export credentials, weaken Keychain ACLs or repeatedly rebuild just to probe prompts. Synthetic fixtures may proceed while this remains pending.",
+      "files": [],
+      "human_review": false,
+      "id": "task-dashboard-journey-3z7s1h"
+    },
+    {
+      "key": "O2",
+      "title": "O2 — Supporting environment: runnable iPad test target",
+      "role": "ops",
+      "priority": 2,
+      "depends_on": [],
+      "description": "Existing blocker hermit-1ny. Provide an installed compatible simulator runtime or an explicitly configured physical iPad/signing setup. SDK 26.5 exists but prior asset compilation reports supportedRuntimes=[]. Acceptance: app builds, installs and launches on the selected target with fixture data; record OS/device and commands. A successful SDK-only compile does not satisfy runtime validation. Do not remove this gate merely because macOS tests pass. This task also blocks M0 baseline collection and therefore R2; provide the target early enough for measurements before implementation. Regression-only iPad scope still requires a runnable target and runtime validation.",
+      "files": [],
+      "human_review": false,
+      "id": "task-dashboard-journey-n3r74v"
+    },
+    {
+      "key": "V1",
+      "title": "V1 — Validate the full journey and accessibility across targets",
+      "role": "test",
+      "priority": 2,
+      "depends_on": [
+        "P4",
+        "O1",
+        "O2"
+      ],
+      "description": "Test the approved journey on compact/detached macOS and iPad with synthetic multi-account/team fixtures before minimal live checks. Cover scope persistence, multiple documents per PR, colliding PR numbers, merged active re-review, true and partial empty, cancellation, cached/offline, rate limits, auth recovery, delayed/failed sync, new and existing Settings windows, keyboard and VoiceOver. Compare task success and time-to-next-action against baseline using R1-approved thresholds; do not invent success measurements. Acceptance: evidence matrix with builds/devices/screenshots, green relevant CI, no unresolved critical failures; update hermit-5lt. A platform scope reduction needs an explicit human decision and revised PRD. Repeat the R1-approved measurement method and versioned scenarios used by M0; report comparable results, not invented measurements or retroactively adjusted thresholds. Material method/scenario/participant-selection changes require a comparable recollected baseline and renewed review. Validate R1-approved iPad parity or existing-journey regression scope, including portrait/landscape/narrow windows and accessibility. Record the exact candidate main SHA and app/backend artifact locations/checksums; verify compatibility with the B0 rollback set. Candidate validation does not promote the release pin.",
+      "files": [],
+      "human_review": false,
+      "id": "task-dashboard-journey-pk6rws"
+    },
+    {
+      "key": "R3",
+      "title": "R3 — Design and release review: approve stable-main adoption",
+      "role": "review",
+      "priority": 2,
+      "depends_on": [
+        "V1"
+      ],
+      "description": "Human product/design and engineering review of the V1 evidence against approved PRD, prototypes and actual final diff. Acceptance: usability findings resolved or explicitly accepted with bounded follow-ups, platform coverage documented, exact tested main SHA and rollback commit recorded, documentation reconciled and explicit release approval. Review changed information priorities, trust/error states and completion behavior, not screenshots alone. Do not close from green CI alone; do not auto-merge. This is the final dashboard adoption gate. Authorize promotion only of the exact V1-tested app/backend artifact set and main SHA. Record approver, decision, promotion target, candidate artifact locations/checksums, previous B0 release pin and verified rollback procedure. Routine users stay on the previous pin until this approval; integration merges do not authorize stable adoption. A newer SHA or rebuilt artifact requires applicable revalidation and renewed approval. If no previous approved release exists, record withdrawal of the candidate as fallback. Do not mark artifacts released merely because this review task is complete; record the actual promotion outcome separately when performed.",
+      "files": [],
+      "human_review": true,
+      "id": "task-dashboard-journey-5cadc8"
+    }
+  ],
+  "updated": "2026-10-16"
+}
