@@ -67,4 +67,4 @@ Reusing `gh auth login` state directly would make onboarding convenient for engi
 
 - [RFC-002: Repository Configuration and PAT-Based Access](../rfcs/rfc-002-repository-configuration-and-pat-authentication.md)
 - [ADR-003: Use GitHub as the Source of Truth](./adr-003-github-source-of-truth.md)
-- [PRD-001: Hermit Vision - RFC PR Collaboration Experience](../prd/prd-001-hermit-rfc-collaboration-vision.md)
+- [PRD-001: Hermit Product Vision](../prd/prd-001-hermit-product-vision.md)

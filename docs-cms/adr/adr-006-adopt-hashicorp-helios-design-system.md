@@ -58,5 +58,5 @@ This could accelerate initial component development, but was not chosen because 
 # References
 
 - [HashiCorp Helios Design System](https://helios.hashicorp.design/)
-- [PRD-001: Hermit Vision - RFC PR Collaboration Experience](../prd/prd-001-hermit-rfc-collaboration-vision.md)
+- [PRD-001: Hermit Product Vision](../prd/prd-001-hermit-product-vision.md)
 - [RFC-001: Hermit High-Level Design and Architecture](../rfcs/rfc-001-hermit-high-level-design-and-architecture.md)

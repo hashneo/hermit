@@ -57,4 +57,4 @@ This was not chosen because it leaks provider-specific complexity to clients and
 - [ADR-003: Use GitHub as the Source of Truth](./adr-003-github-source-of-truth.md)
 - [RFC-001: Hermit High-Level Design and Architecture](../rfcs/rfc-001-hermit-high-level-design-and-architecture.md)
 - [RFC-002: Repository Configuration and PAT-Based Access](../rfcs/rfc-002-repository-configuration-and-pat-authentication.md)
-- [PRD-001: Hermit Vision - RFC PR Collaboration Experience](../prd/prd-001-hermit-rfc-collaboration-vision.md)
+- [PRD-001: Hermit Product Vision](../prd/prd-001-hermit-product-vision.md)

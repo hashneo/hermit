@@ -55,5 +55,5 @@ Python offers rapid development and rich libraries, but was not chosen as the pr
 
 # References
 
-- [PRD-001: Hermit Vision - RFC PR Collaboration Experience](../prd/prd-001-hermit-rfc-collaboration-vision.md)
+- [PRD-001: Hermit Product Vision](../prd/prd-001-hermit-product-vision.md)
 - [Go Project](https://go.dev/)
