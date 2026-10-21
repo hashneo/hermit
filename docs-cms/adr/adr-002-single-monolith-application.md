@@ -53,5 +53,5 @@ This hybrid approach was considered, but not chosen for day one because current 
 
 # References
 
-- [PRD-001: Hermit Vision - RFC PR Collaboration Experience](../prd/prd-001-hermit-rfc-collaboration-vision.md)
+- [PRD-001: Hermit Product Vision](../prd/prd-001-hermit-product-vision.md)
 - [ADR-001: Adopt Go as the Primary Application Language](./adr-001-golang-base-application.md)

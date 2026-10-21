@@ -158,4 +158,4 @@ Comparison: simpler initial architecture, but rejected because rich document ann
 - [ADR-007: Expose an OpenAPI-First Hermit API for All GitHub Interactions](../adr/adr-007-openapi-first-hermit-api-for-github-interactions.md)
 - [RFC-003: OpenAPI Platform API and GitHub Abstraction Layer](./rfc-003-openapi-platform-api-and-github-abstraction.md)
 - [RFC-001: Hermit High-Level Design and Architecture](./rfc-001-hermit-high-level-design-and-architecture.md)
-- [PRD-001: Hermit Vision - RFC PR Collaboration Experience](../prd/prd-001-hermit-rfc-collaboration-vision.md)
+- [PRD-001: Hermit Product Vision](../prd/prd-001-hermit-product-vision.md)

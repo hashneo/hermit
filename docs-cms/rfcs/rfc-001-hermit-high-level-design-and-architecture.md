@@ -185,7 +185,7 @@ Comparison: offers product flexibility but rejected because it conflicts with AD
 
 # Related Documents
 
-- [PRD-001: Hermit Vision - RFC PR Collaboration Experience](../prd/prd-001-hermit-rfc-collaboration-vision.md)
+- [PRD-001: Hermit Product Vision](../prd/prd-001-hermit-product-vision.md)
 - [ADR-001: Adopt Go as the Primary Application Language](../adr/adr-001-golang-base-application.md)
 - [ADR-002: Adopt a Single Monolith Application Architecture](../adr/adr-002-single-monolith-application.md)
 - [ADR-003: Use GitHub as the Source of Truth](../adr/adr-003-github-source-of-truth.md)

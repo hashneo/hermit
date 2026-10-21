@@ -96,7 +96,7 @@ Based on current accepted/proposed docs:
 
 See:
 
-- `docs-cms/prd/prd-001-hermit-rfc-collaboration-vision.md`
+- `docs-cms/prd/prd-001-hermit-product-vision.md`
 - `docs-cms/rfcs/rfc-001-hermit-high-level-design-and-architecture.md`
 - `docs-cms/rfcs/rfc-003-openapi-platform-api-and-github-abstraction.md`
 - `docs-cms/rfcs/rfc-004-react-web-ui-with-helios-and-hermit-api.md`

@@ -340,7 +340,7 @@ Project planning and architecture decisions live in `docs-cms/`.
 
 Core documents:
 
-- `docs-cms/prd/prd-001-hermit-rfc-collaboration-vision.md`
+- `docs-cms/prd/prd-001-hermit-product-vision.md`
 - `docs-cms/adr/adr-001-golang-base-application.md`
 - `docs-cms/adr/adr-002-single-monolith-application.md`
 - `docs-cms/adr/adr-003-github-source-of-truth.md`
